@@ -1,0 +1,128 @@
+import type { Event, EventCreatePayload, GoalStatus, Leaderboard, Post, ReactionType, UserProfile } from "@/types";
+
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+type ApiOptions = RequestInit & {
+  auth?: boolean;
+};
+
+export function setSession(user: UserProfile) {
+  localStorage.setItem("user", JSON.stringify(user));
+}
+
+export function clearSession() {
+  localStorage.removeItem("user");
+}
+
+export async function apiFetch<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+
+  if (!headers.has("Content-Type") && options.body) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const targetPath = path.startsWith("/api/session")
+    ? path
+    : path.startsWith("/api/")
+      ? `/api/backend${path}`
+      : path;
+  const response = await fetch(targetPath, {
+    ...options,
+    headers,
+    credentials: "same-origin",
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearSession();
+      if (typeof window !== "undefined" && window.location.pathname !== "/") {
+        window.location.href = "/";
+      }
+    }
+    throw new Error(data?.detail || "Erro ao comunicar com o servidor");
+  }
+
+  return data as T;
+}
+
+export const api = {
+  login: (username: string, password: string) =>
+    apiFetch<{ user: UserProfile }>("/api/session/login", {
+      auth: false,
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  logout: () =>
+    apiFetch<{ ok: boolean }>("/api/session/logout", {
+      auth: false,
+      method: "POST",
+    }),
+  sessionMe: () => apiFetch<UserProfile>("/api/session/me", { auth: false }),
+  microsoftConfig: () =>
+    apiFetch<{
+      enabled: boolean;
+      provider: string;
+      required_env: string[];
+      redirect_uri: string;
+      verified_domain: string;
+    }>("/api/auth/microsoft/config", { auth: false }),
+  me: () => apiFetch<UserProfile>("/api/me"),
+  updateMe: (profile: Partial<UserProfile>) =>
+    apiFetch<UserProfile>("/api/users/me/profile", {
+      method: "PUT",
+      body: JSON.stringify(profile),
+    }),
+  user: (id: number) => apiFetch<UserProfile & { posts: Post[] }>(`/api/users/${id}`),
+  feed: () => apiFetch<{ posts: Post[] }>("/api/feed"),
+  createPost: (payload: {
+    title?: string;
+    description: string;
+    image_url?: string;
+    match_id?: number;
+    goals_scored?: number;
+  }) =>
+    apiFetch<Post>("/api/posts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  toggleLike: (postId: number) =>
+    apiFetch<{ liked: boolean; post: Post }>(`/api/posts/${postId}/like`, { method: "POST" }),
+  toggleReaction: (postId: number, reactionType: ReactionType) =>
+    apiFetch<{ liked: boolean; post: Post }>(`/api/posts/${postId}/like`, {
+      method: "POST",
+      body: JSON.stringify({ reaction_type: reactionType }),
+    }),
+  reviewPostGoals: (postId: number, status: Extract<GoalStatus, "approved" | "rejected">) =>
+    apiFetch<Post>(`/api/admin/posts/${postId}/goals`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    }),
+  addComment: (
+    postId: number,
+    payload: {
+      text: string;
+      parent_id?: number;
+      media_url?: string;
+      media_type?: "image" | "gif";
+    },
+  ) =>
+    apiFetch<Post>(`/api/posts/${postId}/comments`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  events: () => apiFetch<{ events: Event[] }>("/api/events"),
+  createEvent: (payload: EventCreatePayload) =>
+    apiFetch<Event>("/api/events", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  event: (id: number) => apiFetch<Event>(`/api/events/${id}`),
+  rsvp: (eventId: number, status: "going" | "not_going") =>
+    apiFetch<Event>(`/api/events/${eventId}/rsvp`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    }),
+  leaderboard: () => apiFetch<Leaderboard>("/api/leaderboard"),
+};
