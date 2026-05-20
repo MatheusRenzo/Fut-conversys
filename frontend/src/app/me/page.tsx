@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BadgeCheck, Pencil, Save, Sparkles, X } from "lucide-react";
+import { BadgeCheck, Check, Clock3, Pencil, Save, Sparkles, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Avatar } from "@/components/Avatar";
 import { LineupPreview } from "@/components/LineupPreview";
 import { ProfileHeader } from "@/components/ProfileHeader";
 import { api } from "@/lib/api";
-import type { Event, Leaderboard, UserProfile } from "@/types";
+import type { Event, Leaderboard, Post, UserProfile } from "@/types";
 
 const positionOptions = ["Goleiro", "Zagueiro", "Lateral", "Volante", "Meia", "Ponta", "Atacante"];
 const frameOptions: Array<{
@@ -81,13 +81,17 @@ const effectOptions: Array<{
   { value: "nitro", label: "Nitro+", description: "energia premium no contorno" },
 ];
 
+const adminUsername = process.env.NEXT_PUBLIC_ADMIN_USERNAME ?? "admin";
+
 export default function MePage() {
   const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
   const [saved, setSaved] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
+  const [goalReviewLoading, setGoalReviewLoading] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -100,6 +104,10 @@ export default function MePage() {
         setProfile(me);
         setEvents(eventList.events);
         setLeaderboard(ranking);
+        if (me.username === adminUsername) {
+          const feed = await api.feed();
+          setPosts(feed.posts);
+        }
       } catch {
         router.push("/");
       }
@@ -160,15 +168,91 @@ export default function MePage() {
     setSaved(false);
   };
 
+  const reviewGoalClaim = async (postId: number, status: "approved" | "rejected") => {
+    setGoalReviewLoading(`${postId}-${status}`);
+    try {
+      const updated = await api.reviewPostGoals(postId, status);
+      setPosts((current) => current.map((post) => (post.id === updated.id ? updated : post)));
+      const [me, ranking] = await Promise.all([api.me(), api.leaderboard()]);
+      setProfile(me);
+      setLeaderboard(ranking);
+    } finally {
+      setGoalReviewLoading(null);
+    }
+  };
+
   if (!profile) return <div className="empty-state">Carregando seu perfil...</div>;
 
   const currentFrame = profile.profile_frame ?? "conversys";
   const profileEffect = effectOptions.some((option) => option.value === profile.profile_effect) ? profile.profile_effect : "off";
   const currentEffect = currentFrame !== "none" && profileEffect && profileEffect !== "off" ? profileEffect : "off";
+  const isAdmin = profile.username === adminUsername;
+  const pendingGoalClaims = isAdmin
+    ? posts.filter((post) => (post.goals_scored ?? 0) > 0 && post.goal_status === "pending")
+    : [];
 
   return (
     <AppShell user={profile} nextEvent={events[0] ?? null} leaderboard={leaderboard}>
       <ProfileHeader profile={profile} />
+
+      {isAdmin && (
+        <section className="content-card glass-panel goal-approval-panel">
+          <div className="approval-panel-head">
+            <div>
+              <span className="eyebrow">Admin</span>
+              <h2>Aprovações de gols</h2>
+              <p>Valide apenas gols conferidos no evento antes de contar no ranking.</p>
+            </div>
+            <strong>{pendingGoalClaims.length}</strong>
+          </div>
+
+          {pendingGoalClaims.length > 0 ? (
+            <div className="approval-list">
+              {pendingGoalClaims.map((post) => {
+                const approveKey = `${post.id}-approved`;
+                const rejectKey = `${post.id}-rejected`;
+                return (
+                  <article className="approval-item" key={post.id}>
+                    <div>
+                      <span>
+                        <Clock3 size={15} />
+                        Pendente
+                      </span>
+                      <strong>{post.author.name}</strong>
+                      <p>
+                        {post.goals_scored} {post.goals_scored === 1 ? "gol" : "gols"}
+                        {post.match ? ` em ${post.match.title}` : ""}
+                      </p>
+                    </div>
+                    <div className="approval-actions">
+                      <button
+                        className="goal-review-button approve"
+                        disabled={Boolean(goalReviewLoading)}
+                        onClick={() => reviewGoalClaim(post.id, "approved")}
+                        type="button"
+                      >
+                        <Check size={15} />
+                        <span>{goalReviewLoading === approveKey ? "Aprovando..." : "Aprovar"}</span>
+                      </button>
+                      <button
+                        className="goal-review-button reject"
+                        disabled={Boolean(goalReviewLoading)}
+                        onClick={() => reviewGoalClaim(post.id, "rejected")}
+                        type="button"
+                      >
+                        <X size={15} />
+                        <span>{goalReviewLoading === rejectKey ? "Recusando..." : "Recusar"}</span>
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="approval-empty">Nenhum gol pendente agora.</div>
+          )}
+        </section>
+      )}
 
       <section className="content-card glass-panel profile-edit-card">
         <div className="section-heading compact-heading">
@@ -250,7 +334,7 @@ export default function MePage() {
                   <label className="media-picker">
                     <span>Banner do perfil</span>
                     <div
-                      className="media-preview banner-media-preview"
+                      className={`media-preview banner-media-preview frame-banner-preview banner-frame-${currentFrame}`}
                       style={{
                         backgroundImage: profile.banner_url ? `url(${profile.banner_url})` : undefined,
                       }}
@@ -279,17 +363,17 @@ export default function MePage() {
                   <div className="cosmetic-grid" aria-label="Molduras do avatar">
                     {frameOptions.map((option) => (
                       <button
-                        className={currentFrame === option.value ? "cosmetic-option active" : "cosmetic-option"}
+                        className={`cosmetic-option frame-choice banner-frame-${option.value}${currentFrame === option.value ? " active" : ""}`}
                         key={option.value}
                         onClick={() => selectProfileFrame(option.value)}
                         type="button"
                       >
-                        <span className="frame-preview-stack">
-                          <Avatar user={{ ...profile, profile_frame: option.value, profile_effect: "off" }} size="sm" />
-                          <span className={`frame-banner-preview banner-frame-${option.value}`} />
+                        <span className="frame-color-sample" aria-hidden="true">
+                          <span className="frame-color-ring" />
+                          <span className="frame-color-track" />
                         </span>
                         <strong>{option.label}</strong>
-                        <span>{option.description}</span>
+                        <small>{option.description}</small>
                       </button>
                     ))}
                   </div>

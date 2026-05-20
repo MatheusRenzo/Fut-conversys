@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { BACKEND_API_URL, getSessionToken } from "@/lib/server-auth";
+import { BACKEND_API_URL, clearSessionCookie, getSessionToken } from "@/lib/server-auth";
 
 export async function GET() {
   const token = await getSessionToken();
@@ -11,5 +11,9 @@ export async function GET() {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await backendResponse.json();
-  return NextResponse.json(data, { status: backendResponse.status });
+  const response = NextResponse.json(data, { status: backendResponse.status });
+  if (backendResponse.status === 401) {
+    clearSessionCookie(response);
+  }
+  return response;
 }

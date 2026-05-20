@@ -54,6 +54,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
+  register: (payload: { name: string; email: string; password: string; username?: string }) =>
+    apiFetch<{ user: UserProfile }>("/api/session/register", {
+      auth: false,
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   logout: () =>
     apiFetch<{ ok: boolean }>("/api/session/logout", {
       auth: false,

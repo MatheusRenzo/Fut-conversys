@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { BACKEND_API_URL, getSessionToken } from "@/lib/server-auth";
+import { BACKEND_API_URL, clearSessionCookie, getSessionToken } from "@/lib/server-auth";
 
 const PUBLIC_BACKEND_PATHS = new Set([
   "api/auth/microsoft/config",
@@ -29,12 +29,16 @@ async function proxy(request: NextRequest, { params }: { params: Promise<{ path:
   });
 
   const responseText = await backendResponse.text();
-  return new NextResponse(responseText, {
+  const response = new NextResponse(responseText, {
     status: backendResponse.status,
     headers: {
       "Content-Type": backendResponse.headers.get("content-type") ?? "application/json",
     },
   });
+  if (!isPublic && backendResponse.status === 401) {
+    clearSessionCookie(response);
+  }
+  return response;
 }
 
 export const GET = proxy;
