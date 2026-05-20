@@ -58,11 +58,7 @@ body::before {
   z-index: -1;
   pointer-events: none;
   content: "";
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.75), transparent 82%);
+  background: radial-gradient(circle at 50% 0%, rgba(0, 90, 255, 0.16), transparent 42%);
 }
 
 a {
@@ -254,62 +250,48 @@ textarea {
   overflow: hidden;
   min-height: 100vh;
   min-height: 100svh;
-  padding: max(42px, env(safe-area-inset-top)) max(48px, env(safe-area-inset-right)) max(42px, env(safe-area-inset-bottom)) max(48px, env(safe-area-inset-left));
+  padding: max(56px, env(safe-area-inset-top)) max(64px, env(safe-area-inset-right)) max(56px, env(safe-area-inset-bottom)) max(64px, env(safe-area-inset-left));
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(360px, 420px);
-  gap: clamp(32px, 6vw, 92px);
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
+  gap: clamp(36px, 8vw, 120px);
   align-items: center;
   isolation: isolate;
   background:
-    radial-gradient(circle at 72% 45%, rgba(0, 207, 180, 0.16), transparent 34%),
-    linear-gradient(90deg, rgba(2, 8, 23, 0.98) 0%, rgba(2, 8, 23, 0.76) 42%, rgba(2, 8, 23, 0.1) 100%),
-    linear-gradient(180deg, rgba(2, 8, 23, 0.04), rgba(2, 8, 23, 0.54));
+    linear-gradient(90deg, rgba(2, 8, 23, 0.96) 0%, rgba(2, 8, 23, 0.82) 42%, rgba(2, 8, 23, 0.36) 100%),
+    linear-gradient(180deg, #020817 0%, #041e42 100%);
 }
 
 .landing-page::before {
   position: absolute;
-  inset: -8%;
+  inset: 0;
   z-index: 1;
   pointer-events: none;
   content: "";
   background:
-    radial-gradient(circle at 72% 50%, rgba(0, 207, 180, 0.22), transparent 26%),
-    radial-gradient(circle at 88% 18%, rgba(0, 90, 255, 0.22), transparent 24%),
-    linear-gradient(103deg, transparent 0 48%, rgba(255, 255, 255, 0.18) 54%, transparent 66%),
-    linear-gradient(90deg, rgba(2, 8, 23, 0.98) 0%, rgba(2, 8, 23, 0.78) 34%, rgba(2, 8, 23, 0.24) 66%, rgba(2, 8, 23, 0.02) 100%),
-    linear-gradient(180deg, rgba(2, 8, 23, 0.04) 0%, rgba(2, 8, 23, 0.12) 55%, rgba(2, 8, 23, 0.76) 100%);
-  opacity: 0.88;
-  transform: translate3d(0, 0, 0) scale(1);
-  animation: loginLightDrift 11s ease-in-out infinite alternate;
-  will-change: transform, opacity;
+    radial-gradient(circle at 78% 18%, rgba(0, 90, 255, 0.22), transparent 26%),
+    linear-gradient(90deg, rgba(2, 8, 23, 0.94) 0%, rgba(2, 8, 23, 0.52) 58%, rgba(2, 8, 23, 0.78) 100%);
+  opacity: 1;
 }
 
 .landing-page::after {
   position: absolute;
-  inset: -5%;
+  inset: 0;
   z-index: 0;
   content: "";
   pointer-events: none;
   background:
-    radial-gradient(circle at 70% 48%, rgba(0, 207, 180, 0.12), transparent 25%),
-    linear-gradient(116deg, transparent 0 40%, rgba(255, 255, 255, 0.16) 49%, transparent 61%),
-    url("/bg-login.png") 64% center / min(76vw, 920px) auto no-repeat;
-  background-position: 68% 50%, 42% 50%, 67% 50%;
-  background-size: 118% 118%, 150% 150%, min(76vw, 920px) auto;
-  filter: saturate(1.22) contrast(1.12) brightness(1.12);
-  opacity: 1;
-  transform: scale(1.04);
-  transform-origin: 68% 48%;
-  animation: loginPhotoDrift 18s ease-in-out infinite alternate;
-  will-change: transform, background-position;
+    linear-gradient(90deg, rgba(2, 8, 23, 0.9) 0%, rgba(2, 8, 23, 0.42) 48%, rgba(2, 8, 23, 0.18) 100%),
+    url("/bg-login.png") right center / min(68vw, 980px) auto no-repeat;
+  filter: saturate(0.95) contrast(1.05) brightness(0.82);
+  opacity: 0.86;
 }
 
 .landing-copy {
   position: relative;
   z-index: 2;
-  max-width: 680px;
+  max-width: 620px;
   display: grid;
-  gap: 22px;
+  gap: 24px;
 }
 
 .hero-brand {
@@ -338,18 +320,18 @@ textarea {
 }
 
 .landing-copy h1 {
-  max-width: 8.5ch;
-  font-size: clamp(4.4rem, 8vw, 7rem);
-  line-height: 0.9;
-  letter-spacing: 0;
-  text-shadow: 0 20px 46px rgba(0, 0, 0, 0.42);
+  max-width: 11ch;
+  font-size: clamp(3.8rem, 7vw, 6.2rem);
+  line-height: 0.94;
+  letter-spacing: -0.045em;
+  text-shadow: 0 18px 44px rgba(0, 0, 0, 0.36);
 }
 
 .landing-copy p {
-  max-width: 520px;
-  color: rgba(247, 251, 245, 0.84);
-  font-size: 1.08rem;
-  line-height: 1.62;
+  max-width: 500px;
+  color: rgba(247, 251, 245, 0.78);
+  font-size: 1.02rem;
+  line-height: 1.7;
 }
 
 .hero-tags,
@@ -408,16 +390,17 @@ textarea {
   position: relative;
   z-index: 2;
   overflow: hidden;
-  padding: 28px;
+  padding: 30px;
   display: grid;
-  gap: 17px;
-  background: rgba(4, 30, 66, 0.92);
-  border-color: rgba(255, 255, 255, 0.13);
+  gap: 18px;
+  background: rgba(3, 18, 32, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 24px;
   box-shadow:
-    0 34px 90px rgba(0, 0, 0, 0.46),
-    0 0 0 1px rgba(0, 90, 255, 0.08);
-  backdrop-filter: blur(12px) saturate(118%);
-  -webkit-backdrop-filter: blur(12px) saturate(118%);
+    0 28px 80px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .login-card::before {
@@ -437,8 +420,9 @@ textarea {
 .login-card .eyebrow {
   border: 0;
   background: transparent;
-  color: #8feee0;
+  color: rgba(143, 238, 224, 0.9);
   padding: 0;
+  font-size: 0.68rem;
 }
 
 .login-card h2,
@@ -448,13 +432,13 @@ textarea {
 }
 
 .login-card h2 {
-  font-size: clamp(1.85rem, 2.6vw, 2.15rem);
+  font-size: clamp(1.75rem, 2.5vw, 2.05rem);
   line-height: 1.1;
 }
 
 .login-card p,
 .section-heading p {
-  color: var(--muted);
+  color: rgba(247, 251, 245, 0.68);
   line-height: 1.55;
 }
 
@@ -473,8 +457,8 @@ textarea {
 
 .login-card .input-field {
   min-height: 48px;
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.055);
 }
 
 .login-card .input-field:focus {
@@ -486,7 +470,7 @@ textarea {
   width: 100%;
   justify-content: space-between;
   min-height: 48px;
-  box-shadow: 0 14px 28px rgba(0, 90, 255, 0.24);
+  box-shadow: 0 14px 30px rgba(0, 90, 255, 0.2);
 }
 
 .password-rules {
@@ -527,24 +511,23 @@ textarea {
 
 .microsoft-login {
   width: 100%;
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.035);
 }
 
 .auth-switch-button {
-  min-height: 42px;
-  border: 1px solid rgba(0, 207, 180, 0.22);
-  border-radius: var(--radius);
-  background: rgba(0, 207, 180, 0.06);
-  color: #dffbf7;
+  min-height: 40px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(223, 251, 247, 0.84);
   cursor: pointer;
   font-weight: 900;
   transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
 }
 
 .auth-switch-button:hover {
-  border-color: rgba(0, 207, 180, 0.42);
-  background: rgba(0, 207, 180, 0.1);
+  background: rgba(255, 255, 255, 0.045);
   transform: translateY(-1px);
 }
 
@@ -6118,27 +6101,24 @@ textarea {
     padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
     align-content: start;
     background:
-      linear-gradient(180deg, rgba(2, 8, 23, 0.9) 0%, rgba(2, 8, 23, 0.66) 44%, rgba(2, 8, 23, 0.9) 100%);
+      linear-gradient(180deg, rgba(2, 8, 23, 0.92) 0%, rgba(4, 30, 66, 0.82) 100%);
   }
 
   .landing-page::before {
-    inset: -12%;
-    opacity: 0.98;
+    inset: 0;
+    opacity: 1;
     background:
-      radial-gradient(circle at 64% 26%, rgba(0, 207, 180, 0.14), transparent 30%),
-      linear-gradient(180deg, rgba(2, 8, 23, 0.78) 0%, rgba(2, 8, 23, 0.58) 42%, rgba(2, 8, 23, 0.92) 100%);
+      radial-gradient(circle at 72% 12%, rgba(0, 90, 255, 0.18), transparent 32%),
+      linear-gradient(180deg, rgba(2, 8, 23, 0.58) 0%, rgba(2, 8, 23, 0.92) 100%);
   }
 
   .landing-page::after {
-    inset: -6%;
+    inset: 0;
     background:
-      radial-gradient(circle at 66% 28%, rgba(0, 207, 180, 0.12), transparent 30%),
-      linear-gradient(116deg, transparent 0 34%, rgba(255, 255, 255, 0.12) 48%, transparent 64%),
-      url("/bg-login.png") 66% top / auto min(72vh, 720px) no-repeat;
-    background-position: 68% 32%, 48% 50%, 68% 0%;
-    background-size: 140% 140%, 165% 165%, auto min(72vh, 720px);
-    opacity: 0.98;
-    transform-origin: 66% 42%;
+      linear-gradient(180deg, rgba(2, 8, 23, 0.2) 0%, rgba(2, 8, 23, 0.92) 76%),
+      url("/bg-login.png") center top / auto min(54vh, 560px) no-repeat;
+    opacity: 0.42;
+    transform: none;
   }
 
   .landing-copy {
@@ -6158,7 +6138,7 @@ textarea {
   .login-card {
     margin-top: 4px;
     width: 100%;
-    padding: 22px 16px;
+    padding: 22px 18px;
   }
 
   .hero-scoreboard {
