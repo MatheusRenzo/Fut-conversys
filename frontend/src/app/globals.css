@@ -241,6 +241,14 @@ textarea {
   padding: 12px;
 }
 
+.success-box {
+  border: 1px solid rgba(97, 162, 41, 0.34);
+  border-radius: var(--radius);
+  background: rgba(97, 162, 41, 0.12);
+  color: #dff7d3;
+  padding: 12px;
+}
+
 .landing-page {
   position: relative;
   overflow: hidden;
@@ -481,10 +489,63 @@ textarea {
   box-shadow: 0 14px 28px rgba(0, 90, 255, 0.24);
 }
 
+.password-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: -3px;
+}
+
+.password-rules span {
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(247, 251, 245, 0.58);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  font-size: 0.74rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.password-rules span svg {
+  opacity: 0.42;
+}
+
+.password-rules span.active {
+  border-color: rgba(0, 207, 180, 0.38);
+  background: rgba(0, 207, 180, 0.1);
+  color: #dffbf7;
+}
+
+.password-rules span.active svg {
+  color: var(--brand-cyan);
+  opacity: 1;
+}
+
 .microsoft-login {
   width: 100%;
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.045);
+}
+
+.auth-switch-button {
+  min-height: 42px;
+  border: 1px solid rgba(0, 207, 180, 0.22);
+  border-radius: var(--radius);
+  background: rgba(0, 207, 180, 0.06);
+  color: #dffbf7;
+  cursor: pointer;
+  font-weight: 900;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.auth-switch-button:hover {
+  border-color: rgba(0, 207, 180, 0.42);
+  background: rgba(0, 207, 180, 0.1);
+  transform: translateY(-1px);
 }
 
 .app-shell {
@@ -1305,6 +1366,141 @@ textarea {
   line-height: 1.45;
 }
 
+.composer-status-row .avatar {
+  margin-top: 5px;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.composer-tool-button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  font-weight: 850;
+  line-height: 1;
+  padding: 9px 11px;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.composer-tool-button:hover,
+.composer-tool-button.active {
+  border-color: rgba(0, 207, 180, 0.36);
+  background: rgba(0, 207, 180, 0.08);
+  color: #eafffb;
+  transform: translateY(-1px);
+}
+
+.composer-tool-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.composer-media-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.036);
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+}
+
+.composer-media-thumb {
+  width: 70px;
+  height: 52px;
+  border-radius: 6px;
+  background-position: center;
+  background-size: cover;
+  display: block;
+}
+
+.composer-media-preview > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.composer-media-preview strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-media-preview span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.composer-media-preview button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.composer-goal-row {
+  border: 1px solid rgba(0, 207, 180, 0.16);
+  border-radius: var(--radius);
+  background: rgba(0, 207, 180, 0.045);
+  display: grid;
+  grid-template-columns: minmax(90px, 0.35fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+}
+
+.composer-goal-row label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.composer-goal-row label > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.composer-event-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.composer-event-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.72fr);
+  gap: 10px;
+}
+
+.composer-event-grid .input-field,
+.composer-goal-row .input-field {
+  min-height: 42px;
+}
+
 .goal-admin-summary {
   padding: 16px 18px;
   background:
@@ -1325,6 +1521,94 @@ textarea {
 .goal-admin-summary p {
   color: var(--muted);
   line-height: 1.45;
+}
+
+.goal-approval-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.approval-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.approval-panel-head > div {
+  display: grid;
+  gap: 5px;
+}
+
+.approval-panel-head h2 {
+  font-size: 1.18rem;
+  line-height: 1.15;
+}
+
+.approval-panel-head p,
+.approval-empty {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.approval-panel-head > strong {
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(0, 207, 180, 0.28);
+  border-radius: var(--radius);
+  background: rgba(0, 207, 180, 0.08);
+  color: var(--brand-cyan);
+  display: grid;
+  font-size: 1.2rem;
+  place-items: center;
+}
+
+.approval-list {
+  display: grid;
+  gap: 8px;
+}
+
+.approval-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.035);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+}
+
+.approval-item > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.approval-item span {
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.approval-item strong {
+  color: var(--text);
+  line-height: 1.15;
+}
+
+.approval-item p {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .post-card {
@@ -3429,15 +3713,15 @@ textarea {
 }
 
 .profile-hero {
+  --frame-a: var(--brand-blue);
+  --frame-b: var(--brand-cyan);
+  --frame-c: var(--brand-green);
+  --frame-d: var(--brand-pink);
   overflow: hidden;
   padding: 0;
 }
 
 .profile-banner {
-  --frame-a: var(--brand-blue);
-  --frame-b: var(--brand-cyan);
-  --frame-c: var(--brand-green);
-  --frame-d: var(--brand-pink);
   position: relative;
   overflow: hidden;
   isolation: isolate;
@@ -4339,6 +4623,12 @@ textarea {
   background-size: cover;
 }
 
+.banner-media-preview.frame-banner-preview {
+  position: relative;
+  --banner-ring-size: 3px;
+  border-radius: var(--radius);
+}
+
 .cosmetic-studio {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -4435,6 +4725,8 @@ textarea {
 }
 
 .cosmetic-option {
+  position: relative;
+  overflow: hidden;
   display: grid;
   justify-items: center;
   gap: 7px;
@@ -4442,7 +4734,25 @@ textarea {
   text-align: center;
 }
 
-.frame-preview-stack {
+.cosmetic-option.frame-choice:not(.banner-frame-none) {
+  border-color: color-mix(in srgb, var(--frame-b) 36%, rgba(255, 255, 255, 0.1));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--frame-a) 10%, rgba(255, 255, 255, 0.035)), rgba(255, 255, 255, 0.034)),
+    rgba(255, 255, 255, 0.032);
+}
+
+.cosmetic-option.frame-choice::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--frame-a), var(--frame-b), var(--frame-c), var(--frame-d));
+  content: "";
+  opacity: 0.92;
+}
+
+.frame-color-sample {
   width: 100%;
   min-width: 0;
   display: grid;
@@ -4451,29 +4761,60 @@ textarea {
   gap: 8px;
 }
 
-.frame-preview-stack .avatar {
+.frame-color-ring {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: conic-gradient(from -32deg, var(--frame-a) 0 28%, var(--frame-b) 28% 50%, var(--frame-c) 50% 76%, var(--frame-d) 76% 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 8px 16px color-mix(in srgb, var(--frame-a) 22%, transparent);
   justify-self: center;
 }
 
-.frame-banner-preview {
-  --frame-a: var(--brand-blue);
-  --frame-b: var(--brand-cyan);
-  --frame-c: var(--brand-green);
-  --frame-d: var(--brand-pink);
-  position: relative;
-  min-height: 30px;
-  border-radius: 6px;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--frame-a) 76%, #041e42), color-mix(in srgb, var(--frame-c) 38%, #041e42)),
-    #041e42;
+.frame-color-ring::after {
+  position: absolute;
+  inset: 6px;
+  border-radius: inherit;
+  background: #071f37;
   box-shadow:
-    inset 0 0 0 2px color-mix(in srgb, var(--frame-b) 70%, var(--frame-a)),
-    inset 0 0 0 5px rgba(255, 255, 255, 0.035);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 0 14px rgba(0, 0, 0, 0.18);
+  content: "";
 }
 
-.frame-banner-preview.banner-frame-none {
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-  filter: saturate(0.65);
+.frame-color-track {
+  height: 16px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--frame-a) 0 28%, var(--frame-b) 28% 50%, var(--frame-c) 50% 76%, var(--frame-d) 76% 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 8px 16px color-mix(in srgb, var(--frame-c) 14%, transparent);
+}
+
+.frame-choice.banner-frame-none {
+  --frame-a: rgba(255, 255, 255, 0.12);
+  --frame-b: rgba(255, 255, 255, 0.18);
+  --frame-c: rgba(255, 255, 255, 0.08);
+  --frame-d: rgba(255, 255, 255, 0.04);
+}
+
+.frame-choice.banner-frame-none::before {
+  opacity: 0.36;
+}
+
+.frame-choice.banner-frame-none .frame-color-ring {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+.frame-choice.banner-frame-none .frame-color-track {
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.08) 0 10px,
+    rgba(255, 255, 255, 0.16) 10px 20px
+  );
   opacity: 0.72;
 }
 
@@ -4486,7 +4827,7 @@ textarea {
   line-height: 1.1;
 }
 
-.cosmetic-option span:not(.avatar),
+.cosmetic-option small,
 .tier-option span,
 .motion-effect-option small,
 .banner-effect-toggle small,
@@ -4519,6 +4860,19 @@ textarea {
 .banner-effect-toggle.active,
 .verified-visibility-toggle.active {
   border-color: rgba(0, 207, 180, 0.46);
+}
+
+.cosmetic-option.frame-choice.active {
+  border-color: color-mix(in srgb, var(--frame-b) 68%, rgba(255, 255, 255, 0.22));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--frame-b) 34%, transparent),
+    0 14px 30px color-mix(in srgb, var(--frame-a) 16%, rgba(0, 90, 255, 0.16));
+}
+
+.cosmetic-option.frame-choice.active .frame-color-ring {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--frame-b) 36%, transparent),
+    0 10px 20px color-mix(in srgb, var(--frame-a) 26%, transparent);
 }
 
 .tier-card-grid {
@@ -4815,11 +5169,7 @@ textarea {
 .frame-banner-preview,
 .banner-effect-preview {
   --frame-angle: -32deg;
-}
-
-.avatar[class*="avatar-frame-"]:not(.avatar-frame-none)::before {
-  --frame-angle: -32deg;
-  background: conic-gradient(
+  --profile-frame-gradient: conic-gradient(
     from var(--frame-angle),
     var(--frame-a) 0 28%,
     var(--frame-b) 28% 50%,
@@ -4828,12 +5178,17 @@ textarea {
   );
 }
 
+.avatar[class*="avatar-frame-"]:not(.avatar-frame-none)::before {
+  --frame-angle: -32deg;
+  background: var(--profile-frame-gradient);
+}
+
 .avatar.avatar-effect-pulse::before {
   animation: profileBorderPulse 2.65s ease-in-out infinite;
 }
 
 .avatar.avatar-effect-stadium::before {
-  background: conic-gradient(
+  --profile-frame-gradient: conic-gradient(
     from var(--frame-angle),
     var(--frame-a) 0 18%,
     rgba(255, 255, 255, 0.92) 24% 30%,
@@ -4842,12 +5197,13 @@ textarea {
     rgba(255, 255, 255, 0.7) 78% 84%,
     var(--frame-d) 90% 100%
   );
+  background: var(--profile-frame-gradient);
   animation: profileBorderStadium 4.2s ease-in-out infinite;
 }
 
 .avatar.avatar-effect-orbit::before {
   --frame-angle: 0deg;
-  background: conic-gradient(
+  --profile-frame-gradient: conic-gradient(
     from var(--frame-angle),
     transparent 0 34deg,
     var(--frame-b) 46deg 68deg,
@@ -4855,12 +5211,13 @@ textarea {
     var(--frame-c) 212deg 238deg,
     transparent 252deg 360deg
   );
+  background: var(--profile-frame-gradient);
   animation: profileBorderOrbit 4.4s linear infinite;
 }
 
 .avatar.avatar-effect-nitro::before {
   --frame-angle: 0deg;
-  background: conic-gradient(
+  --profile-frame-gradient: conic-gradient(
     from var(--frame-angle),
     var(--frame-a) 0 18%,
     var(--frame-b) 28% 42%,
@@ -4868,6 +5225,7 @@ textarea {
     var(--frame-c) 62% 78%,
     var(--frame-d) 86% 100%
   );
+  background: var(--profile-frame-gradient);
   animation: profileBorderNitro 3.2s ease-in-out infinite;
 }
 
@@ -4910,13 +5268,7 @@ textarea {
   inset: 0;
   padding: var(--banner-ring-size);
   border: 0;
-  background: conic-gradient(
-    from var(--frame-angle),
-    var(--frame-a) 0 28%,
-    var(--frame-b) 28% 50%,
-    var(--frame-c) 50% 76%,
-    var(--frame-d) 76% 100%
-  );
+  background: var(--profile-frame-gradient);
   opacity: 0.9;
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
@@ -4929,6 +5281,7 @@ textarea {
 }
 
 .profile-banner[class*="banner-frame-"]:not(.banner-frame-none)::after,
+.frame-banner-preview[class*="banner-frame-"]:not(.banner-frame-none)::after,
 .banner-effect-preview[class*="banner-frame-"]:not(.banner-frame-none)::after {
   z-index: 3;
   inset: 5px;
@@ -4951,7 +5304,7 @@ textarea {
 
 .profile-banner.animated.banner-effect-stadium::before,
 .banner-effect-preview.banner-effect-stadium::before {
-  background: conic-gradient(
+  --profile-frame-gradient: conic-gradient(
     from var(--frame-angle),
     var(--frame-a) 0 18%,
     rgba(255, 255, 255, 0.92) 24% 30%,
@@ -4960,13 +5313,14 @@ textarea {
     rgba(255, 255, 255, 0.7) 78% 84%,
     var(--frame-d) 90% 100%
   );
+  background: var(--profile-frame-gradient);
   animation: profileBorderStadium 4.2s ease-in-out infinite;
 }
 
 .profile-banner.animated.banner-effect-orbit::before,
 .banner-effect-preview.banner-effect-orbit::before {
   --frame-angle: 0deg;
-  background: conic-gradient(
+  --profile-frame-gradient: conic-gradient(
     from var(--frame-angle),
     transparent 0 34deg,
     var(--frame-b) 46deg 68deg,
@@ -4974,13 +5328,14 @@ textarea {
     var(--frame-c) 212deg 238deg,
     transparent 252deg 360deg
   );
+  background: var(--profile-frame-gradient);
   animation: profileBorderOrbit 4.4s linear infinite;
 }
 
 .profile-banner.animated.banner-effect-nitro::before,
 .banner-effect-preview.banner-effect-nitro::before {
   --frame-angle: 0deg;
-  background: conic-gradient(
+  --profile-frame-gradient: conic-gradient(
     from var(--frame-angle),
     var(--frame-a) 0 18%,
     var(--frame-b) 28% 42%,
@@ -4988,6 +5343,7 @@ textarea {
     var(--frame-c) 62% 78%,
     var(--frame-d) 86% 100%
   );
+  background: var(--profile-frame-gradient);
   box-shadow: none;
   animation: profileBorderNitro 3.2s ease-in-out infinite;
 }
@@ -5840,6 +6196,8 @@ textarea {
   .event-filter-metrics,
   .events-grid,
   .composer-attachment-panel,
+  .composer-event-grid,
+  .composer-goal-row,
   .composer-grid,
   .composer-grid.post-meta-grid,
   .settings-grid,
@@ -5866,6 +6224,20 @@ textarea {
   .composer-submit-row {
     align-items: stretch;
     display: grid;
+  }
+
+  .composer-tools,
+  .approval-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .composer-tool-button {
+    justify-content: center;
+  }
+
+  .approval-item {
+    grid-template-columns: 1fr;
   }
 
   .goal-review-card {

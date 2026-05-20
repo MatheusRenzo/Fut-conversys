@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import urllib.error
 import urllib.parse
@@ -24,6 +25,10 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "redacted@example.com")
 VERIFIED_DOMAIN = "conversys.global"
 PASSWORD_ITERATIONS = 260000
+TOKEN_TTL_SECONDS = 60 * 60 * 8
+AUTH_SECRET = os.getenv("AUTH_SECRET") or os.getenv("SECRET_KEY") or "fut-conversys-dev-secret"
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+USERNAME_PATTERN = re.compile(r"[^a-z0-9._-]+")
 
 
 def hash_password(password: str) -> str:
@@ -59,17 +64,68 @@ def verify_password(password: str, password_hash: str | None) -> bool:
 
 
 def create_access_token(user_id: int) -> str:
-    return f"token-{user_id}"
+    expires_at = int((datetime.utcnow() + timedelta(seconds=TOKEN_TTL_SECONDS)).timestamp())
+    nonce = secrets.token_urlsafe(12)
+    payload = f"{user_id}.{expires_at}.{nonce}"
+    signature = hmac.new(AUTH_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"v1.{payload}.{signature}"
 
 
 def get_user_id_from_token(token: str) -> int | None:
-    if not token.startswith("token-"):
+    parts = token.split(".")
+    if len(parts) != 5 or parts[0] != "v1":
         return None
 
     try:
-        return int(token.replace("token-", "", 1))
+        user_id = int(parts[1])
+        expires_at = int(parts[2])
     except ValueError:
         return None
+
+    if datetime.utcnow().timestamp() > expires_at:
+        return None
+
+    payload = ".".join(parts[1:4])
+    expected_signature = hmac.new(
+        AUTH_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected_signature, parts[4]):
+        return None
+
+    return user_id
+
+
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def normalize_username(value: str) -> str:
+    username = USERNAME_PATTERN.sub("-", value.strip().lower())
+    username = username.strip(".-_")
+    return username[:32]
+
+
+def validate_password_strength(password: str, email: str, name: str) -> None:
+    password_lower = password.lower()
+    rules = (
+        (len(password) >= 8, "A senha precisa ter pelo menos 8 caracteres"),
+        (any(char.islower() for char in password), "Inclua uma letra minúscula"),
+        (any(char.isupper() for char in password), "Inclua uma letra maiúscula"),
+        (any(char.isdigit() for char in password), "Inclua um número"),
+        (any(not char.isalnum() for char in password), "Inclua um símbolo"),
+    )
+    for passed, message in rules:
+        if not passed:
+            raise HTTPException(status_code=400, detail=message)
+
+    email_user = email.split("@", 1)[0].lower()
+    name_parts = [part.lower() for part in name.split() if len(part) >= 3]
+    if email_user and email_user in password_lower:
+        raise HTTPException(status_code=400, detail="A senha não pode conter seu e-mail")
+    if any(part in password_lower for part in name_parts):
+        raise HTTPException(status_code=400, detail="A senha não pode conter seu nome")
 
 
 def is_conversys_email(email: str | None) -> bool:
@@ -230,6 +286,13 @@ app.add_middleware(
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    username: str | None = None
 
 
 class MicrosoftCallbackRequest(BaseModel):
@@ -874,13 +937,80 @@ def health():
 
 @app.post("/api/auth/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.username == request.username).first()
+    identifier = request.username.strip()
+    user = db.query(models.User).filter(models.User.username == identifier).first()
+    if not user:
+        user = db.query(models.User).filter(models.User.email == normalize_email(identifier)).first()
 
     if not user or not verify_password(request.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuário ou senha inválidos",
         )
+
+    return {
+        "token": create_access_token(user.id),
+        "user": user_summary(user),
+    }
+
+
+@app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
+def register(request: RegisterRequest, db: Session = Depends(get_db)):
+    name = request.name.strip()
+    email = normalize_email(request.email)
+    requested_username = normalize_username(request.username or "")
+
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Informe seu nome")
+    if not EMAIL_PATTERN.match(email):
+        raise HTTPException(status_code=400, detail="Informe um e-mail válido")
+    validate_password_strength(request.password, email, name)
+
+    existing_email = db.query(models.User).filter(models.User.email == email).first()
+    if existing_email:
+        raise HTTPException(status_code=409, detail="Este e-mail já está cadastrado")
+
+    if requested_username:
+        if len(requested_username) < 3:
+            raise HTTPException(status_code=400, detail="O usuário precisa ter pelo menos 3 caracteres")
+        if db.query(models.User).filter(models.User.username == requested_username).first():
+            raise HTTPException(status_code=409, detail="Este usuário já está em uso")
+        username = requested_username
+    else:
+        base_username = normalize_username(email.split("@", 1)[0]) or "jogador"
+        username = base_username
+        suffix = 1
+        while db.query(models.User).filter(models.User.username == username).first():
+            suffix += 1
+            username = f"{base_username}{suffix}"
+
+    user = models.User(
+        username=username,
+        email=email,
+        password_hash=hash_password(request.password),
+        name=name,
+        display_name=name,
+        title="Jogador Conversys",
+        bio="Novo perfil no Fut Conversys.",
+        position="Jogador",
+        favorite_team="Conversys FC",
+        provider="local",
+        profile_frame="conversys",
+        profile_effect="off",
+        cosmetic_tier="starter",
+        animated_banner=False,
+        player_rating=78,
+        verified_domain=is_conversys_email(email),
+        show_verified_badge=True,
+        goals=0,
+        assists=0,
+        fouls=0,
+        barbecue_score=0,
+    )
+    user.avatar_config = json.dumps(default_avatar_config(user))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
 
     return {
         "token": create_access_token(user.id),

@@ -95,7 +95,17 @@ export default function Dashboard() {
         </div>
       </section>
 
-      <PostComposer events={events} onCreated={(post) => setPosts((current) => [post, ...current])} user={profile} />
+      <PostComposer
+        events={events}
+        isAdmin={isAdmin}
+        onCreated={(post) => setPosts((current) => [post, ...current])}
+        onEventCreated={(event) =>
+          setEvents((current) =>
+            [...current, event].sort((first, second) => new Date(first.date).getTime() - new Date(second.date).getTime()),
+          )
+        }
+        user={profile}
+      />
 
       {isAdmin && pendingGoalClaims.length > 0 && (
         <section className="goal-admin-summary glass-panel">
