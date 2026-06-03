@@ -3,6 +3,7 @@ import { BACKEND_API_URL, clearSessionCookie, getSessionToken } from "@/lib/serv
 
 const PUBLIC_BACKEND_PATHS = new Set([
   "api/auth/microsoft/config",
+  "api/auth/microsoft/start",
   "api/health",
 ]);
 
@@ -26,7 +27,13 @@ async function proxy(request: NextRequest, { params }: { params: Promise<{ path:
     method: request.method,
     headers,
     body: ["GET", "HEAD"].includes(request.method) ? undefined : await request.text(),
+    redirect: "manual",
   });
+
+  if (backendResponse.status >= 300 && backendResponse.status < 400) {
+    const location = backendResponse.headers.get("location");
+    if (location) return NextResponse.redirect(location);
+  }
 
   const responseText = await backendResponse.text();
   const response = new NextResponse(responseText, {

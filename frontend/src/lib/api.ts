@@ -1,4 +1,4 @@
-import type { Event, EventCreatePayload, GoalStatus, Leaderboard, Post, ReactionType, UserProfile } from "@/types";
+import type { Event, EventCreatePayload, GoalStatus, Leaderboard, Post, ReactionType, SearchResults, UserProfile } from "@/types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -75,12 +75,19 @@ export const api = {
       verified_domain: string;
     }>("/api/auth/microsoft/config", { auth: false }),
   me: () => apiFetch<UserProfile>("/api/me"),
+  search: (query: string) => apiFetch<SearchResults>(`/api/search?q=${encodeURIComponent(query)}`),
   updateMe: (profile: Partial<UserProfile>) =>
     apiFetch<UserProfile>("/api/users/me/profile", {
       method: "PUT",
       body: JSON.stringify(profile),
     }),
   user: (id: number) => apiFetch<UserProfile & { posts: Post[] }>(`/api/users/${id}`),
+  adminUsers: () => apiFetch<{ users: UserProfile[] }>("/api/admin/users"),
+  setUserVerified: (userId: number, verifiedEnabled: boolean) =>
+    apiFetch<UserProfile>(`/api/admin/users/${userId}/verified`, {
+      method: "PUT",
+      body: JSON.stringify({ verified_enabled: verifiedEnabled }),
+    }),
   feed: () => apiFetch<{ posts: Post[] }>("/api/feed"),
   createPost: (payload: {
     title?: string;

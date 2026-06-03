@@ -22,6 +22,11 @@ if not exist "%FRONTEND_DIR%\node_modules" (
 echo Starting Conversys Fut...
 echo Backend:  http://localhost:8000
 echo Frontend: http://localhost:3000
+for /f "tokens=14" %%i in ('ipconfig ^| findstr /i "IPv4"') do (
+  echo Network:  http://%%i:3000
+  goto printed_network
+)
+:printed_network
 echo.
 
 if exist "%BACKEND_DIR%\venv\Scripts\activate.bat" (

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { BadgeCheck, Check, Clock3, Pencil, Save, Sparkles, X } from "lucide-react";
+import { BadgeCheck, Check, Clock3, Pencil, Save, ShieldCheck, Sparkles, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Avatar } from "@/components/Avatar";
 import { LineupPreview } from "@/components/LineupPreview";
@@ -10,7 +10,6 @@ import { ProfileHeader } from "@/components/ProfileHeader";
 import { api } from "@/lib/api";
 import type { Event, Leaderboard, Post, UserProfile } from "@/types";
 
-const positionOptions = ["Goleiro", "Zagueiro", "Lateral", "Volante", "Meia", "Ponta", "Atacante"];
 const frameOptions: Array<{
   value: NonNullable<UserProfile["profile_frame"]>;
   label: string;
@@ -81,17 +80,22 @@ const effectOptions: Array<{
   { value: "nitro", label: "Nitro+", description: "energia premium no contorno" },
 ];
 
-const adminUsername = process.env.NEXT_PUBLIC_ADMIN_USERNAME ?? "admin";
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
 
 export default function MePage() {
   const router = useRouter();
+  const bannerDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
+  const [adminUsers, setAdminUsers] = useState<UserProfile[]>([]);
   const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
   const [saved, setSaved] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [goalReviewLoading, setGoalReviewLoading] = useState<string | null>(null);
+  const [verifiedLoading, setVerifiedLoading] = useState<number | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -104,9 +108,10 @@ export default function MePage() {
         setProfile(me);
         setEvents(eventList.events);
         setLeaderboard(ranking);
-        if (me.username === adminUsername) {
-          const feed = await api.feed();
+        if (me.is_admin) {
+          const [feed, usersResponse] = await Promise.all([api.feed(), api.adminUsers()]);
           setPosts(feed.posts);
+          setAdminUsers(usersResponse.users);
         }
       } catch {
         router.push("/");
@@ -122,6 +127,7 @@ export default function MePage() {
   };
 
   const selectProfileFrame = (frame: NonNullable<UserProfile["profile_frame"]>) => {
+    if (!profile?.verified_enabled) return;
     setProfile((current) =>
       current
         ? {
@@ -138,7 +144,15 @@ export default function MePage() {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!profile) return;
-    const updated = await api.updateMe(profile);
+    const payload = profile.verified_enabled
+      ? profile
+      : {
+          avatar_url: profile.avatar_url,
+          banner_url: profile.banner_url,
+          banner_position_x: profile.banner_position_x,
+          banner_position_y: profile.banner_position_y,
+        };
+    const updated = await api.updateMe(payload);
     setProfile(updated);
     setSaved(true);
   };
@@ -149,13 +163,70 @@ export default function MePage() {
 
     const reader = new FileReader();
     reader.onload = () => {
-      updateField(field, String(reader.result) as UserProfile[typeof field]);
+      const imageUrl = String(reader.result) as UserProfile[typeof field];
+      setProfile((current) =>
+        current
+          ? {
+              ...current,
+              [field]: imageUrl,
+              ...(field === "banner_url"
+                ? {
+                    banner_position_x: 50,
+                    banner_position_y: 50,
+                  }
+                : {}),
+            }
+          : current,
+      );
+      setSaved(false);
     };
     reader.readAsDataURL(file);
     event.target.value = "";
   };
 
+  const updateBannerPosition = (x: number, y: number) => {
+    setProfile((current) =>
+      current
+        ? {
+            ...current,
+            banner_position_x: clampPercent(x),
+            banner_position_y: clampPercent(y),
+          }
+        : current,
+    );
+    setSaved(false);
+  };
+
+  const startBannerDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!profile?.banner_url) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    bannerDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: profile.banner_position_x ?? 50,
+      originY: profile.banner_position_y ?? 50,
+    };
+  };
+
+  const moveBannerDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = bannerDragRef.current;
+    if (!drag) return;
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const deltaX = ((event.clientX - drag.startX) / bounds.width) * 100;
+    const deltaY = ((event.clientY - drag.startY) / bounds.height) * 100;
+    updateBannerPosition(drag.originX - deltaX, drag.originY - deltaY);
+  };
+
+  const stopBannerDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    bannerDragRef.current = null;
+  };
+
   const selectProfileEffect = (effect: NonNullable<UserProfile["profile_effect"]>) => {
+    if (!profile?.verified_enabled) return;
     setProfile((current) =>
       current
         ? {
@@ -181,12 +252,29 @@ export default function MePage() {
     }
   };
 
+  const toggleVerified = async (target: UserProfile) => {
+    setVerifiedLoading(target.id);
+    try {
+      const updated = await api.setUserVerified(target.id, !target.verified_enabled);
+      setAdminUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      if (profile?.id === updated.id) {
+        const refreshed = await api.me();
+        setProfile(refreshed);
+      }
+    } finally {
+      setVerifiedLoading(null);
+    }
+  };
+
   if (!profile) return <div className="empty-state">Carregando seu perfil...</div>;
 
   const currentFrame = profile.profile_frame ?? "conversys";
+  const bannerPositionX = profile.banner_position_x ?? 50;
+  const bannerPositionY = profile.banner_position_y ?? 50;
   const profileEffect = effectOptions.some((option) => option.value === profile.profile_effect) ? profile.profile_effect : "off";
   const currentEffect = currentFrame !== "none" && profileEffect && profileEffect !== "off" ? profileEffect : "off";
-  const isAdmin = profile.username === adminUsername;
+  const isAdmin = profile.is_admin;
+  const canUseVerifiedFeatures = profile.verified_enabled;
   const pendingGoalClaims = isAdmin
     ? posts.filter((post) => (post.goals_scored ?? 0) > 0 && post.goal_status === "pending")
     : [];
@@ -254,6 +342,46 @@ export default function MePage() {
         </section>
       )}
 
+      {isAdmin && (
+        <section className="content-card glass-panel verified-admin-panel">
+          <div className="approval-panel-head">
+            <div>
+              <span className="eyebrow">Admin</span>
+              <h2>Verificados</h2>
+              <p>Ligue ou desligue selo, bordas e efeitos de cada jogador manualmente.</p>
+            </div>
+            <strong>{adminUsers.filter((item) => item.verified_enabled).length}</strong>
+          </div>
+
+          <div className="verified-admin-list">
+            {adminUsers.map((item) => (
+              <article className={item.verified_enabled ? "verified-admin-item active" : "verified-admin-item"} key={item.id}>
+                <Avatar user={item} size="sm" />
+                <div>
+                  <strong>{item.name}</strong>
+                  <span>{item.email || item.username}</span>
+                </div>
+                <button
+                  className={item.verified_enabled ? "verified-admin-toggle active" : "verified-admin-toggle"}
+                  disabled={verifiedLoading === item.id}
+                  onClick={() => toggleVerified(item)}
+                  type="button"
+                >
+                  <ShieldCheck size={16} />
+                  <span>
+                    {verifiedLoading === item.id
+                      ? "Salvando..."
+                      : item.verified_enabled
+                        ? "Desaprovar"
+                        : "Aprovar"}
+                  </span>
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="content-card glass-panel profile-edit-card">
         <div className="section-heading compact-heading">
           <div>
@@ -275,47 +403,54 @@ export default function MePage() {
           <form className="profile-edit-form" onSubmit={submit}>
             <div className="profile-editor-layout">
               <div className="profile-editor-fields">
-                <div className="settings-grid">
-                  <input
-                    className="input-field"
-                    placeholder="Nome de perfil"
-                    value={profile.display_name || profile.name || ""}
-                    onChange={(event) => updateField("display_name", event.target.value)}
-                  />
-                  <input
-                    className="input-field"
-                    placeholder="Título da resenha"
-                    value={profile.title || ""}
-                    onChange={(event) => updateField("title", event.target.value)}
-                  />
-                  <select
-                    className="input-field"
-                    value={profile.position || ""}
-                    onChange={(event) => updateField("position", event.target.value)}
-                  >
-                    <option value="">Posição que joga</option>
-                    {profile.position && !positionOptions.includes(profile.position) && (
-                      <option value={profile.position}>{profile.position}</option>
-                    )}
-                    {positionOptions.map((position) => (
-                      <option key={position} value={position}>
-                        {position}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    className="input-field"
-                    placeholder="Time preferido"
-                    value={profile.favorite_team || ""}
-                    onChange={(event) => updateField("favorite_team", event.target.value)}
-                  />
-                  <input
-                    className="input-field"
-                    placeholder="Jogador favorito"
-                    value={profile.favorite_player || ""}
-                    onChange={(event) => updateField("favorite_player", event.target.value)}
-                  />
-                </div>
+                {canUseVerifiedFeatures ? (
+                  <div className="settings-grid">
+                    <input
+                      className="input-field"
+                      placeholder="Nome de perfil"
+                      value={profile.display_name || profile.name || ""}
+                      onChange={(event) => updateField("display_name", event.target.value)}
+                    />
+                    <input
+                      className="input-field"
+                      placeholder="Título da resenha"
+                      value={profile.title || ""}
+                      onChange={(event) => updateField("title", event.target.value)}
+                    />
+                    <div className="position-field-picker">
+                      <div>
+                        <span>Posição em campo</span>
+                        <strong>Clique no campo para escolher onde você joga</strong>
+                        <small>O jogador vai para o ponto selecionado e essa posição será salva no perfil.</small>
+                      </div>
+                      <LineupPreview
+                        profile={profile}
+                        selectable
+                        onSelectPosition={(position) => updateField("position", position)}
+                      />
+                    </div>
+                    <input
+                      className="input-field"
+                      placeholder="Time preferido"
+                      value={profile.favorite_team || ""}
+                      onChange={(event) => updateField("favorite_team", event.target.value)}
+                    />
+                    <input
+                      className="input-field"
+                      placeholder="Jogador favorito"
+                      value={profile.favorite_player || ""}
+                      onChange={(event) => updateField("favorite_player", event.target.value)}
+                    />
+                  </div>
+                ) : (
+                  <div className="verified-locked-card">
+                    <ShieldCheck size={20} />
+                    <div>
+                      <strong>Perfil básico</strong>
+                      <p>O admin ainda não liberou verificado para esta conta. Por enquanto, só foto e banner podem ser alterados.</p>
+                    </div>
+                  </div>
+                )}
 
                 <div className="media-picker-grid">
                   <div className="profile-photo-stack">
@@ -327,23 +462,50 @@ export default function MePage() {
                       <strong>Escolher foto</strong>
                       <input accept="image/*" className="file-input" onChange={selectImage("avatar_url")} type="file" />
                     </label>
-
-                    <LineupPreview profile={profile} />
                   </div>
 
-                  <label className="media-picker">
-                    <span>Banner do perfil</span>
+                  <div className="media-picker banner-position-editor">
+                    <div className="banner-position-head">
+                      <span>Banner do perfil</span>
+                      <strong>Prévia da área real</strong>
+                      <small>Arraste a imagem com o mouse para escolher exatamente o que aparece no perfil.</small>
+                    </div>
                     <div
-                      className={`media-preview banner-media-preview frame-banner-preview banner-frame-${currentFrame}`}
+                      className={`media-preview banner-media-preview banner-real-preview frame-banner-preview banner-frame-${currentFrame}`}
+                      onPointerCancel={stopBannerDrag}
+                      onPointerDown={startBannerDrag}
+                      onPointerMove={moveBannerDrag}
+                      onPointerUp={stopBannerDrag}
+                      role="img"
+                      aria-label="Prévia reposicionável do banner"
                       style={{
                         backgroundImage: profile.banner_url ? `url(${profile.banner_url})` : undefined,
+                        backgroundPosition: `${bannerPositionX}% ${bannerPositionY}%`,
                       }}
-                    />
-                    <strong>Escolher banner</strong>
-                    <input accept="image/*" className="file-input" onChange={selectImage("banner_url")} type="file" />
-                  </label>
+                    >
+                      {profile.banner_url ? (
+                        <>
+                          <span className="banner-visible-frame" />
+                          <em>Arraste para reposicionar</em>
+                        </>
+                      ) : (
+                        <label className="banner-empty-hint">
+                          <strong>Escolher banner</strong>
+                          <span>Depois de subir, arraste para ajustar o recorte.</span>
+                          <input accept="image/*" className="file-input" onChange={selectImage("banner_url")} type="file" />
+                        </label>
+                      )}
+                    </div>
+                    {profile.banner_url && (
+                      <label className="banner-change-button">
+                        Alterar foto do banner
+                        <input accept="image/*" className="file-input" onChange={selectImage("banner_url")} type="file" />
+                      </label>
+                    )}
+                  </div>
                 </div>
 
+                {canUseVerifiedFeatures && (
                 <div className="cosmetic-studio">
                   <div className="cosmetic-studio-head">
                     <div>
@@ -409,35 +571,33 @@ export default function MePage() {
                   </div>
 
                   <button
-                    className={profile.verified_domain && profile.show_verified_badge !== false ? "verified-visibility-toggle active" : "verified-visibility-toggle"}
-                    disabled={!profile.verified_domain}
+                    className={profile.verified_enabled && profile.show_verified_badge !== false ? "verified-visibility-toggle active" : "verified-visibility-toggle"}
                     onClick={() => updateField("show_verified_badge", !(profile.show_verified_badge !== false))}
                     type="button"
                   >
                     <BadgeCheck size={18} />
                     <span>
                       <strong>
-                        {!profile.verified_domain
-                          ? "Verificado indisponível"
-                          : profile.show_verified_badge === false
+                        {profile.show_verified_badge === false
                             ? "Mostrar verificado"
                             : "Verificado visível"}
                       </strong>
                       <small>
-                        {!profile.verified_domain
-                          ? "Use uma conta Conversys validada para liberar o selo."
-                          : "Você pode exibir ou esconder o selo no perfil e nos posts."}
+                        Você pode exibir ou esconder o selo no perfil e nos posts.
                       </small>
                     </span>
                   </button>
                 </div>
+                )}
 
-                <textarea
-                  className="input-field"
-                  placeholder="Bio"
-                  value={profile.bio || ""}
-                  onChange={(event) => updateField("bio", event.target.value)}
-                />
+                {canUseVerifiedFeatures && (
+                  <textarea
+                    className="input-field"
+                    placeholder="Bio"
+                    value={profile.bio || ""}
+                    onChange={(event) => updateField("bio", event.target.value)}
+                  />
+                )}
               </div>
             </div>
             <div className="action-row">

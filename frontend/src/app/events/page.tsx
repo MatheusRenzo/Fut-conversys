@@ -15,8 +15,6 @@ type EventDraft = Omit<EventCreatePayload, "max_players"> & {
 type EventStatusFilter = "all" | "open" | "confirmed" | "full" | "past";
 type EventSort = "upcoming" | "popular" | "available";
 
-const adminUsername = process.env.NEXT_PUBLIC_ADMIN_USERNAME ?? "admin";
-
 const eventTypeLabels: Record<string, string> = {
   pelada: "Pelada",
   torneio: "Torneio",
@@ -154,7 +152,7 @@ export default function EventsPage() {
     }
   };
 
-  const isAdmin = profile?.username === adminUsername;
+  const isAdmin = Boolean(profile?.is_admin);
   const now = currentTime;
   const normalizedQuery = query.trim().toLowerCase();
 

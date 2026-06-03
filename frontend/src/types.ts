@@ -11,6 +11,8 @@ export type UserProfile = {
   favorite_player?: string | null;
   avatar_url?: string | null;
   banner_url?: string | null;
+  banner_position_x?: number | null;
+  banner_position_y?: number | null;
   profile_frame?: ProfileFrame | null;
   cosmetic_tier?: CosmeticTier | null;
   animated_banner?: boolean;
@@ -19,6 +21,8 @@ export type UserProfile = {
   avatar_config?: AvatarConfig | null;
   player_rating?: number;
   verified_domain: boolean;
+  verified_enabled: boolean;
+  is_admin: boolean;
   stats?: PlayerStats;
 };
 
@@ -200,4 +204,10 @@ export type Post = {
 export type Leaderboard = {
   top_scorers: Array<UserProfile & { score: number }>;
   top_barbecue: Array<UserProfile & { score: number }>;
+};
+
+export type SearchResults = {
+  profiles: UserProfile[];
+  events: Event[];
+  posts: Post[];
 };

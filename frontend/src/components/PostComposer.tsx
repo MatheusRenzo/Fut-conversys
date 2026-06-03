@@ -162,7 +162,12 @@ export function PostComposer({
   };
 
   const firstName = user?.name.split(" ")[0] || "jogador";
-  const eventCount = events.length;
+  const composerNote =
+    mode === "event"
+      ? "Eventos criados aqui entram direto no calendário da firma."
+      : claimingGoals
+        ? "Gols informados ficam pendentes até aprovação do admin."
+        : "";
 
   return (
     <form className="post-composer glass-panel" onSubmit={submit}>
@@ -347,15 +352,7 @@ export function PostComposer({
       {error && <div className="error-box">{error}</div>}
       {notice && <div className="success-box">{notice}</div>}
       <div className="composer-submit-row">
-        <p className="composer-note">
-          {mode === "event"
-            ? "Eventos criados aqui entram direto no calendário da firma."
-            : claimingGoals
-              ? "Gols informados ficam pendentes até aprovação do admin."
-              : eventCount
-                ? `${eventCount} evento${eventCount > 1 ? "s" : ""} no calendário da firma.`
-                : "Publique uma atualização simples, com ou sem mídia."}
-        </p>
+        {composerNote && <p className="composer-note">{composerNote}</p>}
         <button className="btn-primary" disabled={loading}>
           <Send size={17} />
           <span>{loading ? "Enviando..." : mode === "event" ? "Criar evento" : "Publicar"}</span>

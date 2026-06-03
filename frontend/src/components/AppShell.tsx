@@ -1,28 +1,196 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   CalendarDays,
   ChevronRight,
+  FileText,
   Flame,
   Home,
+  LoaderCircle,
   LogOut,
+  Search,
   Trophy,
   UserRound,
 } from "lucide-react";
 import { api, clearSession } from "@/lib/api";
-import type { Event, Leaderboard, UserProfile } from "@/types";
+import type { Event, Leaderboard, SearchResults, UserProfile } from "@/types";
 import { Avatar } from "./Avatar";
-import { formatEventDate } from "@/lib/format";
+import { formatEventDate, formatShortDate } from "@/lib/format";
 
 const navItems = [
   { href: "/dashboard", label: "Feed", icon: Home },
   { href: "/events", label: "Eventos", icon: CalendarDays },
   { href: "/me", label: "Meu perfil", icon: UserRound },
 ];
+
+function SoccerBallMark() {
+  return (
+    <svg className="sidebar-brand-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m12 7 3.8 2.8-1.45 4.45h-4.7L8.2 9.8 12 7Z" />
+      <path d="m12 7 .55-3.9" />
+      <path d="m15.8 9.8 3.75-1.25" />
+      <path d="m14.35 14.25 2.35 3.25" />
+      <path d="m9.65 14.25-2.35 3.25" />
+      <path d="M8.2 9.8 4.45 8.55" />
+    </svg>
+  );
+}
+
+const emptySearchResults: SearchResults = {
+  profiles: [],
+  events: [],
+  posts: [],
+};
+
+function GlobalSearch({ compact = false }: { compact?: boolean }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchResults>(emptySearchResults);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const searchRef = useRef<HTMLDivElement | null>(null);
+  const trimmedQuery = query.trim();
+  const hasResults = results.profiles.length > 0 || results.events.length > 0 || results.posts.length > 0;
+
+  useEffect(() => {
+    const closeWhenOutside = (event: PointerEvent) => {
+      if (!searchRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeWhenOutside);
+    return () => document.removeEventListener("pointerdown", closeWhenOutside);
+  }, []);
+
+  useEffect(() => {
+    if (trimmedQuery.length < 2) {
+      return;
+    }
+
+    let active = true;
+    const timer = window.setTimeout(() => {
+      api
+        .search(trimmedQuery)
+        .then((nextResults) => {
+          if (!active) return;
+          setResults(nextResults);
+          setOpen(true);
+        })
+        .catch(() => {
+          if (active) setResults(emptySearchResults);
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }, 220);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [trimmedQuery]);
+
+  const closeSearch = () => setOpen(false);
+
+  return (
+    <div className={compact ? "global-search compact" : "global-search"} ref={searchRef}>
+      <label className="global-search-field">
+        <Search size={17} />
+        <input
+          aria-label="Buscar perfis, eventos e publicações"
+          onChange={(event) => {
+            const nextQuery = event.target.value;
+            setQuery(nextQuery);
+            if (nextQuery.trim().length < 2) {
+              setResults(emptySearchResults);
+              setLoading(false);
+              setOpen(false);
+              return;
+            }
+            setLoading(true);
+            setOpen(true);
+          }}
+          onFocus={() => trimmedQuery.length >= 2 && setOpen(true)}
+          placeholder={compact ? "Buscar" : "Buscar perfis, eventos ou posts"}
+          value={query}
+        />
+        {loading && <LoaderCircle className="search-loading-icon" size={15} />}
+      </label>
+
+      {open && trimmedQuery.length >= 2 && (
+        <div className="global-search-dropdown">
+          {hasResults ? (
+            <>
+              <section>
+                <span className="search-section-label">Perfis</span>
+                {results.profiles.length > 0 ? (
+                  results.profiles.map((profile) => (
+                    <Link className="search-result-item" href={`/profile/${profile.id}`} key={profile.id} onClick={closeSearch}>
+                      <Avatar user={profile} size="sm" />
+                      <span>
+                        <strong>{profile.name}</strong>
+                        <small>{profile.position || profile.title || "Perfil"}</small>
+                      </span>
+                    </Link>
+                  ))
+                ) : (
+                  <p className="search-empty-line">Nenhum perfil encontrado</p>
+                )}
+              </section>
+
+              <section>
+                <span className="search-section-label">Eventos</span>
+                {results.events.length > 0 ? (
+                  results.events.map((event) => (
+                    <Link className="search-result-item" href={`/events/${event.id}`} key={event.id} onClick={closeSearch}>
+                      <span className="search-result-icon">
+                        <CalendarDays size={16} />
+                      </span>
+                      <span>
+                        <strong>{event.title}</strong>
+                        <small>
+                          {formatEventDate(event.date)} - {event.location}
+                        </small>
+                      </span>
+                    </Link>
+                  ))
+                ) : (
+                  <p className="search-empty-line">Nenhum evento encontrado</p>
+                )}
+              </section>
+
+              <section>
+                <span className="search-section-label">Publicações</span>
+                {results.posts.length > 0 ? (
+                  results.posts.map((post) => (
+                    <Link className="search-result-item" href={`/dashboard#post-${post.id}`} key={post.id} onClick={closeSearch}>
+                      <span className="search-result-icon">
+                        <FileText size={16} />
+                      </span>
+                      <span>
+                        <strong>{post.title || post.description || `Publicação de ${post.author.name}`}</strong>
+                        <small>
+                          {post.author.name} - {formatShortDate(post.created_at)}
+                        </small>
+                      </span>
+                    </Link>
+                  ))
+                ) : (
+                  <p className="search-empty-line">Nenhuma publicação encontrada</p>
+                )}
+              </section>
+            </>
+          ) : (
+            <p className="search-empty-state">{loading ? "Buscando..." : "Nada encontrado por enquanto."}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function AppShell({
   children,
@@ -51,29 +219,37 @@ export function AppShell({
     <div className="app-shell">
       <header className="mobile-topbar">
         <Link href="/dashboard" className="brand-mark sidebar-brand-panel">
-          <span className="brand-ball sidebar-brand-logo">
-            <Image src="/icons/fut-conversys-logo.png" alt="" width={86} height={86} priority />
-          </span>
           <span className="sidebar-brand-copy">
-            <small>Clube interno</small>
-            <strong>Fut Conversys</strong>
-            <em>Pelada da firma</em>
+            <span className="sidebar-brand-title">
+              <SoccerBallMark />
+              <strong>Fut Conversys</strong>
+            </span>
           </span>
         </Link>
-        {user && <Avatar user={user} size="sm" />}
+        <GlobalSearch compact />
+        {user && (
+          <div className="mobile-user-actions">
+            <Link href="/me" className="mobile-avatar-link" aria-label="Abrir meu perfil">
+              <Avatar user={user} size="sm" />
+            </Link>
+            <button className="mobile-logout-button" onClick={logout} aria-label="Sair da conta">
+              <LogOut size={17} />
+            </button>
+          </div>
+        )}
       </header>
 
       <aside className="desktop-sidebar glass-panel">
         <Link href="/dashboard" className="brand-mark sidebar-brand-panel app-brand-panel">
-          <span className="brand-ball sidebar-brand-logo">
-            <Image src="/icons/fut-conversys-logo.png" alt="" width={86} height={86} priority />
-          </span>
           <span className="sidebar-brand-copy">
-            <small>Clube interno</small>
-            <strong>Fut Conversys</strong>
-            <em>Pelada da firma</em>
+            <span className="sidebar-brand-title">
+              <SoccerBallMark />
+              <strong>Fut Conversys</strong>
+            </span>
           </span>
         </Link>
+
+        <GlobalSearch />
 
         <nav className="nav-stack">
           {navItems.map((item) => {

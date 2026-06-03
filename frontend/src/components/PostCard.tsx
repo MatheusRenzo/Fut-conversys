@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
+  BadgeCheck,
   Beer,
   Bookmark,
   Camera,
@@ -28,7 +29,6 @@ import { api } from "@/lib/api";
 import { formatShortDate } from "@/lib/format";
 import type { Comment, GoalStatus, Post, ReactionType } from "@/types";
 import { Avatar } from "./Avatar";
-import { VerifiedBadge } from "./VerifiedBadge";
 
 const reactionOptions: Array<{
   type: ReactionType;
@@ -199,9 +199,12 @@ export function PostCard({
     ? totalReactions > 1
       ? `Você e mais ${totalReactions - 1}`
       : "Você"
-    : `${totalReactions}`;
+    : totalReactions === 1
+      ? "1 reação"
+      : `${totalReactions} reações`;
   const commentSummaryText = post.comments_count === 1 ? "1 comentário" : `${post.comments_count} comentários`;
   const showEngagementLine = totalReactions > 0 || post.comments_count > 0;
+  const authorVerified = post.author.verified_enabled && post.author.show_verified_badge !== false;
 
   const showReactionBurst = (reactionType: ReactionType) => {
     setBurstReaction(reactionType);
@@ -313,18 +316,24 @@ export function PostCard({
   const SelectedIcon = selectedReaction.icon;
 
   return (
-    <article className="post-card social-post glass-panel">
+    <article className="post-card social-post glass-panel" id={`post-${post.id}`}>
       <header className="post-header social-post-header">
         <div className="post-author">
           <Link className="post-avatar-link" href={`/profile/${post.author.id}`}>
-            <Avatar user={post.author} />
+            <span className="post-avatar-wrap">
+              <Avatar user={post.author} />
+              {authorVerified && (
+                <span aria-label="Perfil verificado" className="profile-verified-mark post-verified-mark" title="Perfil verificado">
+                  <BadgeCheck size={13} />
+                </span>
+              )}
+            </span>
           </Link>
           <div className="post-author-copy">
             <div className="post-author-row">
               <Link href={`/profile/${post.author.id}`} className="profile-link">
                 {post.author.name}
               </Link>
-              <VerifiedBadge verified={post.author.verified_domain && post.author.show_verified_badge !== false} />
             </div>
             <p>{post.author.title || post.author.position || "Jogador Conversys"}</p>
           </div>

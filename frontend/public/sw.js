@@ -1,5 +1,14 @@
-const CACHE_NAME = "fut-conversys-shell-v1";
-const APP_SHELL = ["/", "/manifest.webmanifest"];
+const CACHE_NAME = "fut-conversys-shell-v2";
+const APP_SHELL = [
+  "/",
+  "/manifest.webmanifest",
+  "/icons/fut-conversys-logo.png",
+  "/icons/favicon-32.png",
+  "/icons/apple-touch-icon.png",
+  "/icons/fut-conversys-192.png",
+  "/icons/fut-conversys-512.png",
+  "/icons/fut-conversys-maskable.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

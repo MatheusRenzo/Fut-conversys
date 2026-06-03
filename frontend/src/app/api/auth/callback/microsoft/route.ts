@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BACKEND_API_URL, setSessionCookie } from "@/lib/server-auth";
 
+function appUrl(path: string) {
+  const baseUrl = process.env.PUBLIC_APP_URL;
+  return baseUrl ? new URL(path, baseUrl) : null;
+}
+
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   const error = request.nextUrl.searchParams.get("error");
 
   if (error || !code) {
-    return NextResponse.redirect(new URL(`/?error=${error || "microsoft_callback"}`, request.url));
+    return NextResponse.redirect(appUrl(`/?error=${error || "microsoft_callback"}`) ?? new URL(`/?error=${error || "microsoft_callback"}`, request.url));
   }
 
-  const redirectUri = new URL("/api/auth/callback/microsoft", request.url).toString();
+  const redirectUri = process.env.MICROSOFT_REDIRECT_URI ?? new URL("/api/auth/callback/microsoft", request.url).toString();
   const backendResponse = await fetch(`${BACKEND_API_URL}/api/auth/microsoft/callback`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -17,11 +22,16 @@ export async function GET(request: NextRequest) {
   });
 
   if (!backendResponse.ok) {
-    return NextResponse.redirect(new URL("/?error=microsoft_login", request.url));
+    const errorBody = await backendResponse.text();
+    console.error("Microsoft login failed", errorBody);
+    const redirectUrl = appUrl("/") ?? new URL("/", request.url);
+    redirectUrl.searchParams.set("error", "microsoft_login");
+    redirectUrl.searchParams.set("detail", errorBody.slice(0, 500));
+    return NextResponse.redirect(redirectUrl);
   }
 
   const data = await backendResponse.json();
-  const response = NextResponse.redirect(new URL("/dashboard", request.url));
+  const response = NextResponse.redirect(appUrl("/dashboard") ?? new URL("/dashboard", request.url));
   setSessionCookie(response, data.token);
   return response;
 }

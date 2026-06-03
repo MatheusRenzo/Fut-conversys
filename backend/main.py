@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import json
@@ -14,7 +15,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import Session
 
 from database import Base, SessionLocal, engine, get_db
@@ -186,6 +187,28 @@ def request_json(url: str, data: dict[str, str] | None = None, token: str | None
         raise HTTPException(status_code=400, detail="Não foi possível conectar ao Microsoft Entra") from exc
 
 
+def request_microsoft_photo_data_url(token: str) -> str | None:
+    request = urllib.request.Request("https://graph.microsoft.com/v1.0/me/photo/$value")
+    request.add_header("Authorization", f"Bearer {token}")
+
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            content_type = response.headers.get("Content-Type", "image/jpeg")
+            photo = response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code in {404, 403}:
+            return None
+        raise HTTPException(status_code=400, detail="Não foi possível buscar a foto do Microsoft Graph") from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=400, detail="Não foi possível conectar ao Microsoft Graph") from exc
+
+    if not photo:
+        return None
+
+    encoded_photo = base64.b64encode(photo).decode("ascii")
+    return f"data:{content_type};base64,{encoded_photo}"
+
+
 def ensure_schema() -> None:
     Base.metadata.create_all(bind=engine)
 
@@ -196,6 +219,8 @@ def ensure_schema() -> None:
             "title": "VARCHAR",
             "avatar_url": "VARCHAR",
             "banner_url": "VARCHAR",
+            "banner_position_x": "INTEGER DEFAULT 50",
+            "banner_position_y": "INTEGER DEFAULT 50",
             "profile_frame": "VARCHAR DEFAULT 'conversys'",
             "cosmetic_tier": "VARCHAR DEFAULT 'starter'",
             "animated_banner": "BOOLEAN DEFAULT FALSE",
@@ -203,7 +228,9 @@ def ensure_schema() -> None:
             "avatar_config": "TEXT",
             "player_rating": "INTEGER DEFAULT 78",
             "verified_domain": "BOOLEAN DEFAULT FALSE",
+            "verified_enabled": "BOOLEAN DEFAULT FALSE",
             "show_verified_badge": "BOOLEAN DEFAULT TRUE",
+            "is_admin": "BOOLEAN DEFAULT FALSE",
             "provider": "VARCHAR DEFAULT 'local'",
             "provider_subject": "VARCHAR",
             "tenant_id": "VARCHAR",
@@ -276,7 +303,7 @@ app = FastAPI(title="Conversys Fut App API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+):\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -323,6 +350,10 @@ class GoalReviewRequest(BaseModel):
     status: str
 
 
+class VerifiedFeatureRequest(BaseModel):
+    verified_enabled: bool
+
+
 class RSVPRequest(BaseModel):
     status: str
 
@@ -346,6 +377,8 @@ class ProfileUpdateRequest(BaseModel):
     favorite_player: str | None = None
     avatar_url: str | None = None
     banner_url: str | None = None
+    banner_position_x: int | None = None
+    banner_position_y: int | None = None
     profile_frame: str | None = None
     cosmetic_tier: str | None = None
     animated_banner: bool | None = None
@@ -430,10 +463,29 @@ GOAL_STATUSES = ("none", "pending", "approved", "rejected")
 
 
 def is_admin_user(user: models.User | None) -> bool:
-    return bool(user and user.username == ADMIN_USERNAME)
+    return bool(user and user.is_admin)
+
+
+def has_verified_features(user: models.User | None) -> bool:
+    return bool(user and user.verified_enabled)
+
+
+def clear_verified_features(user: models.User) -> None:
+    user.profile_frame = "none"
+    user.profile_effect = "off"
+    user.animated_banner = False
+    user.show_verified_badge = False
+
+
+def clamp_banner_position(value: int | None) -> int:
+    if value is None:
+        return 50
+    return max(0, min(100, int(value)))
 
 
 def profile_effect_value(user: models.User) -> str:
+    if not has_verified_features(user):
+        return "off"
     effect = user.profile_effect or "off"
     if effect in SUPPORTED_EFFECTS and effect != "off":
         return effect
@@ -577,14 +629,20 @@ def user_summary(user: models.User) -> dict[str, Any]:
         "favorite_player": user.favorite_player,
         "avatar_url": user.avatar_url,
         "banner_url": user.banner_url,
-        "profile_frame": user.profile_frame or "conversys",
+        "banner_position_x": clamp_banner_position(user.banner_position_x),
+        "banner_position_y": clamp_banner_position(user.banner_position_y),
+        "profile_frame": user.profile_frame if has_verified_features(user) else "none",
         "cosmetic_tier": "starter",
-        "animated_banner": bool(user.animated_banner),
+        "animated_banner": bool(user.animated_banner and has_verified_features(user)),
         "profile_effect": profile_effect_value(user),
-        "show_verified_badge": bool(user.show_verified_badge if user.show_verified_badge is not None else True),
+        "show_verified_badge": bool(
+            has_verified_features(user) and (user.show_verified_badge if user.show_verified_badge is not None else True)
+        ),
         "avatar_config": avatar_config(user),
         "player_rating": player_traits(user)["overall"],
         "verified_domain": bool(user.verified_domain),
+        "verified_enabled": has_verified_features(user),
+        "is_admin": is_admin_user(user),
     }
 
 
@@ -725,7 +783,8 @@ def seed_user(
     user.avatar_config = user.avatar_config or json.dumps(default_avatar_config(user))
     user.player_rating = user.player_rating or 78
     user.verified_domain = is_conversys_email(email)
-    user.show_verified_badge = bool(user.show_verified_badge if user.show_verified_badge is not None else True)
+    user.verified_enabled = bool(user.verified_enabled)
+    user.show_verified_badge = bool(user.show_verified_badge if user.show_verified_badge is not None else False)
     user.provider = user.provider or "local"
     user.goals = goals
     user.assists = assists
@@ -737,192 +796,57 @@ def seed_user(
 def seed_demo_data() -> None:
     db = SessionLocal()
     try:
-        admin = db.query(models.User).filter(models.User.username == ADMIN_USERNAME).first()
+        admin = db.query(models.User).filter(models.User.is_admin.is_(True)).first()
+        if not admin:
+            admin = db.query(models.User).filter(models.User.email == ADMIN_EMAIL).first()
+        if not admin:
+            admin = db.query(models.User).filter(models.User.username == ADMIN_USERNAME).first()
+
+        created_bootstrap_admin = False
         if not admin:
             admin = models.User(username=ADMIN_USERNAME)
             db.add(admin)
+            created_bootstrap_admin = True
 
-        admin.email = ADMIN_EMAIL
-        admin.password_hash = hash_password(ADMIN_PASSWORD)
-        admin.name = "Administrador Teste"
-        admin.display_name = "Admin Conversys"
-        admin.title = "Dono da resenha"
-        admin.bio = "Organizador oficial da pelada, do churras e da escalação."
-        admin.position = "Admin"
-        admin.favorite_team = "Conversys FC"
-        admin.favorite_player = "Ronaldinho"
-        admin.avatar_url = "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=400&q=80"
-        admin.banner_url = "https://images.unsplash.com/photo-1522778119026-d647f0596c20?auto=format&fit=crop&w=1200&q=80"
-        admin.profile_frame = "nitro_plus"
-        admin.cosmetic_tier = "starter"
-        admin.animated_banner = True
-        if not admin.profile_effect or admin.profile_effect == "off":
+        if created_bootstrap_admin:
+            admin.email = ADMIN_EMAIL
+            admin.password_hash = hash_password(ADMIN_PASSWORD)
+            admin.name = "Matheus Renzo"
+            admin.display_name = "Matheus Renzo"
+            admin.title = "Admin"
+            admin.bio = "Administrador do Fut Conversys."
+            admin.position = "Admin"
+            admin.favorite_team = "Conversys FC"
+            admin.favorite_player = None
+            admin.profile_frame = "nitro_plus"
+            admin.cosmetic_tier = "starter"
+            admin.animated_banner = False
             admin.profile_effect = "nitro"
-        admin.avatar_config = json.dumps(
-            {
-                "body": "athletic",
-                "presentation": "player",
-                "skin": "medium",
-                "hair": "short",
-                "kit": "home",
-                "shorts": "navy",
-                "boots": "cyan",
-                "gender": "neutral",
-                "pose": "captain",
-            }
-        )
-        admin.player_rating = 87
-        admin.verified_domain = is_conversys_email(admin.email)
-        admin.show_verified_badge = bool(admin.show_verified_badge if admin.show_verified_badge is not None else True)
-        admin.provider = "local"
-        admin.goals = 3
-        admin.assists = 7
-        admin.fouls = 1
-        admin.barbecue_score = 10
-
-        players = [
-            seed_user(
-                db,
-                "bia",
-                "redacted@example.com",
-                "Bia Almeida",
-                "Camisa 10 da firma",
-                "Meia",
-                "Marta",
-                "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80",
-                "https://images.unsplash.com/photo-1517927033932-b3d18e61fb3a?auto=format&fit=crop&w=1200&q=80",
-                12,
-                9,
-                2,
-                8,
-            ),
-            seed_user(
-                db,
-                "renato",
-                "redacted@example.com",
-                "Renato Lima",
-                "Zagueiro raiz",
-                "Zagueiro",
-                "Thiago Silva",
-                "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80",
-                "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=1200&q=80",
-                2,
-                3,
-                9,
-                7,
-            ),
-            seed_user(
-                db,
-                "carol",
-                "redacted@example.com",
-                "Carol Souza",
-                "Rainha do churras",
-                "Atacante",
-                "Cristiano Ronaldo",
-                "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=400&q=80",
-                "https://images.unsplash.com/photo-1556056504-5c7696c4c28d?auto=format&fit=crop&w=1200&q=80",
-                15,
-                5,
-                4,
-                10,
-            ),
-        ]
-
-        db.commit()
-
-        demo_matches = [
-            {
-                "title": "Pelada da Firma + Churras",
-                "event_type": "pelada",
-                "location": "Arena Conversys",
-                "date": datetime.utcnow() + timedelta(days=3, hours=6),
-                "description": "Quadra alugada, times mistos, churrasco depois e álbum oficial da resenha.",
-                "max_players": 20,
-                "cover_url": "https://images.unsplash.com/photo-1526232761682-d26e03ac148e?auto=format&fit=crop&w=1200&q=80",
-            },
-            {
-                "title": "Torneio Relâmpago Conversys",
-                "event_type": "torneio",
-                "location": "Society Vila Olímpia",
-                "date": datetime.utcnow() + timedelta(days=10, hours=7),
-                "description": "Formato 5x5, mini tabela, troféu simbólico e voto de craque do jogo.",
-                "max_players": 24,
-                "cover_url": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=1200&q=80",
-            },
-        ]
-
-        for match_data in demo_matches:
-            match = db.query(models.Match).filter(models.Match.title == match_data["title"]).first()
-            if not match:
-                match = models.Match(**match_data)
-                db.add(match)
-            else:
-                for field, value in match_data.items():
-                    setattr(match, field, value)
-
-        db.commit()
-
-        first_match = db.query(models.Match).order_by(models.Match.date.asc()).first()
-        for user in [admin, *players]:
-            existing_rsvp = (
-                db.query(models.MatchRSVP)
-                .filter_by(user_id=user.id, match_id=first_match.id)
-                .first()
+            admin.avatar_config = json.dumps(
+                {
+                    "body": "athletic",
+                    "presentation": "player",
+                    "skin": "medium",
+                    "hair": "short",
+                    "kit": "home",
+                    "shorts": "navy",
+                    "boots": "cyan",
+                    "gender": "neutral",
+                    "pose": "captain",
+                }
             )
-            if not existing_rsvp:
-                db.add(models.MatchRSVP(user_id=user.id, match_id=first_match.id, status="going"))
+            admin.player_rating = 87
+            admin.provider = "local"
+            admin.goals = 0
+            admin.assists = 0
+            admin.fouls = 0
+            admin.barbecue_score = 0
 
+        admin.is_admin = True
+        admin.verified_domain = is_conversys_email(admin.email)
+        admin.verified_enabled = True
+        admin.show_verified_badge = bool(admin.show_verified_badge if admin.show_verified_badge is not None else True)
         db.commit()
-
-        if db.query(models.Post).count() == 0:
-            posts = [
-                models.Post(
-                    user_id=players[0].id,
-                    match_id=first_match.id,
-                    title="Convocação aberta",
-                    description="Quem vem para a próxima? Quero ver time completo e resenha forte no pós-jogo.",
-                    image_url="https://images.unsplash.com/photo-1517466787929-bc90951d0974?auto=format&fit=crop&w=1200&q=80",
-                    goals_scored=2,
-                    goal_status="approved",
-                    goal_reviewed_by_id=admin.id,
-                    goal_reviewed_at=datetime.utcnow(),
-                ),
-                models.Post(
-                    user_id=admin.id,
-                    match_id=first_match.id,
-                    title="Churras confirmado",
-                    description="Carvão, gelo e quadra já estão no esquema. Só falta confirmar presença no app.",
-                    image_url="https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=1200&q=80",
-                    goals_scored=1,
-                    goal_status="approved",
-                    goal_reviewed_by_id=admin.id,
-                    goal_reviewed_at=datetime.utcnow(),
-                ),
-                models.Post(
-                    user_id=players[2].id,
-                    title="Craque da semana",
-                    description="Meta da próxima pelada: assistência, gol e foto no feed.",
-                    image_url="https://images.unsplash.com/photo-1551958219-acbc608c6377?auto=format&fit=crop&w=1200&q=80",
-                    goals_scored=3,
-                    goal_status="approved",
-                    goal_reviewed_by_id=admin.id,
-                    goal_reviewed_at=datetime.utcnow(),
-                ),
-            ]
-            db.add_all(posts)
-            db.commit()
-
-            for post in posts:
-                db.add(models.Like(post_id=post.id, user_id=admin.id))
-                db.add(models.Like(post_id=post.id, user_id=players[1].id))
-                db.add(
-                    models.Comment(
-                        post_id=post.id,
-                        user_id=players[0].id,
-                        text="Confirmado! Já vou separando a chuteira.",
-                    )
-                )
-            db.commit()
     finally:
         db.close()
 
@@ -1067,6 +991,7 @@ def microsoft_callback(request: MicrosoftCallbackRequest, db: Session = Depends(
         "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName",
         token=access_token,
     )
+    microsoft_avatar_url = request_microsoft_photo_data_url(access_token)
 
     provider_subject = graph_user.get("id")
     email = graph_user.get("mail") or graph_user.get("userPrincipalName")
@@ -1099,10 +1024,14 @@ def microsoft_callback(request: MicrosoftCallbackRequest, db: Session = Depends(
     user.bio = user.bio or "Perfil conectado com Microsoft Entra."
     user.position = user.position or "Jogador"
     user.favorite_team = user.favorite_team or "Conversys FC"
+    user.avatar_url = microsoft_avatar_url or user.avatar_url
     user.provider = "microsoft_entra"
     user.provider_subject = provider_subject
     user.tenant_id = config["tenant_id"]
     user.verified_domain = is_conversys_email(email)
+    user.verified_enabled = bool(user.verified_enabled)
+    if not has_verified_features(user):
+        clear_verified_features(user)
     db.commit()
     db.refresh(user)
 
@@ -1120,13 +1049,71 @@ def get_my_profile(user: models.User = Depends(get_current_user)):
     }
 
 
+@app.get("/api/search")
+def global_search(
+    q: str = "",
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    query = q.strip()
+    if len(query) < 2:
+        return {"profiles": [], "events": [], "posts": []}
+
+    pattern = f"%{query}%"
+    profiles = (
+        db.query(models.User)
+        .filter(
+            or_(
+                models.User.name.ilike(pattern),
+                models.User.display_name.ilike(pattern),
+                models.User.username.ilike(pattern),
+                models.User.title.ilike(pattern),
+                models.User.position.ilike(pattern),
+            )
+        )
+        .order_by(models.User.name.asc())
+        .limit(5)
+        .all()
+    )
+    matches = (
+        db.query(models.Match)
+        .filter(
+            or_(
+                models.Match.title.ilike(pattern),
+                models.Match.location.ilike(pattern),
+                models.Match.description.ilike(pattern),
+                models.Match.event_type.ilike(pattern),
+            )
+        )
+        .order_by(models.Match.date.asc())
+        .limit(5)
+        .all()
+    )
+    posts = (
+        db.query(models.Post)
+        .filter(or_(models.Post.title.ilike(pattern), models.Post.description.ilike(pattern)))
+        .order_by(models.Post.created_at.desc())
+        .limit(5)
+        .all()
+    )
+
+    return {
+        "profiles": [user_summary(item) for item in profiles],
+        "events": [match_response(item, user) for item in matches],
+        "posts": [post_response(item, user) for item in posts],
+    }
+
+
 @app.put("/api/users/me/profile")
 def update_my_profile(
     request: ProfileUpdateRequest,
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    unverified_allowed_fields = {"avatar_url", "banner_url", "banner_position_x", "banner_position_y"}
     for field, value in request.model_dump(exclude_unset=True).items():
+        if not has_verified_features(user) and field not in unverified_allowed_fields:
+            raise HTTPException(status_code=403, detail="Edição completa precisa ser liberada pelo admin")
         if field == "profile_frame" and value not in SUPPORTED_FRAMES:
             raise HTTPException(status_code=400, detail="Moldura inválida")
         if field == "cosmetic_tier":
@@ -1141,16 +1128,59 @@ def update_my_profile(
             continue
         if field == "player_rating" and value is not None:
             value = max(40, min(99, int(value)))
+        if field in {"banner_position_x", "banner_position_y"}:
+            value = clamp_banner_position(value)
         if field == "avatar_config" and value is not None:
             value = json.dumps({**default_avatar_config(user), **value})
         setattr(user, field, value)
 
+    if not has_verified_features(user):
+        clear_verified_features(user)
     db.commit()
     db.refresh(user)
     return {
         **user_summary(user),
         "stats": player_stats(user),
     }
+
+
+@app.get("/api/admin/users")
+def admin_users(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Apenas o admin pode gerenciar verificados")
+
+    users = db.query(models.User).order_by(models.User.name.asc()).all()
+    return {"users": [user_summary(item) for item in users]}
+
+
+@app.put("/api/admin/users/{user_id}/verified")
+def set_user_verified(
+    user_id: int,
+    request: VerifiedFeatureRequest,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Apenas o admin pode gerenciar verificados")
+
+    target = db.query(models.User).filter(models.User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Jogador não encontrado")
+
+    target.verified_enabled = request.verified_enabled
+    if request.verified_enabled:
+        target.show_verified_badge = True
+        if not target.profile_frame or target.profile_frame == "none":
+            target.profile_frame = "conversys"
+    else:
+        clear_verified_features(target)
+
+    db.commit()
+    db.refresh(target)
+    return user_summary(target)
 
 
 @app.get("/api/users/{user_id}")

@@ -22,11 +22,21 @@ function normalizePosition(position?: string | null) {
   };
 }
 
-export function LineupPreview({ compact = false, profile }: { compact?: boolean; profile: UserProfile }) {
+export function LineupPreview({
+  compact = false,
+  onSelectPosition,
+  profile,
+  selectable = false,
+}: {
+  compact?: boolean;
+  onSelectPosition?: (position: string) => void;
+  profile: UserProfile;
+  selectable?: boolean;
+}) {
   const position = normalizePosition(profile.position);
 
   return (
-    <div className={compact ? "lineup-preview compact" : "lineup-preview"}>
+    <div className={`${compact ? "lineup-preview compact" : "lineup-preview"}${selectable ? " selectable" : ""}`}>
       <div className="lineup-head">
         <span className="eyebrow">Escalação</span>
         <strong>{position.label}</strong>
@@ -36,6 +46,22 @@ export function LineupPreview({ compact = false, profile }: { compact?: boolean;
         <span className="lineup-box right" />
         <span className="lineup-midline" />
         <span className="lineup-circle" />
+        {selectable &&
+          Object.values(positionMap).map((option) => (
+            <button
+              aria-label={`Selecionar ${option.label}`}
+              className={position.label === option.label ? "lineup-position-option active" : "lineup-position-option"}
+              key={option.label}
+              onClick={() => onSelectPosition?.(option.label)}
+              style={{
+                left: `${option.x}%`,
+                top: `${option.y}%`,
+              }}
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
         <div
           className="lineup-player"
           style={{

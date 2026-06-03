@@ -24,13 +24,14 @@ export function ProfileHeader({ profile }: { profile: UserProfile }) {
         className={`profile-banner banner-frame-${frame} banner-effect-${effect}${hasMotion ? " animated" : ""}`}
         style={{
           backgroundImage: profile.banner_url ? `url(${profile.banner_url})` : undefined,
+          backgroundPosition: `${profile.banner_position_x ?? 50}% ${profile.banner_position_y ?? 50}%`,
         }}
       />
       <div className="profile-main">
         <div className="profile-info">
           <div className="profile-avatar-wrap">
             <Avatar user={profile} size="lg" />
-            {profile.verified_domain && profile.show_verified_badge !== false && (
+            {profile.verified_enabled && profile.show_verified_badge !== false && (
               <span aria-label="Perfil verificado" className="profile-verified-mark" title="Perfil verificado">
                 <BadgeCheck size={17} />
               </span>

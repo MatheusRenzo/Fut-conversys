@@ -2,15 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Flame, MessageCircle, UsersRound } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { EventCard } from "@/components/EventCard";
 import { PostCard } from "@/components/PostCard";
 import { PostComposer } from "@/components/PostComposer";
 import { api } from "@/lib/api";
 import type { Event, Leaderboard, Post, UserProfile } from "@/types";
-
-const adminUsername = process.env.NEXT_PUBLIC_ADMIN_USERNAME ?? "admin";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -63,36 +60,17 @@ export default function Dashboard() {
   }
 
   const nextEvent = events[0] ?? null;
-  const isAdmin = profile?.username === adminUsername;
+  const isAdmin = Boolean(profile?.is_admin);
   const pendingGoalClaims = isAdmin
     ? posts.filter((post) => (post.goals_scored ?? 0) > 0 && post.goal_status === "pending")
     : [];
 
   return (
     <AppShell user={profile} nextEvent={nextEvent} leaderboard={leaderboard}>
-      <section className="section-heading dashboard-hero">
-        <div>
-          <span className="eyebrow">Feed da firma</span>
-          <h1>Resenha, gols e churras</h1>
-          <p>Publique fotos, combine o próximo jogo e acompanhe quem confirmou presença.</p>
-        </div>
-        <div className="hero-metrics">
-          <div>
-            <UsersRound size={18} />
-            <strong>{nextEvent?.confirmed_players ?? 0}</strong>
-            <span>confirmados</span>
-          </div>
-          <div>
-            <MessageCircle size={18} />
-            <strong>{posts.reduce((total, post) => total + post.comments_count, 0)}</strong>
-            <span>comentários</span>
-          </div>
-          <div>
-            <Flame size={18} />
-            <strong>{posts.reduce((total, post) => total + post.likes_count, 0)}</strong>
-            <span>reações</span>
-          </div>
-        </div>
+      <section className="feed-intro">
+        <span className="eyebrow">Início</span>
+        <h1>Publicações</h1>
+        <p>Compartilhe uma atualização, foto ou lance com o grupo.</p>
       </section>
 
       <PostComposer
