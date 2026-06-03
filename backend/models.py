@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, ForeignKey, DateTime, Text
+from sqlalchemy import Boolean, Column, Integer, String, ForeignKey, DateTime, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -44,6 +44,7 @@ class User(Base):
     posts = relationship("Post", back_populates="user")
     comments = relationship("Comment", back_populates="user")
     likes = relationship("Like", back_populates="user")
+    world_cup_predictions = relationship("WorldCupPrediction", back_populates="user")
 
 class Match(Base):
     __tablename__ = "matches"
@@ -120,3 +121,42 @@ class Like(Base):
 
     post = relationship("Post", back_populates="likes")
     user = relationship("User", back_populates="likes")
+
+
+class WorldCupGame(Base):
+    __tablename__ = "world_cup_games"
+
+    id = Column(Integer, primary_key=True, index=True)
+    external_id = Column(String, unique=True, nullable=True)
+    match_number = Column(Integer, nullable=True)
+    home_team = Column(String)
+    away_team = Column(String)
+    group_label = Column(String, nullable=True)
+    stage = Column(String, default="group-stage")
+    venue = Column(String, nullable=True)
+    kickoff_at = Column(DateTime)
+    status = Column(String, default="scheduled")
+    home_score = Column(Integer, nullable=True)
+    away_score = Column(Integer, nullable=True)
+    source = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    predictions = relationship("WorldCupPrediction", back_populates="game")
+
+
+class WorldCupPrediction(Base):
+    __tablename__ = "world_cup_predictions"
+    __table_args__ = (UniqueConstraint("user_id", "game_id", name="uq_world_cup_prediction_user_game"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    game_id = Column(Integer, ForeignKey("world_cup_games.id"))
+    home_score = Column(Integer, default=0)
+    away_score = Column(Integer, default=0)
+    points = Column(Integer, default=0)
+    status = Column(String, default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="world_cup_predictions")
+    game = relationship("WorldCupGame", back_populates="predictions")

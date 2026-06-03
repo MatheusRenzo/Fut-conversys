@@ -24,6 +24,7 @@ import { formatEventDate, formatShortDate } from "@/lib/format";
 const navItems = [
   { href: "/dashboard", label: "Feed", icon: Home },
   { href: "/events", label: "Eventos", icon: CalendarDays },
+  { href: "/bolao", label: "Bolão", icon: Trophy },
   { href: "/me", label: "Meu perfil", icon: UserRound },
 ];
 

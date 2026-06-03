@@ -8,7 +8,7 @@ import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
@@ -30,6 +30,28 @@ TOKEN_TTL_SECONDS = 60 * 60 * 8
 AUTH_SECRET = os.getenv("AUTH_SECRET") or os.getenv("SECRET_KEY") or "fut-conversys-dev-secret"
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 USERNAME_PATTERN = re.compile(r"[^a-z0-9._-]+")
+OPENFOOTBALL_2026_CUP_URL = os.getenv(
+    "WORLD_CUP_OPENFOOTBALL_URL",
+    "https://raw.githubusercontent.com/openfootball/worldcup/master/2026--usa/cup.txt",
+)
+OPENFOOTBALL_2026_FINALS_URL = os.getenv(
+    "WORLD_CUP_OPENFOOTBALL_FINALS_URL",
+    "https://raw.githubusercontent.com/openfootball/worldcup/master/2026--usa/cup_finals.txt",
+)
+MONTHS_EN = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
 
 
 def hash_password(password: str) -> str:
@@ -265,6 +287,31 @@ def ensure_schema() -> None:
             "media_url": "VARCHAR",
             "media_type": "VARCHAR",
         },
+        "world_cup_games": {
+            "external_id": "VARCHAR",
+            "match_number": "INTEGER",
+            "home_team": "VARCHAR",
+            "away_team": "VARCHAR",
+            "group_label": "VARCHAR",
+            "stage": "VARCHAR DEFAULT 'group-stage'",
+            "venue": "VARCHAR",
+            "kickoff_at": "TIMESTAMP",
+            "status": "VARCHAR DEFAULT 'scheduled'",
+            "home_score": "INTEGER",
+            "away_score": "INTEGER",
+            "source": "VARCHAR",
+            "created_at": "TIMESTAMP",
+        },
+        "world_cup_predictions": {
+            "user_id": "INTEGER",
+            "game_id": "INTEGER",
+            "home_score": "INTEGER DEFAULT 0",
+            "away_score": "INTEGER DEFAULT 0",
+            "points": "INTEGER DEFAULT 0",
+            "status": "VARCHAR DEFAULT 'pending'",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+        },
     }
 
     inspector = inspect(engine)
@@ -368,6 +415,29 @@ class EventCreateRequest(BaseModel):
     cover_url: str | None = None
 
 
+class WorldCupGameCreateRequest(BaseModel):
+    home_team: str
+    away_team: str
+    kickoff_at: datetime
+    group_label: str | None = None
+    stage: str = "group-stage"
+    venue: str | None = None
+    match_number: int | None = None
+    external_id: str | None = None
+    source: str | None = None
+
+
+class WorldCupGameResultRequest(BaseModel):
+    home_score: int
+    away_score: int
+    status: str = "finished"
+
+
+class WorldCupPredictionRequest(BaseModel):
+    home_score: int
+    away_score: int
+
+
 class ProfileUpdateRequest(BaseModel):
     display_name: str | None = None
     title: str | None = None
@@ -460,6 +530,8 @@ SUPPORTED_FRAMES = (
 SUPPORTED_TIERS = ("starter",)
 SUPPORTED_EFFECTS = ("off", "pulse", "stadium", "orbit", "nitro")
 GOAL_STATUSES = ("none", "pending", "approved", "rejected")
+WORLD_CUP_GAME_STATUSES = ("scheduled", "live", "finished", "postponed")
+WORLD_CUP_PREDICTION_STATUSES = ("pending", "scored")
 
 
 def is_admin_user(user: models.User | None) -> bool:
@@ -685,6 +757,220 @@ def match_response(match: models.Match, user: models.User | None = None) -> dict
         "user_rsvp_status": user_rsvp.status if user_rsvp else None,
         "attendees": [user_summary(rsvp.user) for rsvp in going],
     }
+
+
+def to_utc_naive(value: datetime) -> datetime:
+    if value.tzinfo and value.utcoffset():
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.replace(tzinfo=None)
+
+
+def clamp_prediction_score(value: int) -> int:
+    return max(0, min(30, int(value)))
+
+
+def game_outcome(home_score: int, away_score: int) -> str:
+    if home_score > away_score:
+        return "home"
+    if away_score > home_score:
+        return "away"
+    return "draw"
+
+
+def world_cup_prediction_points(
+    prediction_home: int,
+    prediction_away: int,
+    game_home: int | None,
+    game_away: int | None,
+) -> int:
+    if game_home is None or game_away is None:
+        return 0
+    if prediction_home == game_home and prediction_away == game_away:
+        return 3
+    if game_outcome(prediction_home, prediction_away) == game_outcome(game_home, game_away):
+        return 1
+    return 0
+
+
+def score_world_cup_game(game: models.WorldCupGame) -> None:
+    for prediction in game.predictions:
+        prediction.points = world_cup_prediction_points(
+            prediction.home_score or 0,
+            prediction.away_score or 0,
+            game.home_score,
+            game.away_score,
+        )
+        prediction.status = "scored" if game.status == "finished" else "pending"
+        prediction.updated_at = datetime.utcnow()
+
+
+def world_cup_prediction_response(prediction: models.WorldCupPrediction) -> dict[str, Any]:
+    return {
+        "id": prediction.id,
+        "game_id": prediction.game_id,
+        "home_score": prediction.home_score or 0,
+        "away_score": prediction.away_score or 0,
+        "points": prediction.points or 0,
+        "status": prediction.status or "pending",
+        "created_at": prediction.created_at.isoformat() if prediction.created_at else None,
+        "updated_at": prediction.updated_at.isoformat() if prediction.updated_at else None,
+        "user": user_summary(prediction.user),
+    }
+
+
+def world_cup_game_response(game: models.WorldCupGame, user: models.User | None = None) -> dict[str, Any]:
+    viewer_prediction = None
+    if user:
+        viewer_prediction = next((prediction for prediction in game.predictions if prediction.user_id == user.id), None)
+
+    return {
+        "id": game.id,
+        "external_id": game.external_id,
+        "match_number": game.match_number,
+        "home_team": game.home_team,
+        "away_team": game.away_team,
+        "group_label": game.group_label,
+        "stage": game.stage or "group-stage",
+        "venue": game.venue,
+        "kickoff_at": game.kickoff_at.isoformat(),
+        "status": game.status or "scheduled",
+        "home_score": game.home_score,
+        "away_score": game.away_score,
+        "source": game.source,
+        "predictions_count": len(game.predictions),
+        "viewer_prediction": world_cup_prediction_response(viewer_prediction) if viewer_prediction else None,
+    }
+
+
+def world_cup_leaderboard_response(db: Session) -> list[dict[str, Any]]:
+    rows: dict[int, dict[str, Any]] = {}
+    predictions = db.query(models.WorldCupPrediction).all()
+    for prediction in predictions:
+        if prediction.user_id not in rows:
+            rows[prediction.user_id] = {
+                "user": user_summary(prediction.user),
+                "points": 0,
+                "predictions": 0,
+                "scored_predictions": 0,
+                "exact_scores": 0,
+            }
+
+        row = rows[prediction.user_id]
+        row["points"] += prediction.points or 0
+        row["predictions"] += 1
+        if prediction.status == "scored":
+            row["scored_predictions"] += 1
+            if (
+                prediction.game
+                and prediction.game.home_score is not None
+                and prediction.game.away_score is not None
+                and prediction.home_score == prediction.game.home_score
+                and prediction.away_score == prediction.game.away_score
+            ):
+                row["exact_scores"] += 1
+
+    leaderboard = sorted(
+        rows.values(),
+        key=lambda item: (item["points"], item["exact_scores"], item["scored_predictions"], item["predictions"]),
+        reverse=True,
+    )
+    for index, row in enumerate(leaderboard, start=1):
+        row["rank"] = index
+    return leaderboard[:30]
+
+
+def world_cup_stage_from_section(section: str) -> tuple[str, str | None]:
+    normalized = section.strip().lower()
+    if normalized.startswith("group "):
+        return "group-stage", section.replace("Group", "").strip()
+    if "round of 32" in normalized:
+        return "round-of-32", None
+    if "round of 16" in normalized:
+        return "round-of-16", None
+    if "quarter" in normalized:
+        return "quarter-finals", None
+    if "semi" in normalized:
+        return "semi-finals", None
+    if "third" in normalized:
+        return "third-place", None
+    if "final" in normalized:
+        return "final", None
+    return "group-stage", None
+
+
+def parse_openfootball_world_cup(text_data: str) -> list[dict[str, Any]]:
+    games: list[dict[str, Any]] = []
+    stage = "group-stage"
+    group_label = None
+    current_date: tuple[int, int] | None = None
+
+    for raw_line in text_data.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith("="):
+            continue
+
+        if line.startswith("▪"):
+            section = line.replace("▪", "", 1).strip()
+            stage, group_label = world_cup_stage_from_section(section)
+            continue
+
+        date_match = re.match(r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+([A-Za-z]+)\s+(\d{1,2})$", line)
+        if date_match:
+            month = MONTHS_EN.get(date_match.group(2)[:3].lower())
+            if month:
+                current_date = (month, int(date_match.group(3)))
+            continue
+
+        game_match = re.match(
+            r"^(?:\((\d+)\)\s*)?(\d{1,2}:\d{2})\s+UTC([+-]\d{1,2})\s+(.+?)\s+v\s+(.+?)\s+@\s+(.+)$",
+            line,
+        )
+        if not game_match or not current_date:
+            continue
+
+        offset_hours = int(game_match.group(3))
+        hour, minute = [int(part) for part in game_match.group(2).split(":", 1)]
+        month, day = current_date
+        kickoff_local = datetime(
+            2026,
+            month,
+            day,
+            hour,
+            minute,
+            tzinfo=timezone(timedelta(hours=offset_hours)),
+        )
+        kickoff_at = kickoff_local.astimezone(timezone.utc).replace(tzinfo=None)
+        match_number = int(game_match.group(1)) if game_match.group(1) else len(games) + 1
+        games.append(
+            {
+                "external_id": f"openfootball-2026-{match_number}",
+                "match_number": match_number,
+                "home_team": re.sub(r"\s+", " ", game_match.group(4)).strip(),
+                "away_team": re.sub(r"\s+", " ", game_match.group(5)).strip(),
+                "group_label": group_label,
+                "stage": stage,
+                "venue": re.sub(r"\s+", " ", game_match.group(6)).strip(),
+                "kickoff_at": kickoff_at,
+                "source": "openfootball",
+            }
+        )
+
+    return games
+
+
+def fetch_openfootball_world_cup_games() -> list[dict[str, Any]]:
+    try:
+        with urllib.request.urlopen(OPENFOOTBALL_2026_CUP_URL, timeout=15) as response:
+            group_stage_text = response.read().decode("utf-8")
+        with urllib.request.urlopen(OPENFOOTBALL_2026_FINALS_URL, timeout=15) as response:
+            knockout_text = response.read().decode("utf-8")
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=400, detail="Não foi possível buscar a tabela openfootball") from exc
+
+    games = parse_openfootball_world_cup(group_stage_text) + parse_openfootball_world_cup(knockout_text)
+    if not games:
+        raise HTTPException(status_code=400, detail="A fonte openfootball não retornou jogos válidos")
+    return sorted(games, key=lambda item: item["match_number"])
 
 
 def post_response(post: models.Post, user: models.User | None = None) -> dict[str, Any]:
@@ -1212,6 +1498,182 @@ def leaderboard(db: Session = Depends(get_db)):
             for user in sorted(users, key=lambda item: item.barbecue_score or 0, reverse=True)[:5]
         ],
     }
+
+
+@app.get("/api/world-cup/board")
+def world_cup_board(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    games = db.query(models.WorldCupGame).order_by(models.WorldCupGame.kickoff_at.asc()).all()
+    return {
+        "games": [world_cup_game_response(game, user) for game in games],
+        "leaderboard": world_cup_leaderboard_response(db),
+        "rules": {
+            "exact_score": 3,
+            "correct_outcome": 1,
+            "locked_after_kickoff": True,
+        },
+    }
+
+
+@app.get("/api/world-cup/games")
+def list_world_cup_games(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    games = db.query(models.WorldCupGame).order_by(models.WorldCupGame.kickoff_at.asc()).all()
+    return {"games": [world_cup_game_response(game, user) for game in games]}
+
+
+@app.post("/api/world-cup/games")
+def create_world_cup_game(
+    request: WorldCupGameCreateRequest,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Apenas o admin pode cadastrar jogos do bolão")
+
+    home_team = request.home_team.strip()
+    away_team = request.away_team.strip()
+    if not home_team or not away_team:
+        raise HTTPException(status_code=400, detail="Informe as duas seleções")
+    if home_team.lower() == away_team.lower():
+        raise HTTPException(status_code=400, detail="As seleções precisam ser diferentes")
+
+    stage = (request.stage or "group-stage").strip().lower()
+    if not stage:
+        stage = "group-stage"
+
+    external_id = request.external_id.strip() if request.external_id else None
+    if external_id and db.query(models.WorldCupGame).filter(models.WorldCupGame.external_id == external_id).first():
+        raise HTTPException(status_code=409, detail="Esse jogo externo já foi cadastrado")
+
+    game = models.WorldCupGame(
+        external_id=external_id,
+        match_number=request.match_number,
+        home_team=home_team,
+        away_team=away_team,
+        group_label=request.group_label.strip() if request.group_label else None,
+        stage=stage,
+        venue=request.venue.strip() if request.venue else None,
+        kickoff_at=to_utc_naive(request.kickoff_at),
+        status="scheduled",
+        source=request.source.strip() if request.source else "manual",
+        created_at=datetime.utcnow(),
+    )
+    db.add(game)
+    db.commit()
+    db.refresh(game)
+    return world_cup_game_response(game, user)
+
+
+@app.post("/api/world-cup/sync/openfootball")
+def sync_world_cup_openfootball(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Apenas o admin pode importar jogos da Copa")
+
+    imported = 0
+    updated = 0
+    for item in fetch_openfootball_world_cup_games():
+        game = db.query(models.WorldCupGame).filter(models.WorldCupGame.external_id == item["external_id"]).first()
+        if not game:
+            game = models.WorldCupGame(**item, status="scheduled", created_at=datetime.utcnow())
+            db.add(game)
+            imported += 1
+            continue
+
+        game.match_number = item["match_number"]
+        game.home_team = item["home_team"]
+        game.away_team = item["away_team"]
+        game.group_label = item["group_label"]
+        game.stage = item["stage"]
+        game.venue = item["venue"]
+        game.kickoff_at = item["kickoff_at"]
+        game.source = item["source"]
+        updated += 1
+
+    db.commit()
+    games = db.query(models.WorldCupGame).order_by(models.WorldCupGame.kickoff_at.asc()).all()
+    return {
+        "imported": imported,
+        "updated": updated,
+        "games": [world_cup_game_response(game, user) for game in games],
+    }
+
+
+@app.post("/api/world-cup/games/{game_id}/prediction")
+def submit_world_cup_prediction(
+    game_id: int,
+    request: WorldCupPredictionRequest,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    game = db.query(models.WorldCupGame).filter(models.WorldCupGame.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Jogo do bolão não encontrado")
+    if (game.status or "scheduled") != "scheduled" or game.kickoff_at <= datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Palpites deste jogo já estão fechados")
+
+    prediction = (
+        db.query(models.WorldCupPrediction)
+        .filter_by(user_id=user.id, game_id=game_id)
+        .first()
+    )
+    if not prediction:
+        prediction = models.WorldCupPrediction(user_id=user.id, game_id=game_id, created_at=datetime.utcnow())
+        db.add(prediction)
+
+    prediction.home_score = clamp_prediction_score(request.home_score)
+    prediction.away_score = clamp_prediction_score(request.away_score)
+    prediction.points = 0
+    prediction.status = "pending"
+    prediction.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(game)
+    return world_cup_game_response(game, user)
+
+
+@app.post("/api/world-cup/games/{game_id}/result")
+def set_world_cup_game_result(
+    game_id: int,
+    request: WorldCupGameResultRequest,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Apenas o admin pode lançar resultados do bolão")
+
+    game = db.query(models.WorldCupGame).filter(models.WorldCupGame.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Jogo do bolão não encontrado")
+
+    result_status = (request.status or "finished").strip().lower()
+    if result_status not in WORLD_CUP_GAME_STATUSES:
+        raise HTTPException(status_code=400, detail="Status do jogo inválido")
+
+    game.home_score = clamp_prediction_score(request.home_score)
+    game.away_score = clamp_prediction_score(request.away_score)
+    game.status = result_status
+    score_world_cup_game(game)
+    db.commit()
+    db.refresh(game)
+    return {
+        "game": world_cup_game_response(game, user),
+        "leaderboard": world_cup_leaderboard_response(db),
+    }
+
+
+@app.get("/api/world-cup/leaderboard")
+def world_cup_leaderboard(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    return {"leaderboard": world_cup_leaderboard_response(db)}
 
 
 @app.get("/api/feed")

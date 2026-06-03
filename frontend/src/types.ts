@@ -206,6 +206,55 @@ export type Leaderboard = {
   top_barbecue: Array<UserProfile & { score: number }>;
 };
 
+export type WorldCupPrediction = {
+  id: number;
+  game_id: number;
+  home_score: number;
+  away_score: number;
+  points: number;
+  status: "pending" | "scored";
+  created_at?: string | null;
+  updated_at?: string | null;
+  user: UserProfile;
+};
+
+export type WorldCupGame = {
+  id: number;
+  external_id?: string | null;
+  match_number?: number | null;
+  home_team: string;
+  away_team: string;
+  group_label?: string | null;
+  stage: string;
+  venue?: string | null;
+  kickoff_at: string;
+  status: "scheduled" | "live" | "finished" | "postponed";
+  home_score?: number | null;
+  away_score?: number | null;
+  source?: string | null;
+  predictions_count: number;
+  viewer_prediction?: WorldCupPrediction | null;
+};
+
+export type WorldCupLeaderboardEntry = {
+  rank: number;
+  user: UserProfile;
+  points: number;
+  predictions: number;
+  scored_predictions: number;
+  exact_scores: number;
+};
+
+export type WorldCupBoard = {
+  games: WorldCupGame[];
+  leaderboard: WorldCupLeaderboardEntry[];
+  rules: {
+    exact_score: number;
+    correct_outcome: number;
+    locked_after_kickoff: boolean;
+  };
+};
+
 export type SearchResults = {
   profiles: UserProfile[];
   events: Event[];
