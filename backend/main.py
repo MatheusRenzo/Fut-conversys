@@ -185,6 +185,20 @@ def validate_url(value: str | None) -> str | None:
     return stripped
 
 
+MAX_IMAGE_DATA_URL_LENGTH = 4_000_000  # ~3 MB de imagem em base64
+
+
+def validate_image_url(value: str | None) -> str | None:
+    if not value:
+        return value
+    stripped = value.strip()
+    if stripped.lower().startswith("data:image/"):
+        if len(stripped) > MAX_IMAGE_DATA_URL_LENGTH:
+            raise HTTPException(status_code=400, detail="Imagem muito grande — envie uma foto menor")
+        return stripped
+    return validate_url(stripped)
+
+
 def normalize_email(email: str) -> str:
     return email.strip().lower()
 
@@ -2045,7 +2059,7 @@ def update_my_profile(
         if field == "avatar_config" and value is not None:
             value = json.dumps({**default_avatar_config(user), **value})
         if field in {"avatar_url", "banner_url"}:
-            value = validate_url(value)
+            value = validate_image_url(value)
         setattr(user, field, value)
 
     if not has_verified_features(user):
@@ -2611,7 +2625,7 @@ def create_event(
     location = request.location.strip()
     description = request.description.strip()
     event_type = (request.event_type or "pelada").strip().lower()
-    cover_url = validate_url(request.cover_url.strip() if request.cover_url else None)
+    cover_url = validate_image_url(request.cover_url.strip() if request.cover_url else None)
 
     if not title:
         raise HTTPException(status_code=400, detail="Informe o nome do evento")
@@ -2655,7 +2669,7 @@ def update_event(
     location = request.location.strip()
     description = request.description.strip()
     event_type = (request.event_type or "pelada").strip().lower()
-    cover_url = validate_url(request.cover_url.strip() if request.cover_url else None)
+    cover_url = validate_image_url(request.cover_url.strip() if request.cover_url else None)
 
     if not title:
         raise HTTPException(status_code=400, detail="Informe o nome do evento")

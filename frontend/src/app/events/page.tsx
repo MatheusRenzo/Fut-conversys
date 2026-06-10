@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarCheck2, CalendarPlus, CheckCircle2, Clock3, ListFilter, Save, Search, UsersRound, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
@@ -140,6 +141,35 @@ export default function EventsPage() {
   const updateDraft = <K extends keyof EventDraft>(field: K, value: EventDraft[K]) => {
     setEventDraft((current) => ({ ...current, [field]: value }));
     setFormError("");
+  };
+
+  // Redimensiona a foto escolhida (máx. 1600px) e guarda como data URL
+  const selectCoverImage = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rawUrl = String(reader.result);
+      const image = new Image();
+      image.onload = () => {
+        const scale = Math.min(1, 1600 / image.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(image.width * scale);
+        canvas.height = Math.round(image.height * scale);
+        const context = canvas.getContext("2d");
+        if (!context) {
+          updateDraft("cover_url", rawUrl);
+          return;
+        }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        updateDraft("cover_url", canvas.toDataURL("image/jpeg", 0.85));
+      };
+      image.onerror = () => updateDraft("cover_url", rawUrl);
+      image.src = rawUrl;
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
   };
 
   const closeEventModal = () => {
@@ -531,15 +561,23 @@ export default function EventsPage() {
               </div>
 
               <div className="modal-field">
-                <label htmlFor="event-cover">Imagem de capa</label>
-                <input
-                  className="input-field"
-                  id="event-cover"
-                  onChange={(event) => updateDraft("cover_url", event.target.value)}
-                  placeholder="https://..."
-                  type="url"
-                  value={eventDraft.cover_url ?? ""}
-                />
+                <label>Foto de capa</label>
+                <label className="media-picker event-cover-picker">
+                  <div
+                    className="media-preview event-cover-preview"
+                    style={{ backgroundImage: eventDraft.cover_url ? `url(${eventDraft.cover_url})` : undefined }}
+                  >
+                    {!eventDraft.cover_url && <span>Nenhuma foto escolhida</span>}
+                  </div>
+                  <strong>{eventDraft.cover_url ? "Trocar foto" : "Escolher foto"}</strong>
+                  <input accept="image/*" className="file-input" onChange={selectCoverImage} type="file" />
+                </label>
+                {eventDraft.cover_url && (
+                  <button className="event-cover-remove" onClick={() => updateDraft("cover_url", "")} type="button">
+                    <X size={14} />
+                    <span>Remover foto</span>
+                  </button>
+                )}
               </div>
 
               <div className="modal-field">

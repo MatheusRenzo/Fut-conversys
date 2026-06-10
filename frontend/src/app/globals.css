@@ -8618,6 +8618,39 @@ img.team-flag {
   line-height: 1;
 }
 
+.event-cover-preview {
+  min-height: 140px;
+  display: grid;
+  place-items: center;
+  background-position: center;
+  background-size: cover;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.event-cover-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 850;
+  padding: 8px 12px;
+}
+
+.event-cover-remove:hover {
+  border-color: rgba(255, 99, 99, 0.45);
+  color: #fff;
+}
+
 .wc-ranking-show-more {
   display: flex;
   align-items: center;
