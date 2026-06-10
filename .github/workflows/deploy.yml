@@ -10,10 +10,12 @@ jobs:
     name: Deploy no servidor
     runs-on: self-hosted
     timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout do código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
 
@@ -25,7 +27,7 @@ jobs:
       - name: Notificar sucesso por e-mail
         if: success()
         continue-on-error: true
-        uses: dawidd6/action-send-mail@v4
+        uses: dawidd6/action-send-mail@v4.1.0
         with:
           server_address: smtp.gmail.com
           server_port: 587
@@ -48,7 +50,7 @@ jobs:
       - name: Notificar falha por e-mail
         if: failure()
         continue-on-error: true
-        uses: dawidd6/action-send-mail@v4
+        uses: dawidd6/action-send-mail@v4.1.0
         with:
           server_address: smtp.gmail.com
           server_port: 587
