@@ -24,6 +24,7 @@ jobs:
 
       - name: Notificar sucesso por e-mail
         if: success()
+        continue-on-error: true
         uses: dawidd6/action-send-mail@v4
         with:
           server_address: smtp.gmail.com
@@ -46,6 +47,7 @@ jobs:
 
       - name: Notificar falha por e-mail
         if: failure()
+        continue-on-error: true
         uses: dawidd6/action-send-mail@v4
         with:
           server_address: smtp.gmail.com
