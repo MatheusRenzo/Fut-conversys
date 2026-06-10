@@ -645,15 +645,6 @@ export default function BolaoPage() {
     }
   };
 
-  const openResultModal = (game: WorldCupGame) => {
-    setResultDraft({
-      home: String(game.home_score ?? 0),
-      away: String(game.away_score ?? 0),
-      scorers: game.scorers ?? "",
-    });
-    setResultModalGame(game);
-  };
-
   const handleResult = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!resultModalGame) return;

@@ -212,13 +212,8 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [worldCupRanking, setWorldCupRanking] = useState<WorldCupLeaderboardEntry[]>([]);
-  const [companyLeaderboard, setCompanyLeaderboard] = useState<Leaderboard | null>(leaderboard ?? null);
-
-  useEffect(() => {
-    if (leaderboard) {
-      setCompanyLeaderboard(leaderboard);
-    }
-  }, [leaderboard]);
+  const [fetchedLeaderboard, setFetchedLeaderboard] = useState<Leaderboard | null>(null);
+  const companyLeaderboard = leaderboard ?? fetchedLeaderboard;
 
   useEffect(() => {
     if (!user || leaderboard) return;
@@ -226,7 +221,7 @@ export function AppShell({
     api
       .leaderboard()
       .then((response) => {
-        if (active) setCompanyLeaderboard(response);
+        if (active) setFetchedLeaderboard(response);
       })
       .catch(() => null);
     return () => {
