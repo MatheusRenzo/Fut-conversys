@@ -6,22 +6,26 @@ import { useRouter } from "next/navigation";
 import {
   CalendarPlus,
   CheckCircle2,
-  Clock3,
   Crown,
   DownloadCloud,
+  Flame,
   Goal,
-  ListFilter,
   Medal,
   RefreshCcw,
   Save,
-  ShieldCheck,
+  Settings2,
   Sparkles,
-  Target,
+  Ticket,
   Trophy,
+  Users,
+  X,
+  Zap,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Avatar } from "@/components/Avatar";
+import { TeamFlag } from "@/components/TeamFlag";
 import { api } from "@/lib/api";
+import { squadTeamKey } from "@/lib/teams";
 import { formatEventDate } from "@/lib/format";
 import type {
   Event as AppEvent,
@@ -30,6 +34,7 @@ import type {
   WorldCupBoard,
   WorldCupGame,
   WorldCupLeaderboardEntry,
+  WorldCupSquads,
 } from "@/types";
 
 type PredictionDraft = {
@@ -55,6 +60,7 @@ type GameDraft = {
 };
 
 type RankingTab = "geral" | "exatos" | "resultados" | "artilheiro";
+type QuickFilter = "today" | "open" | "live" | "finished" | "all";
 
 const emptyGameDraft = (): GameDraft => ({
   home_team: "",
@@ -79,9 +85,17 @@ const stageLabels: Record<string, string> = {
 const statusLabels: Record<WorldCupGame["status"], string> = {
   scheduled: "Aberto",
   live: "Ao vivo",
-  finished: "Finalizado",
+  finished: "Encerrado",
   postponed: "Adiado",
 };
+
+const quickFilters: Array<{ key: QuickFilter; label: string }> = [
+  { key: "today", label: "Hoje" },
+  { key: "open", label: "Abertos" },
+  { key: "live", label: "Ao vivo" },
+  { key: "finished", label: "Encerrados" },
+  { key: "all", label: "Todos" },
+];
 
 const rankingTabs: Array<{ key: RankingTab; label: string }> = [
   { key: "geral", label: "Geral" },
@@ -108,6 +122,49 @@ function isGameLocked(game: WorldCupGame, now: number) {
   return game.status !== "scheduled" || new Date(game.kickoff_at).getTime() <= now;
 }
 
+function isUpcomingGame(game: WorldCupGame, now: number) {
+  return !isGameLocked(game, now);
+}
+
+function isSameDay(iso: string, now: number) {
+  const date = new Date(iso);
+  const today = new Date(now);
+  return (
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  );
+}
+
+function countdownParts(targetIso: string, now: number) {
+  const distance = Math.max(0, new Date(targetIso).getTime() - now);
+  const days = Math.floor(distance / 86_400_000);
+  const hours = Math.floor((distance % 86_400_000) / 3_600_000);
+  const minutes = Math.floor((distance % 3_600_000) / 60_000);
+  const seconds = Math.floor((distance % 60_000) / 1000);
+  return { days, hours, minutes, seconds };
+}
+
+function pad(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function minutesUntil(iso: string, now: number) {
+  return Math.max(0, Math.floor((new Date(iso).getTime() - now) / 60_000));
+}
+
+function urgencyLabel(minutes: number) {
+  if (minutes <= 0) return "Fechando agora";
+  if (minutes < 60) return `Fecha em ${minutes} min`;
+  if (minutes < 1440) return `Fecha em ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  const days = Math.floor(minutes / 1440);
+  return `Fecha em ${days}d ${Math.floor((minutes % 1440) / 60)}h`;
+}
+
+function maxPoints(rules: WorldCupBoard["rules"] | undefined) {
+  return (rules?.exact_score ?? 3) + (rules?.scorer_bonus ?? 1);
+}
+
 function rankingValue(entry: WorldCupLeaderboardEntry, tab: RankingTab) {
   if (tab === "exatos") return entry.exact_scores;
   if (tab === "resultados") return entry.outcome_hits;
@@ -122,25 +179,251 @@ function rankingUnit(tab: RankingTab) {
   return "pts";
 }
 
+type BolaoRankingPanelProps = {
+  board: WorldCupBoard | null;
+  rankingTab: RankingTab;
+  onTabChange: (tab: RankingTab) => void;
+  sortedRanking: WorldCupLeaderboardEntry[];
+  highlights?: WorldCupBoard["highlights"];
+  limit?: number;
+  compact?: boolean;
+  onShowAll?: () => void;
+};
+
+function BolaoRankingPanel({
+  board,
+  rankingTab,
+  onTabChange,
+  sortedRanking,
+  highlights,
+  limit,
+  compact = false,
+  onShowAll,
+}: BolaoRankingPanelProps) {
+  const entries = limit ? sortedRanking.slice(0, limit) : sortedRanking;
+
+  return (
+    <>
+      {!compact && (
+        <div className="bolao-rules">
+          <span>Placar exato: {board?.rules.exact_score ?? 3} pts</span>
+          <span>Vencedor certo: {board?.rules.correct_outcome ?? 1} pt</span>
+          <span>Artilheiro certo: +{board?.rules.scorer_bonus ?? 1} pt</span>
+          <span>Campeã da Copa: {board?.rules.champion ?? 10} pts</span>
+        </div>
+      )}
+
+      <div className="segmented-control bolao-ranking-tabs">
+        {rankingTabs.map((tab) => (
+          <button
+            className={rankingTab === tab.key ? "active" : ""}
+            key={tab.key}
+            onClick={() => onTabChange(tab.key)}
+            type="button"
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="bolao-ranking-list">
+        {entries.map((entry, index) => (
+          <div className="bolao-rank-row" key={entry.user.id}>
+            <strong>{rankingTab === "geral" ? entry.rank : index + 1}</strong>
+            <Avatar user={entry.user} size="sm" />
+            <span>{entry.user.name}</span>
+            <small>
+              {rankingTab === "geral"
+                ? `${entry.exact_scores} exatos`
+                : rankingTab === "artilheiro"
+                  ? `${entry.scorer_hits} acertos`
+                  : `${entry.predictions} palpites`}
+            </small>
+            <b>
+              {rankingValue(entry, rankingTab)} {rankingUnit(rankingTab)}
+            </b>
+          </div>
+        ))}
+        {sortedRanking.length === 0 && <p>Ninguém pontuou ainda. O ranking nasce no primeiro jogo encerrado.</p>}
+      </div>
+
+      {compact && onShowAll && sortedRanking.length > entries.length && (
+        <button className="wc-ranking-show-more" onClick={onShowAll} type="button">
+          <Medal size={15} />
+          <span>Mostrar mais</span>
+        </button>
+      )}
+
+      {!compact && highlights?.last_game && (
+        <div className="wc-last-game">
+          <span className="eyebrow">Último jogo</span>
+          <strong>
+            <TeamFlag team={highlights.last_game.home_team} /> {highlights.last_game.home_team}{" "}
+            {highlights.last_game.home_score} x {highlights.last_game.away_score}{" "}
+            {highlights.last_game.away_team} <TeamFlag team={highlights.last_game.away_team} />
+          </strong>
+          {highlights.last_game_winners.length > 0 ? (
+            <div className="bolao-ranking-list">
+              {highlights.last_game_winners.map((prediction) => (
+                <div className="bolao-rank-row" key={prediction.id}>
+                  <strong>+{prediction.points}</strong>
+                  <Avatar user={prediction.user} size="sm" />
+                  <span>{prediction.user.name}</span>
+                  <small>
+                    {prediction.home_score}x{prediction.away_score}
+                    {prediction.scorer_hit ? " ⚽" : ""}
+                  </small>
+                  <b />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="bolao-highlight-empty">Ninguém pontuou nesse jogo.</p>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+type ScorerPlayer = { id: number; name: string; team: string; position?: string | null; club?: string | null };
+
+function ScorerPicker({
+  game,
+  players,
+  value,
+  onChange,
+}: {
+  game: WorldCupGame;
+  players: ScorerPlayer[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  if (players.length === 0) {
+    return (
+      <input
+        className="input-field wc-scorer-select"
+        maxLength={80}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Quem marca? +1 pt bônus"
+        value={value}
+      />
+    );
+  }
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const matches = (player: ScorerPlayer) => !normalizedQuery || player.name.toLowerCase().includes(normalizedQuery);
+  const groups = [
+    { team: game.home_team, players: players.filter((player) => player.team === game.home_team && matches(player)) },
+    { team: game.away_team, players: players.filter((player) => player.team === game.away_team && matches(player)) },
+  ].filter((group) => group.players.length > 0);
+
+  const pick = (name: string) => {
+    onChange(name);
+    setOpen(false);
+    setQuery("");
+  };
+
+  return (
+    <>
+      <button
+        className={value ? "wc-scorer-trigger picked" : "wc-scorer-trigger"}
+        onClick={() => setOpen(true)}
+        type="button"
+      >
+        <span>{value || "Artilheiro (opcional, +1 pt)"}</span>
+        {value ? <CheckCircle2 size={15} /> : <Users size={15} />}
+      </button>
+
+      {open && (
+        <div className="event-modal-backdrop" onClick={() => setOpen(false)}>
+          <div className="event-modal glass-panel wc-modal wc-scorer-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <span className="eyebrow">Palpite de artilheiro (+1 pt)</span>
+                <h2>
+                  {game.home_team} x {game.away_team}
+                </h2>
+              </div>
+              <button className="modal-close" onClick={() => setOpen(false)} type="button">
+                <X size={18} />
+              </button>
+            </div>
+
+            <input
+              className="input-field wc-scorer-search"
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Buscar jogador..."
+              type="search"
+              value={query}
+            />
+
+            <div className="wc-scorer-list">
+              {value && (
+                <button className="wc-scorer-option clear" onClick={() => pick("")} type="button">
+                  <X size={15} />
+                  <span>Remover palpite de artilheiro</span>
+                </button>
+              )}
+              {groups.map((group) => (
+                <div className="wc-scorer-group" key={group.team}>
+                  <span className="wc-scorer-group-label">
+                    <TeamFlag team={group.team} /> {group.team}
+                  </span>
+                  {group.players.map((player) => (
+                    <button
+                      className={value === player.name ? "wc-scorer-option active" : "wc-scorer-option"}
+                      key={`${player.team}-${player.id}`}
+                      onClick={() => pick(player.name)}
+                      type="button"
+                    >
+                      <span className="wc-scorer-option-name">{player.name}</span>
+                      <small>
+                        {[player.position, player.club].filter(Boolean).join(" · ")}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+              ))}
+              {groups.length === 0 && <p className="rail-empty-copy">Nenhum jogador encontrado com esse nome.</p>}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function BolaoPage() {
   const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
   const [board, setBoard] = useState<WorldCupBoard | null>(null);
+  const [squads, setSquads] = useState<WorldCupSquads>({});
   const [loading, setLoading] = useState(true);
   const [predictionDrafts, setPredictionDrafts] = useState<Record<number, PredictionDraft>>({});
-  const [resultDrafts, setResultDrafts] = useState<Record<number, ResultDraft>>({});
   const [savingPrediction, setSavingPrediction] = useState<number | null>(null);
-  const [savingResult, setSavingResult] = useState<number | null>(null);
+  const [savedFlash, setSavedFlash] = useState<number | null>(null);
+  const [resultModalGame, setResultModalGame] = useState<WorldCupGame | null>(null);
+  const [resultDraft, setResultDraft] = useState<ResultDraft>({ home: "0", away: "0", scorers: "" });
+  const [savingResult, setSavingResult] = useState(false);
+  const [adminModalOpen, setAdminModalOpen] = useState(false);
+  const [rankingModalOpen, setRankingModalOpen] = useState(false);
+  const [myBetsModalOpen, setMyBetsModalOpen] = useState(false);
+  const [championQuery, setChampionQuery] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [syncingSquads, setSyncingSquads] = useState(false);
   const [creatingGame, setCreatingGame] = useState(false);
   const [championDraft, setChampionDraft] = useState("");
   const [savingChampion, setSavingChampion] = useState(false);
   const [championAnnounceDraft, setChampionAnnounceDraft] = useState("");
   const [announcingChampion, setAnnouncingChampion] = useState(false);
   const [rankingTab, setRankingTab] = useState<RankingTab>("geral");
-  const [statusFilter, setStatusFilter] = useState<"all" | WorldCupGame["status"]>("all");
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>("open");
   const [stageFilter, setStageFilter] = useState("all");
   const [gameDraft, setGameDraft] = useState<GameDraft>(emptyGameDraft);
   const [message, setMessage] = useState("");
@@ -171,16 +454,22 @@ export default function BolaoPage() {
         setBoard({ ...bolao, games: sortGames(bolao.games) });
       } catch {
         router.push("/");
+        return;
       } finally {
         setLoading(false);
       }
+
+      api
+        .worldCupPlayers()
+        .then((response) => setSquads(response.players))
+        .catch(() => null);
     }
 
     load();
   }, [router]);
 
   useEffect(() => {
-    const clock = window.setInterval(() => setCurrentTime(Date.now()), 60_000);
+    const clock = window.setInterval(() => setCurrentTime(Date.now()), 1000);
     const poller = window.setInterval(() => {
       refreshBoard();
     }, 60_000);
@@ -190,7 +479,7 @@ export default function BolaoPage() {
     };
   }, [refreshBoard]);
 
-  const games = useMemo(() => board?.games ?? [], [board?.games]);
+  const games = useMemo(() => (board?.games ?? []).filter((game) => game.bettable !== false), [board?.games]);
   const isAdmin = Boolean(profile?.is_admin);
   const myEntry = board?.leaderboard.find((entry) => entry.user.id === profile?.id);
   const champion = board?.champion;
@@ -213,23 +502,78 @@ export default function BolaoPage() {
     [games],
   );
 
+  const nextGame = useMemo(
+    () => sortGames(games).find((game) => isUpcomingGame(game, currentTime)) ?? null,
+    [currentTime, games],
+  );
+
+  const liveGames = useMemo(() => games.filter((game) => game.status === "live"), [games]);
+
   const filteredGames = useMemo(() => {
     return games.filter((game) => {
-      if (statusFilter !== "all" && game.status !== statusFilter) return false;
       if (stageFilter !== "all" && game.stage !== stageFilter) return false;
+      if (quickFilter === "today") return isSameDay(game.kickoff_at, currentTime);
+      if (quickFilter === "open") return isUpcomingGame(game, currentTime);
+      if (quickFilter === "live") return game.status === "live";
+      if (quickFilter === "finished") return game.status === "finished";
       return true;
     });
-  }, [games, stageFilter, statusFilter]);
+  }, [currentTime, games, quickFilter, stageFilter]);
+
+  const myBetGames = useMemo(
+    () => games.filter((game) => game.viewer_prediction).sort((a, b) => new Date(b.kickoff_at).getTime() - new Date(a.kickoff_at).getTime()),
+    [games],
+  );
+
+  const upcomingGames = useMemo(
+    () => sortGames(filteredGames.filter((game) => isUpcomingGame(game, currentTime))),
+    [currentTime, filteredGames],
+  );
+
+  const openBetGames = useMemo(
+    () => upcomingGames.filter((game) => !game.viewer_prediction),
+    [upcomingGames],
+  );
+
+  const championTeams = useMemo(() => {
+    const names = new Set(Object.keys(squads));
+    for (const team of teams) names.add(team);
+    return Array.from(names).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [squads, teams]);
+
+  const filteredChampionTeams = useMemo(() => {
+    const query = championQuery.trim().toLowerCase();
+    if (!query) return championTeams;
+    return championTeams.filter((team) => team.toLowerCase().includes(query));
+  }, [championQuery, championTeams]);
 
   const summary = useMemo(() => {
-    const open = games.filter((game) => !isGameLocked(game, currentTime)).length;
+    const open = games.filter((game) => isUpcomingGame(game, currentTime)).length;
     const predicted = games.filter((game) => game.viewer_prediction).length;
     return {
       open,
       predicted,
       points: myEntry?.points ?? 0,
+      rank: myEntry?.rank ?? null,
     };
-  }, [currentTime, games, myEntry?.points]);
+  }, [currentTime, games, myEntry?.points, myEntry?.rank]);
+
+  const countdown = nextGame ? countdownParts(nextGame.kickoff_at, currentTime) : null;
+
+  const unpickedOpen = openBetGames.length;
+
+  const recentResults = useMemo(
+    () =>
+      games
+        .filter((game) => game.status === "finished" && game.home_score !== null && game.away_score !== null)
+        .sort((a, b) => new Date(b.kickoff_at).getTime() - new Date(a.kickoff_at).getTime())
+        .slice(0, 6),
+    [games],
+  );
+
+  const scrollToGame = (gameId: number) => {
+    document.getElementById(`game-${gameId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   const sortedRanking = useMemo(() => {
     const entries = [...(board?.leaderboard ?? [])];
@@ -237,31 +581,32 @@ export default function BolaoPage() {
     return entries.sort((a, b) => rankingValue(b, rankingTab) - rankingValue(a, rankingTab));
   }, [board?.leaderboard, rankingTab]);
 
-  const predictionDraftFor = (game: WorldCupGame): PredictionDraft =>
-    predictionDrafts[game.id] ?? {
-      home: String(game.viewer_prediction?.home_score ?? 0),
-      away: String(game.viewer_prediction?.away_score ?? 0),
-      scorer: game.viewer_prediction?.scorer_guess ?? "",
-    };
+  const gamePlayers = useCallback(
+    (game: WorldCupGame) => {
+      const homeTeam = squadTeamKey(game.home_team);
+      const awayTeam = squadTeamKey(game.away_team);
+      const home = squads[homeTeam] ?? squads[game.home_team] ?? [];
+      const away = squads[awayTeam] ?? squads[game.away_team] ?? [];
+      return [...home.map((p) => ({ ...p, team: game.home_team })), ...away.map((p) => ({ ...p, team: game.away_team }))];
+    },
+    [squads],
+  );
 
-  const resultDraftFor = (game: WorldCupGame): ResultDraft =>
-    resultDrafts[game.id] ?? {
-      home: String(game.home_score ?? 0),
-      away: String(game.away_score ?? 0),
-      scorers: game.scorers ?? "",
-    };
+  const predictionDraftFor = useCallback(
+    (game: WorldCupGame): PredictionDraft =>
+      predictionDrafts[game.id] ?? {
+        home: String(game.viewer_prediction?.home_score ?? 0),
+        away: String(game.viewer_prediction?.away_score ?? 0),
+        scorer: game.viewer_prediction?.scorer_guess ?? "",
+      },
+    [predictionDrafts],
+  );
 
   const updatePredictionDraft = (game: WorldCupGame, field: keyof PredictionDraft, value: string) => {
+    const base = predictionDraftFor(game);
     setPredictionDrafts((current) => ({
       ...current,
-      [game.id]: { ...predictionDraftFor(game), ...current[game.id], [field]: value },
-    }));
-  };
-
-  const updateResultDraft = (game: WorldCupGame, field: keyof ResultDraft, value: string) => {
-    setResultDrafts((current) => ({
-      ...current,
-      [game.id]: { ...resultDraftFor(game), ...current[game.id], [field]: value },
+      [game.id]: { ...base, ...current[game.id], [field]: value },
     }));
   };
 
@@ -271,6 +616,7 @@ export default function BolaoPage() {
   };
 
   const handlePrediction = async (game: WorldCupGame) => {
+    if (game.viewer_prediction) return;
     const draft = predictionDraftFor(game);
     setSavingPrediction(game.id);
     setError("");
@@ -282,7 +628,9 @@ export default function BolaoPage() {
         scorer_guess: draft.scorer.trim() || null,
       });
       setBoard((current) => (current ? { ...current, games: replaceGame(current.games, updated) } : current));
-      setMessage("Palpite salvo. Agora é torcer para esse placar bater.");
+      setSavedFlash(game.id);
+      window.setTimeout(() => setSavedFlash((id) => (id === game.id ? null : id)), 2400);
+      setMessage("Palpite cravado. O próximo jogo na fila só muda quando este encerrar ou começar.");
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Não foi possível salvar o palpite");
     } finally {
@@ -290,17 +638,27 @@ export default function BolaoPage() {
     }
   };
 
-  const handleResult = async (game: WorldCupGame) => {
-    const draft = resultDraftFor(game);
-    setSavingResult(game.id);
+  const openResultModal = (game: WorldCupGame) => {
+    setResultDraft({
+      home: String(game.home_score ?? 0),
+      away: String(game.away_score ?? 0),
+      scorers: game.scorers ?? "",
+    });
+    setResultModalGame(game);
+  };
+
+  const handleResult = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!resultModalGame) return;
+    setSavingResult(true);
     setError("");
     setMessage("");
     try {
-      const response = await api.setWorldCupGameResult(game.id, {
-        home_score: scoreValue(draft.home),
-        away_score: scoreValue(draft.away),
+      const response = await api.setWorldCupGameResult(resultModalGame.id, {
+        home_score: scoreValue(resultDraft.home),
+        away_score: scoreValue(resultDraft.away),
         status: "finished",
-        scorers: draft.scorers.trim() || null,
+        scorers: resultDraft.scorers.trim() || null,
       });
       setBoard((current) =>
         current
@@ -312,23 +670,23 @@ export default function BolaoPage() {
           : current,
       );
       setMessage("Resultado lançado e ranking atualizado.");
+      setResultModalGame(null);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Não foi possível lançar o resultado");
     } finally {
-      setSavingResult(null);
+      setSavingResult(false);
     }
   };
 
-  const handleChampionPick = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!championDraft.trim()) return;
+  const handleChampionPick = async (team: string) => {
+    if (!team.trim() || champion?.viewer_pick || champion?.locked) return;
     setSavingChampion(true);
     setError("");
     setMessage("");
     try {
-      const updated = await api.submitWorldCupChampionPick(championDraft.trim());
+      const updated = await api.submitWorldCupChampionPick(team.trim());
       setBoard((current) => (current ? { ...current, champion: updated } : current));
-      setMessage("Palpite de campeão registrado. Boa sorte!");
+      setMessage("Palpite de campeão cravado. Boa sorte!");
       setChampionDraft("");
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Não foi possível salvar o palpite de campeão");
@@ -405,11 +763,28 @@ export default function BolaoPage() {
             }
           : current,
       );
-      setMessage(`${response.imported} jogos importados e ${response.updated} atualizados. Resultados sincronizam sozinhos a cada 10 minutos.`);
+      setMessage(
+        `${response.imported} jogos importados e ${response.updated} atualizados. Resultados e artilheiros vêm do openfootball a cada sync.`,
+      );
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Não foi possível importar os jogos");
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleSyncSquads = async () => {
+    setSyncingSquads(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await api.syncWorldCupSquads();
+      setSquads(response.players);
+      setMessage(`Elencos atualizados: ${response.imported} jogadores novos, ${response.updated} atualizados.`);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Não foi possível importar os elencos");
+    } finally {
+      setSyncingSquads(false);
     }
   };
 
@@ -418,34 +793,148 @@ export default function BolaoPage() {
   }
 
   return (
-    <AppShell user={profile} nextEvent={events[0] ?? null} leaderboard={leaderboard}>
-      <section className="bolao-hero glass-panel">
-        <div className="bolao-hero-copy">
-          <span className="eyebrow">Bolão da Copa</span>
-          <h1>Palpites, placares e ranking da firma</h1>
-          <p>
-            Acerte o placar, chute quem marca gol e escolha o campeão da Copa. Os jogos e resultados sincronizam
-            automaticamente — é só palpitar antes da bola rolar.
-          </p>
+    <AppShell hideRightRail user={profile} nextEvent={events[0] ?? null} leaderboard={leaderboard}>
+      <div className="wc-page">
+      <section className="wc-hero glass-panel">
+        <div className="wc-hero-top">
+          <div className="wc-hero-title">
+            <span className="eyebrow">Bolão da Copa 2026</span>
+            <h1>Crave. Torça. Domine.</h1>
+            <p className="wc-hero-sub">
+              Placar exato vale até <strong>+{maxPoints(board?.rules)} pts</strong>. Quem palpitar antes da bola rolar, sobe no ranking.
+            </p>
+          </div>
+          <div className="wc-hero-actions">
+            <button className="wc-ranking-button" onClick={() => setMyBetsModalOpen(true)} type="button">
+              <Ticket size={16} />
+              <span>Minhas apostas ({summary.predicted})</span>
+            </button>
+            <button className="wc-ranking-button" onClick={() => setRankingModalOpen(true)} type="button">
+              <Medal size={16} />
+              <span>Ranking</span>
+            </button>
+            {isAdmin && (
+              <button className="wc-admin-button" onClick={() => setAdminModalOpen(true)} type="button">
+                <Settings2 size={16} />
+                <span>Gerenciar</span>
+              </button>
+            )}
+          </div>
         </div>
-        <div className="bolao-scoreboard">
-          <div>
-            <Sparkles size={18} />
+
+        <div className="wc-hero-stats">
+          <div className="wc-stat">
+            <Sparkles size={16} />
             <strong>{summary.points}</strong>
-            <span>meus pontos</span>
+            <span>pontos</span>
           </div>
-          <div>
-            <CheckCircle2 size={18} />
+          <div className="wc-stat">
+            <Medal size={16} />
+            <strong>{summary.rank ? `${summary.rank}º` : "—"}</strong>
+            <span>posição</span>
+          </div>
+          <div className="wc-stat">
+            <Zap size={16} />
             <strong>{summary.predicted}</strong>
-            <span>palpites feitos</span>
+            <span>palpites</span>
           </div>
-          <div>
-            <Clock3 size={18} />
+          <div className="wc-stat">
+            <Flame size={16} />
             <strong>{summary.open}</strong>
-            <span>jogos abertos</span>
+            <span>abertos</span>
           </div>
         </div>
+
+        {liveGames.length > 0 ? (
+          <div className="wc-live-banner">
+            <span className="wc-live-dot" />
+            <strong>
+              {liveGames[0].home_team} {liveGames[0].home_score ?? 0} x {liveGames[0].away_score ?? 0}{" "}
+              {liveGames[0].away_team}
+            </strong>
+            <span>rolando agora{liveGames.length > 1 ? ` +${liveGames.length - 1} jogos` : ""}</span>
+          </div>
+        ) : (
+          nextGame &&
+          countdown && (
+            <div className="wc-countdown">
+              <div className="wc-countdown-match">
+                <span className="wc-countdown-flag"><TeamFlag team={nextGame.home_team} /></span>
+                <strong>
+                  {nextGame.home_team} x {nextGame.away_team}
+                </strong>
+                <span className="wc-countdown-flag"><TeamFlag team={nextGame.away_team} /></span>
+              </div>
+              <div className="wc-countdown-clock" aria-label="Contagem regressiva para o próximo jogo">
+                {countdown.days > 0 && (
+                  <span className="wc-clock-cell">
+                    <strong>{countdown.days}</strong>
+                    <small>dias</small>
+                  </span>
+                )}
+                <span className="wc-clock-cell">
+                  <strong>{pad(countdown.hours)}</strong>
+                  <small>hrs</small>
+                </span>
+                <span className="wc-clock-sep">:</span>
+                <span className="wc-clock-cell">
+                  <strong>{pad(countdown.minutes)}</strong>
+                  <small>min</small>
+                </span>
+                <span className="wc-clock-sep">:</span>
+                <span className="wc-clock-cell">
+                  <strong>{pad(countdown.seconds)}</strong>
+                  <small>seg</small>
+                </span>
+              </div>
+              {!nextGame.viewer_prediction ? (
+                <button className="wc-countdown-cta" onClick={() => scrollToGame(nextGame.id)} type="button">
+                  ⚡ Você ainda não palpitou — crava agora
+                </button>
+              ) : (
+                <span className="wc-countdown-done">Palpite feito — aguardando o início do jogo</span>
+              )}
+            </div>
+          )
+        )}
       </section>
+
+      <section className="wc-ranking-inline glass-panel wc-ranking-mobile-only" id="bolao-ranking">
+        <div className="wc-section-head wc-ranking-inline-head">
+          <div>
+            <span className="eyebrow">Classificação</span>
+            <h2>Ranking do bolão</h2>
+          </div>
+        </div>
+        <BolaoRankingPanel
+          board={board}
+          highlights={highlights}
+          compact
+          limit={3}
+          onShowAll={() => setRankingModalOpen(true)}
+          onTabChange={setRankingTab}
+          rankingTab={rankingTab}
+          sortedRanking={sortedRanking}
+        />
+      </section>
+
+      {unpickedOpen > 0 && (
+        <section className="wc-urgency-bar glass-panel" role="status">
+          <Flame size={18} />
+          <div>
+            <strong>
+              {unpickedOpen} jogo{unpickedOpen > 1 ? "s" : ""} aberto{unpickedOpen > 1 ? "s" : ""} sem teu palpite
+            </strong>
+            <span>Depois que a bola rola, acabou. Não fica de fora.</span>
+          </div>
+          {nextGame && !nextGame.viewer_prediction && (
+            <button className="wc-urgency-action" onClick={() => scrollToGame(nextGame.id)} type="button">
+              <Zap size={15} />
+              <span>Palpitar agora</span>
+            </button>
+          )}
+        </section>
+      )}
 
       {(message || error) && (
         <section className={error ? "bolao-feedback error" : "bolao-feedback"}>
@@ -453,429 +942,650 @@ export default function BolaoPage() {
         </section>
       )}
 
-      <section className="bolao-champion glass-panel">
-        <div className="bolao-champion-head">
+      <section className="wc-champion-arena glass-panel">
+        <div className="wc-champion-head">
           <div>
-            <span className="eyebrow">Campeão da Copa</span>
-            <h2>
-              <Crown size={20} />
-              {champion?.team
-                ? `Campeã: ${champion.team}`
-                : champion?.locked
-                  ? "Palpites de campeão fechados"
-                  : "Quem leva a taça?"}
-            </h2>
+            <span className="eyebrow">Palpite especial</span>
+            <h2>Quem leva a taça?</h2>
+            <p className="wc-champion-copy">
+              Vale <strong>{champion?.points_award ?? 10} pts</strong>. Escolhe uma vez — depois não dá pra trocar.
+            </p>
           </div>
-          <span className="bolao-champion-award">vale {champion?.points_award ?? 10} pts</span>
+          <span className="wc-champion-trophy" aria-hidden="true">
+            🏆
+          </span>
         </div>
 
-        {champion?.viewer_pick && (
-          <p className="bolao-champion-mine">
-            Seu palpite: <strong>{champion.viewer_pick.team}</strong>
-            {champion.viewer_pick.status === "scored" && champion.viewer_pick.points > 0 && (
-              <b> · +{champion.viewer_pick.points} pts</b>
-            )}
-          </p>
-        )}
-
-        {!champion?.locked && (
-          <form className="bolao-champion-form" onSubmit={handleChampionPick}>
+        {champion?.team ? (
+          <div className="wc-champion-result">
+            <span className="wc-champion-result-flag"><TeamFlag team={champion.team} /></span>
+            <div>
+              <strong>Campeã: {champion.team}</strong>
+              <span>A Copa acabou — confere os pontos no ranking.</span>
+            </div>
+          </div>
+        ) : champion?.viewer_pick ? (
+          <div className="wc-champion-result locked">
+            <span className="wc-champion-result-flag"><TeamFlag team={champion.viewer_pick.team} /></span>
+            <div>
+              <strong>{champion.viewer_pick.team}</strong>
+              <span>Palpite cravado. Não dá pra mudar.</span>
+            </div>
+            <span className="wc-champion-seal">Cravado</span>
+          </div>
+        ) : champion?.locked ? (
+          <p className="wc-champion-closed">Palpites de campeão fechados.</p>
+        ) : (
+          <>
             <input
-              className="input-field"
-              list="bolao-teams"
-              onChange={(event) => setChampionDraft(event.target.value)}
-              placeholder={champion?.viewer_pick ? "Trocar palpite de campeão" : "Escolha a seleção campeã"}
-              value={championDraft}
+              className="input-field wc-champion-search"
+              onChange={(event) => setChampionQuery(event.target.value)}
+              placeholder="Buscar seleção..."
+              value={championQuery}
             />
-            <datalist id="bolao-teams">
-              {teams.map((team) => (
-                <option key={team} value={team} />
+            <div className="wc-champion-grid">
+              {filteredChampionTeams.map((team) => (
+                <button
+                  className={championDraft === team ? "wc-champion-team active" : "wc-champion-team"}
+                  disabled={savingChampion}
+                  key={team}
+                  onClick={() => setChampionDraft(team)}
+                  type="button"
+                >
+                  <span className="wc-champion-team-flag"><TeamFlag team={team} /></span>
+                  <span>{team}</span>
+                </button>
               ))}
-            </datalist>
-            <button className="btn-primary" disabled={savingChampion || !championDraft.trim()} type="submit">
-              <Trophy size={16} />
-              <span>{savingChampion ? "Salvando..." : "Cravar campeão"}</span>
+            </div>
+            <button
+              className="wc-bet-button wc-champion-submit"
+              disabled={savingChampion || !championDraft}
+              onClick={() => handleChampionPick(championDraft)}
+              type="button"
+            >
+              <Crown size={16} />
+              <span>
+                {savingChampion ? (
+                  "Cravando..."
+                ) : championDraft ? (
+                  <>
+                    Cravar <TeamFlag team={championDraft} /> {championDraft}
+                  </>
+                ) : (
+                  "Escolha uma seleção"
+                )}
+              </span>
             </button>
-          </form>
+          </>
         )}
 
-        {champion?.locked && champion.picks.length > 0 && (
-          <div className="bolao-champion-picks">
+        {champion?.locked && !champion.team && champion.picks.length > 0 && (
+          <div className="wc-champion-picks">
             {champion.picks.map((pick) => (
-              <div className="bolao-champion-pick" key={pick.id}>
-                <Avatar user={pick.user} size="sm" />
-                <span>{pick.user.name}</span>
-                <strong>{pick.team}</strong>
-                {pick.status === "scored" && pick.points > 0 && <b>+{pick.points}</b>}
-              </div>
+              <span className="wc-champion-chip" key={pick.id} title={pick.user.name}>
+                <TeamFlag team={pick.team} /> {pick.user.name.split(" ")[0]}
+              </span>
             ))}
           </div>
         )}
       </section>
 
-      <section className="bolao-layout">
-        <div className="bolao-main">
-          <section className="bolao-filter-panel glass-panel">
+      {recentResults.length > 0 && (
+        <section className="wc-results-panel glass-panel">
+          <div className="wc-section-head">
             <div>
-              <span className="eyebrow">Jogos</span>
-              <h2>Agenda de palpites</h2>
+              <span className="eyebrow">Resultados oficiais</span>
+              <h2>Placares e artilheiros</h2>
+              <p className="wc-section-copy">
+                Atualizado automaticamente pela fonte openfootball. Quando o jogo finaliza, a pontuação do bolão recalcula
+                sozinha.
+              </p>
             </div>
-            <div className="bolao-filter-actions">
-              <label>
-                <ListFilter size={16} />
-                <select className="input-field" onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} value={statusFilter}>
-                  <option value="all">Todos os status</option>
-                  <option value="scheduled">Abertos</option>
-                  <option value="live">Ao vivo</option>
-                  <option value="finished">Finalizados</option>
-                  <option value="postponed">Adiados</option>
-                </select>
-              </label>
-              <label>
-                <Trophy size={16} />
-                <select className="input-field" onChange={(event) => setStageFilter(event.target.value)} value={stageFilter}>
-                  <option value="all">Todas as fases</option>
-                  {stageOptions.map((stage) => (
-                    <option key={stage} value={stage}>
-                      {stageLabels[stage] ?? stage}
-                    </option>
-                  ))}
-                </select>
-              </label>
+          </div>
+          <div className="wc-results-list">
+            {recentResults.map((game) => (
+              <article className="wc-result-card" key={game.id}>
+                <div className="wc-result-top">
+                  <span className="wc-game-stage">
+                    {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
+                  </span>
+                  <span className="wc-game-date">{formatEventDate(game.kickoff_at)}</span>
+                </div>
+                <div className="wc-result-scoreline">
+                  <span><TeamFlag team={game.home_team} /> {game.home_team}</span>
+                  <strong>
+                    {game.home_score} x {game.away_score}
+                  </strong>
+                  <span>
+                    {game.away_team} <TeamFlag team={game.away_team} />
+                  </span>
+                </div>
+                {game.scorers ? (
+                  <div className="wc-result-scorers">
+                    <Goal size={14} />
+                    <span>{game.scorers}</span>
+                  </div>
+                ) : (
+                  <div className="wc-result-scorers muted">Artilheiros ainda não publicados na fonte.</div>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="wc-filters">
+        <div className="wc-filter-chips">
+          {quickFilters.map((filter) => (
+            <button
+              className={quickFilter === filter.key ? "wc-chip active" : "wc-chip"}
+              key={filter.key}
+              onClick={() => setQuickFilter(filter.key)}
+              type="button"
+            >
+              {filter.key === "live" && liveGames.length > 0 && <span className="wc-live-dot small" />}
+              {filter.label}
+            </button>
+          ))}
+        </div>
+        <select className="input-field wc-stage-select" onChange={(event) => setStageFilter(event.target.value)} value={stageFilter}>
+          <option value="all">Todas as fases</option>
+          {stageOptions.map((stage) => (
+            <option key={stage} value={stage}>
+              {stageLabels[stage] ?? stage}
+            </option>
+          ))}
+        </select>
+      </section>
+
+      <section className="wc-section-head">
+        <div>
+          <span className="eyebrow">Próximos jogos</span>
+          <h2>Ordem do calendário da Copa</h2>
+          <p className="wc-section-copy">A fila segue o horário oficial. Apostar não tira o jogo da lista — ele só sai quando começar ou finalizar.</p>
+        </div>
+        <span className="wc-section-count">
+          {upcomingGames.length} jogo{upcomingGames.length === 1 ? "" : "s"}
+          {unpickedOpen > 0 ? ` · ${unpickedOpen} sem palpite` : ""}
+        </span>
+      </section>
+
+      {upcomingGames.length > 0 ? (
+        <section className="wc-game-grid">
+          {upcomingGames.map((game) => {
+            const draft = predictionDraftFor(game);
+            const players = gamePlayers(game);
+            const lockMinutes = minutesUntil(game.kickoff_at, currentTime);
+            const justSaved = savedFlash === game.id;
+            const hasBet = Boolean(game.viewer_prediction);
+            const isNextScheduled = nextGame?.id === game.id;
+
+            return (
+              <article
+                className={[
+                  "wc-game-card glass-panel",
+                  justSaved ? "just-saved" : "",
+                  hasBet ? "has-bet" : "needs-bet",
+                  isNextScheduled ? "is-next" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                id={`game-${game.id}`}
+                key={game.id}
+              >
+                <div className="wc-game-top">
+                  <span className="wc-game-stage">
+                    {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
+                  </span>
+                  {isNextScheduled && <span className="wc-next-badge">Próximo jogo</span>}
+                  <span className="wc-game-date">{formatEventDate(game.kickoff_at)}</span>
+                  <div className="wc-game-top-actions">
+                    <span className={hasBet ? "wc-game-status finished" : "wc-game-status scheduled"}>
+                      {hasBet ? "Palpite feito" : "Aberto"}
+                    </span>
+                    {!hasBet && <span className="wc-points-teaser">Até +{maxPoints(board?.rules)} pts</span>}
+                  </div>
+                </div>
+
+                <div className={lockMinutes < 120 ? "wc-lock-timer urgent" : "wc-lock-timer"}>
+                  <span>{urgencyLabel(lockMinutes)}</span>
+                </div>
+
+                {hasBet && game.viewer_prediction ? (
+                  <>
+                    <div className="wc-matchup readonly">
+                      <div className="wc-team">
+                        <span className="wc-team-flag"><TeamFlag team={game.home_team} /></span>
+                        <span className="wc-team-name">{game.home_team}</span>
+                      </div>
+                      <div className="wc-score readonly-score">
+                        <strong>
+                          {game.viewer_prediction.home_score} x {game.viewer_prediction.away_score}
+                        </strong>
+                      </div>
+                      <div className="wc-team away">
+                        <span className="wc-team-flag"><TeamFlag team={game.away_team} /></span>
+                        <span className="wc-team-name">{game.away_team}</span>
+                      </div>
+                    </div>
+                    {game.viewer_prediction.scorer_guess && (
+                      <div className="wc-scorer-row readonly">
+                        <Goal size={15} />
+                        <span>{game.viewer_prediction.scorer_guess}</span>
+                      </div>
+                    )}
+                    <div className="wc-bet-locked-note">
+                      <CheckCircle2 size={16} />
+                      <span>Palpite cravado. Este jogo só sai da fila quando começar ou finalizar.</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="wc-matchup">
+                      <div className="wc-team">
+                        <span className="wc-team-flag"><TeamFlag team={game.home_team} /></span>
+                        <span className="wc-team-name">{game.home_team}</span>
+                      </div>
+                      <div className="wc-score">
+                        <div className="wc-score-inputs">
+                          <input
+                            aria-label={`Gols de ${game.home_team}`}
+                            inputMode="numeric"
+                            min={0}
+                            onChange={(event) => updatePredictionDraft(game, "home", event.target.value)}
+                            type="number"
+                            value={draft.home}
+                          />
+                          <small>x</small>
+                          <input
+                            aria-label={`Gols de ${game.away_team}`}
+                            inputMode="numeric"
+                            min={0}
+                            onChange={(event) => updatePredictionDraft(game, "away", event.target.value)}
+                            type="number"
+                            value={draft.away}
+                          />
+                        </div>
+                      </div>
+                      <div className="wc-team away">
+                        <span className="wc-team-flag"><TeamFlag team={game.away_team} /></span>
+                        <span className="wc-team-name">{game.away_team}</span>
+                      </div>
+                    </div>
+
+                    <div className="wc-scorer-row">
+                      <Goal size={15} />
+                      <ScorerPicker
+                        game={game}
+                        onChange={(scorer) => updatePredictionDraft(game, "scorer", scorer)}
+                        players={players}
+                        value={draft.scorer}
+                      />
+                    </div>
+                    <button
+                      className={justSaved ? "wc-bet-button saved" : "wc-bet-button"}
+                      disabled={savingPrediction === game.id}
+                      onClick={() => handlePrediction(game)}
+                      type="button"
+                    >
+                      {justSaved ? (
+                        <>
+                          <Trophy size={16} />
+                          <span>Palpite cravado!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Zap size={16} />
+                          <span>{savingPrediction === game.id ? "Cravando..." : "Cravar palpite"}</span>
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
+
+                <div className="wc-game-foot">
+                  <span>{game.venue || "Local a confirmar"}</span>
+                  <span>
+                    <Users size={12} /> {game.predictions_count}
+                  </span>
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      ) : (
+        <section className="empty-state bolao-empty">
+          <Trophy size={24} />
+          <strong>Nenhum jogo aberto nesse filtro</strong>
+          <span>
+            {summary.predicted > 0
+              ? "Seus palpites fechados estão em Minhas apostas."
+              : quickFilter === "today"
+                ? "Nenhum jogo hoje. Confere os próximos em Abertos."
+                : "Tenta outro filtro ou aguarda a próxima rodada."}
+          </span>
+          {summary.predicted > 0 && (
+            <button className="wc-urgency-action" onClick={() => setMyBetsModalOpen(true)} type="button">
+              <Ticket size={15} />
+              <span>Ver minhas apostas</span>
+            </button>
+          )}
+        </section>
+      )}
+
+      {myBetsModalOpen && (
+        <div className="event-modal-backdrop" onClick={() => setMyBetsModalOpen(false)}>
+          <div className="event-modal glass-panel wc-modal wc-bets-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <span className="eyebrow">Seus palpites</span>
+                <h2>Minhas apostas</h2>
+              </div>
+              <button className="modal-close" onClick={() => setMyBetsModalOpen(false)} type="button">
+                <X size={18} />
+              </button>
             </div>
-          </section>
 
-          {filteredGames.length > 0 ? (
-            <section className="bolao-game-grid">
-              {filteredGames.map((game) => {
-                const locked = isGameLocked(game, currentTime);
-                const predictionDraft = predictionDraftFor(game);
-                const resultDraft = resultDraftFor(game);
+            {myBetGames.length > 0 ? (
+              <div className="wc-bets-list">
+                {myBetGames.map((game) => {
+                  const prediction = game.viewer_prediction!;
+                  const scored = prediction.status === "scored";
+                  const showScore = (game.status === "finished" || game.status === "live") && game.home_score !== null;
 
-                return (
-                  <article className={locked ? "bolao-game-card glass-panel locked" : "bolao-game-card glass-panel"} key={game.id}>
-                    <div className="bolao-game-head">
-                      <div>
-                        <span className="eyebrow">
+                  return (
+                    <article className={["wc-bet-slip", scored && prediction.points > 0 ? "won" : ""].filter(Boolean).join(" ")} key={game.id}>
+                      <div className="wc-bet-slip-top">
+                        <span className="wc-game-stage">
                           {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
                         </span>
-                        <strong>{formatEventDate(game.kickoff_at)}</strong>
+                        <span className={`wc-game-status ${game.status}`}>{statusLabels[game.status]}</span>
                       </div>
-                      <span className={`bolao-status ${game.status}`}>{statusLabels[game.status]}</span>
-                    </div>
-
-                    <div className="bolao-matchup">
-                      <div>
-                        <span>{game.home_team}</span>
-                        {(game.status === "finished" || game.status === "live") && game.home_score !== null && (
-                          <strong>{game.home_score}</strong>
+                      <div className="wc-bet-slip-match">
+                        <span>
+                          <TeamFlag team={game.home_team} /> {game.home_team}
+                        </span>
+                        <strong>
+                          {showScore ? `${game.home_score} x ${game.away_score}` : `${prediction.home_score} x ${prediction.away_score}`}
+                        </strong>
+                        <span>
+                          {game.away_team} <TeamFlag team={game.away_team} />
+                        </span>
+                      </div>
+                      <div className="wc-bet-slip-meta">
+                        <span>{formatEventDate(game.kickoff_at)}</span>
+                        <span>{game.venue || "Local a confirmar"}</span>
+                      </div>
+                      <div className="wc-bet-slip-pick">
+                        <span>
+                          Seu palpite: <strong>{prediction.home_score}x{prediction.away_score}</strong>
+                          {prediction.scorer_guess ? (
+                            <>
+                              {" · "}
+                              <strong className={prediction.scorer_hit ? "hit" : ""}>⚽ {prediction.scorer_guess}</strong>
+                            </>
+                          ) : null}
+                        </span>
+                        {scored ? (
+                          <b className={prediction.points > 0 ? "wc-points-badge won" : "wc-points-badge"}>
+                            {prediction.points > 0 ? `+${prediction.points} pts` : "0 pts"}
+                          </b>
+                        ) : (
+                          <b className="wc-points-badge pending">Aguardando</b>
                         )}
                       </div>
-                      <small>x</small>
-                      <div>
-                        {(game.status === "finished" || game.status === "live") && game.away_score !== null && (
-                          <strong>{game.away_score}</strong>
-                        )}
-                        <span>{game.away_team}</span>
-                      </div>
-                    </div>
-
-                    <div className="bolao-game-meta">
-                      <span>{game.venue || "Local a confirmar"}</span>
-                      <span>{game.predictions_count} palpites</span>
-                    </div>
-
-                    {game.status === "finished" && game.scorers && (
-                      <div className="bolao-scorers">
-                        <Goal size={14} />
-                        <span>{game.scorers}</span>
-                      </div>
-                    )}
-
-                    <div className="bolao-prediction-box">
-                      <div>
-                        <span>Seu palpite</span>
-                        {game.viewer_prediction && (
-                          <strong>
-                            {game.viewer_prediction.home_score} x {game.viewer_prediction.away_score}
-                            {game.viewer_prediction.scorer_guess ? ` · ⚽ ${game.viewer_prediction.scorer_guess}` : ""}
-                            {game.viewer_prediction.status === "scored" ? ` · ${game.viewer_prediction.points} pts` : ""}
-                          </strong>
-                        )}
-                      </div>
-                      <div className="score-input-row">
-                        <input
-                          aria-label={`Gols de ${game.home_team}`}
-                          disabled={locked}
-                          min={0}
-                          onChange={(event) => updatePredictionDraft(game, "home", event.target.value)}
-                          type="number"
-                          value={predictionDraft.home}
-                        />
-                        <span>x</span>
-                        <input
-                          aria-label={`Gols de ${game.away_team}`}
-                          disabled={locked}
-                          min={0}
-                          onChange={(event) => updatePredictionDraft(game, "away", event.target.value)}
-                          type="number"
-                          value={predictionDraft.away}
-                        />
-                        <button disabled={locked || savingPrediction === game.id} onClick={() => handlePrediction(game)} type="button">
-                          <Save size={15} />
-                          <span>{savingPrediction === game.id ? "Salvando" : "Salvar"}</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {!locked && (
-                      <div className="bolao-scorer-guess">
-                        <Target size={14} />
-                        <input
-                          aria-label="Quem marca gol?"
-                          className="input-field"
-                          maxLength={80}
-                          onChange={(event) => updatePredictionDraft(game, "scorer", event.target.value)}
-                          placeholder="Quem marca gol? (bônus +1 pt)"
-                          value={predictionDraft.scorer}
-                        />
-                      </div>
-                    )}
-
-                    {isAdmin && (
-                      <div className="bolao-admin-result-wrap">
-                        <div className="bolao-admin-result">
-                          <span>Resultado admin</span>
-                          <div className="score-input-row">
-                            <input
-                              aria-label={`Resultado de ${game.home_team}`}
-                              min={0}
-                              onChange={(event) => updateResultDraft(game, "home", event.target.value)}
-                              type="number"
-                              value={resultDraft.home}
-                            />
-                            <span>x</span>
-                            <input
-                              aria-label={`Resultado de ${game.away_team}`}
-                              min={0}
-                              onChange={(event) => updateResultDraft(game, "away", event.target.value)}
-                              type="number"
-                              value={resultDraft.away}
-                            />
-                            <button disabled={savingResult === game.id} onClick={() => handleResult(game)} type="button">
-                              <ShieldCheck size={15} />
-                              <span>{savingResult === game.id ? "Lançando" : "Finalizar"}</span>
-                            </button>
-                          </div>
+                      {game.status === "finished" && game.scorers && (
+                        <div className="wc-game-scorers">
+                          <Goal size={13} />
+                          <span>{game.scorers}</span>
                         </div>
-                        <input
-                          aria-label="Quem marcou os gols"
-                          className="input-field"
-                          onChange={(event) => updateResultDraft(game, "scorers", event.target.value)}
-                          placeholder="Quem marcou? Ex: Vini Jr, Mbappé"
-                          value={resultDraft.scorers}
-                        />
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
-            </section>
-          ) : (
-            <section className="empty-state bolao-empty">
-              <Trophy size={24} />
-              <strong>Nenhum jogo encontrado</strong>
-              <span>{isAdmin ? "Importe a tabela openfootball ou cadastre o primeiro jogo manualmente." : "O admin ainda vai liberar os jogos do bolão."}</span>
-            </section>
-          )}
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="rail-empty-copy">Você ainda não cravou nenhum palpite.</p>
+            )}
+          </div>
         </div>
+      )}
 
-        <aside className="bolao-side">
-          {highlights?.last_game && (
-            <section className="bolao-highlight glass-panel">
-              <div className="bolao-side-head">
-                <span className="eyebrow">Último jogo</span>
-                <Goal size={18} />
+      {rankingModalOpen && (
+        <div className="event-modal-backdrop" onClick={() => setRankingModalOpen(false)}>
+          <div className="event-modal glass-panel wc-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <span className="eyebrow">Bolão da Copa</span>
+                <h2>Ranking</h2>
               </div>
-              <h2>
-                {highlights.last_game.home_team} {highlights.last_game.home_score} x {highlights.last_game.away_score}{" "}
-                {highlights.last_game.away_team}
-              </h2>
-              {highlights.last_game_winners.length > 0 ? (
-                <div className="bolao-ranking-list">
-                  {highlights.last_game_winners.map((prediction) => (
-                    <div className="bolao-rank-row" key={prediction.id}>
-                      <strong>+{prediction.points}</strong>
-                      <Avatar user={prediction.user} size="sm" />
-                      <span>{prediction.user.name}</span>
-                      <small>
-                        {prediction.home_score}x{prediction.away_score}
-                        {prediction.scorer_hit ? " ⚽" : ""}
-                      </small>
-                      <b />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="bolao-highlight-empty">Ninguém pontuou nesse jogo.</p>
-              )}
-            </section>
-          )}
-
-          <section className="bolao-ranking glass-panel">
-            <div className="bolao-side-head">
-              <span className="eyebrow">Leaderboard</span>
-              <Medal size={18} />
-            </div>
-            <h2>Ranking do bolão</h2>
-            <div className="bolao-rules">
-              <span>Placar exato: {board?.rules.exact_score ?? 3} pts</span>
-              <span>Vencedor certo: {board?.rules.correct_outcome ?? 1} pt</span>
-              <span>Artilheiro certo: +{board?.rules.scorer_bonus ?? 1} pt</span>
-              <span>Campeão da Copa: {board?.rules.champion ?? 10} pts</span>
-            </div>
-            <div className="segmented-control bolao-ranking-tabs">
-              {rankingTabs.map((tab) => (
-                <button
-                  className={rankingTab === tab.key ? "active" : ""}
-                  key={tab.key}
-                  onClick={() => setRankingTab(tab.key)}
-                  type="button"
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <div className="bolao-ranking-list">
-              {sortedRanking.slice(0, 8).map((entry, index) => (
-                <div className="bolao-rank-row" key={entry.user.id}>
-                  <strong>{rankingTab === "geral" ? entry.rank : index + 1}</strong>
-                  <Avatar user={entry.user} size="sm" />
-                  <span>{entry.user.name}</span>
-                  <small>
-                    {rankingTab === "geral"
-                      ? `${entry.exact_scores} exatos`
-                      : rankingTab === "artilheiro"
-                        ? `${entry.scorer_hits} acertos`
-                        : `${entry.predictions} palpites`}
-                  </small>
-                  <b>
-                    {rankingValue(entry, rankingTab)} {rankingUnit(rankingTab)}
-                  </b>
-                </div>
-              ))}
-              {sortedRanking.length === 0 && <p>Ninguém pontuou ainda. O ranking nasce no primeiro resultado finalizado.</p>}
-            </div>
-          </section>
-
-          {isAdmin && (
-            <section className="bolao-admin-panel glass-panel">
-              <div className="bolao-side-head">
-                <span className="eyebrow">Admin</span>
-                <CalendarPlus size={18} />
-              </div>
-              <h2>Gerenciar jogos</h2>
-              {board?.last_sync && (
-                <p className="bolao-sync-info">
-                  <RefreshCcw size={13} /> Sync automático: {formatEventDate(board.last_sync)}
-                </p>
-              )}
-              <button className="btn-secondary bolao-sync-button" disabled={syncing} onClick={handleSyncOpenfootball} type="button">
-                <DownloadCloud size={17} />
-                <span>{syncing ? "Importando..." : "Sincronizar agora"}</span>
+              <button className="modal-close" onClick={() => setRankingModalOpen(false)} type="button">
+                <X size={18} />
               </button>
+            </div>
 
-              <form className="bolao-champion-form" onSubmit={handleAnnounceChampion}>
-                <input
-                  className="input-field"
-                  list="bolao-teams"
-                  onChange={(event) => setChampionAnnounceDraft(event.target.value)}
-                  placeholder="Definir campeã da Copa"
-                  value={championAnnounceDraft}
-                />
-                <button className="btn-secondary" disabled={announcingChampion || !championAnnounceDraft.trim()} type="submit">
-                  <Crown size={16} />
-                  <span>{announcingChampion ? "Definindo..." : "Definir campeã"}</span>
-                </button>
-              </form>
+            <BolaoRankingPanel
+              board={board}
+              highlights={highlights}
+              onTabChange={setRankingTab}
+              rankingTab={rankingTab}
+              sortedRanking={sortedRanking}
+            />
+          </div>
+        </div>
+      )}
 
-              <form className="bolao-admin-form" onSubmit={handleCreateGame}>
-                <label>
-                  Seleção mandante
+      {resultModalGame && (
+        <div className="event-modal-backdrop" onClick={() => setResultModalGame(null)}>
+          <div className="event-modal glass-panel wc-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <span className="eyebrow">Resultado oficial</span>
+                <h2>
+                  <TeamFlag team={resultModalGame.home_team} /> {resultModalGame.home_team} x {resultModalGame.away_team}{" "}
+                  <TeamFlag team={resultModalGame.away_team} />
+                </h2>
+              </div>
+              <button className="modal-close" onClick={() => setResultModalGame(null)} type="button">
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleResult}>
+              <div className="modal-grid">
+                <div className="modal-field">
+                  <label htmlFor="result-home">{resultModalGame.home_team}</label>
                   <input
                     className="input-field"
+                    id="result-home"
+                    inputMode="numeric"
+                    min={0}
+                    onChange={(event) => setResultDraft((current) => ({ ...current, home: event.target.value }))}
+                    type="number"
+                    value={resultDraft.home}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="result-away">{resultModalGame.away_team}</label>
+                  <input
+                    className="input-field"
+                    id="result-away"
+                    inputMode="numeric"
+                    min={0}
+                    onChange={(event) => setResultDraft((current) => ({ ...current, away: event.target.value }))}
+                    type="number"
+                    value={resultDraft.away}
+                  />
+                </div>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="result-scorers">Quem marcou (separa por vírgula)</label>
+                <input
+                  className="input-field"
+                  id="result-scorers"
+                  onChange={(event) => setResultDraft((current) => ({ ...current, scorers: event.target.value }))}
+                  placeholder="Ex: Vini Jr, Mbappé"
+                  value={resultDraft.scorers}
+                />
+              </div>
+              <button className="btn-primary" disabled={savingResult} type="submit">
+                <Save size={16} />
+                <span>{savingResult ? "Lançando..." : "Finalizar jogo"}</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {adminModalOpen && (
+        <div className="event-modal-backdrop" onClick={() => setAdminModalOpen(false)}>
+          <div className="event-modal glass-panel wc-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <span className="eyebrow">Admin</span>
+                <h2>Gerenciar bolão</h2>
+              </div>
+              <button className="modal-close" onClick={() => setAdminModalOpen(false)} type="button">
+                <X size={18} />
+              </button>
+            </div>
+
+            {board?.last_sync && (
+              <p className="bolao-sync-info">
+                <RefreshCcw size={13} /> Sync automático a cada 10 min via openfootball · placares, artilheiros e pontos ·
+                último: {formatEventDate(board.last_sync)}
+              </p>
+            )}
+
+            <div className="wc-admin-sync-row">
+              <button className="btn-secondary" disabled={syncing} onClick={handleSyncOpenfootball} type="button">
+                <DownloadCloud size={16} />
+                <span>{syncing ? "Importando..." : "Sincronizar jogos"}</span>
+              </button>
+              <button className="btn-secondary" disabled={syncingSquads} onClick={handleSyncSquads} type="button">
+                <Users size={16} />
+                <span>{syncingSquads ? "Importando..." : "Sincronizar elencos"}</span>
+              </button>
+            </div>
+
+            <form className="wc-champion-form" onSubmit={handleAnnounceChampion}>
+              <input
+                className="input-field"
+                list="bolao-teams"
+                onChange={(event) => setChampionAnnounceDraft(event.target.value)}
+                placeholder="Definir campeã da Copa"
+                value={championAnnounceDraft}
+              />
+              <button className="btn-secondary" disabled={announcingChampion || !championAnnounceDraft.trim()} type="submit">
+                <Crown size={15} />
+                <span>{announcingChampion ? "..." : "Definir"}</span>
+              </button>
+            </form>
+
+            <form className="bolao-admin-form" onSubmit={handleCreateGame}>
+              <span className="eyebrow">
+                <CalendarPlus size={13} /> Cadastrar jogo manual
+              </span>
+              <div className="modal-grid">
+                <div className="modal-field">
+                  <label htmlFor="game-home">Seleção mandante</label>
+                  <input
+                    className="input-field"
+                    id="game-home"
                     onChange={(event) => updateGameDraft("home_team", event.target.value)}
                     required
                     value={gameDraft.home_team}
                   />
-                </label>
-                <label>
-                  Seleção visitante
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="game-away">Seleção visitante</label>
                   <input
                     className="input-field"
+                    id="game-away"
                     onChange={(event) => updateGameDraft("away_team", event.target.value)}
                     required
                     value={gameDraft.away_team}
                   />
-                </label>
-                <div className="bolao-admin-form-grid">
-                  <label>
-                    Data e hora
-                    <input
-                      className="input-field"
-                      onChange={(event) => updateGameDraft("kickoff_at", event.target.value)}
-                      required
-                      type="datetime-local"
-                      value={gameDraft.kickoff_at}
-                    />
-                  </label>
-                  <label>
-                    Grupo
-                    <input
-                      className="input-field"
-                      onChange={(event) => updateGameDraft("group_label", event.target.value)}
-                      placeholder="A"
-                      value={gameDraft.group_label}
-                    />
-                  </label>
                 </div>
-                <label>
-                  Fase
-                  <select className="input-field" onChange={(event) => updateGameDraft("stage", event.target.value)} value={gameDraft.stage}>
+              </div>
+              <div className="modal-grid">
+                <div className="modal-field">
+                  <label htmlFor="game-kickoff">Data e hora</label>
+                  <input
+                    className="input-field"
+                    id="game-kickoff"
+                    onChange={(event) => updateGameDraft("kickoff_at", event.target.value)}
+                    required
+                    type="datetime-local"
+                    value={gameDraft.kickoff_at}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="game-group">Grupo</label>
+                  <input
+                    className="input-field"
+                    id="game-group"
+                    onChange={(event) => updateGameDraft("group_label", event.target.value)}
+                    placeholder="A"
+                    value={gameDraft.group_label}
+                  />
+                </div>
+              </div>
+              <div className="modal-grid">
+                <div className="modal-field">
+                  <label htmlFor="game-stage">Fase</label>
+                  <select className="input-field" id="game-stage" onChange={(event) => updateGameDraft("stage", event.target.value)} value={gameDraft.stage}>
                     {Object.entries(stageLabels).map(([value, label]) => (
                       <option key={value} value={value}>
                         {label}
                       </option>
                     ))}
                   </select>
-                </label>
-                <label>
-                  Estádio ou cidade
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="game-number">Número do jogo</label>
                   <input
                     className="input-field"
-                    onChange={(event) => updateGameDraft("venue", event.target.value)}
-                    value={gameDraft.venue}
-                  />
-                </label>
-                <label>
-                  Número do jogo
-                  <input
-                    className="input-field"
+                    id="game-number"
                     min={1}
                     onChange={(event) => updateGameDraft("match_number", event.target.value)}
                     type="number"
                     value={gameDraft.match_number}
                   />
-                </label>
-                <button className="btn-primary" disabled={creatingGame}>
-                  <Save size={17} />
-                  <span>{creatingGame ? "Cadastrando..." : "Cadastrar jogo"}</span>
-                </button>
-              </form>
-            </section>
-          )}
-        </aside>
-      </section>
+                </div>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="game-venue">Estádio ou cidade</label>
+                <input
+                  className="input-field"
+                  id="game-venue"
+                  onChange={(event) => updateGameDraft("venue", event.target.value)}
+                  value={gameDraft.venue}
+                />
+              </div>
+              <button className="btn-primary" disabled={creatingGame}>
+                <Save size={16} />
+                <span>{creatingGame ? "Cadastrando..." : "Cadastrar jogo"}</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {nextGame && !nextGame.viewer_prediction && !isGameLocked(nextGame, currentTime) && (
+        <div className="wc-sticky-bet">
+          <div className="wc-sticky-bet-copy">
+            <span className="wc-sticky-flags">
+              <TeamFlag team={nextGame.home_team} /> x <TeamFlag team={nextGame.away_team} />
+            </span>
+            <strong>{urgencyLabel(minutesUntil(nextGame.kickoff_at, currentTime))}</strong>
+          </div>
+          <button className="wc-sticky-bet-button" onClick={() => scrollToGame(nextGame.id)} type="button">
+            <Zap size={16} />
+            <span>Cravar palpite</span>
+          </button>
+        </div>
+      )}
+      </div>
     </AppShell>
   );
 }

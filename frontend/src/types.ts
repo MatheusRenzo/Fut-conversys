@@ -236,6 +236,8 @@ export type WorldCupGame = {
   scorers?: string | null;
   source?: string | null;
   predictions_count: number;
+  is_placeholder?: boolean;
+  bettable?: boolean;
   viewer_prediction?: WorldCupPrediction | null;
 };
 
@@ -268,6 +270,16 @@ export type WorldCupChampion = {
   viewer_pick?: WorldCupChampionPick | null;
   picks: WorldCupChampionPick[];
 };
+
+export type WorldCupPlayer = {
+  id: number;
+  name: string;
+  number?: number | null;
+  position?: string | null;
+  club?: string | null;
+};
+
+export type WorldCupSquads = Record<string, WorldCupPlayer[]>;
 
 export type WorldCupHighlights = {
   last_game?: WorldCupGame | null;

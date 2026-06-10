@@ -10,16 +10,20 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-echo "[1/4] Parando containers antigos..."
+echo "[1/5] Preparando certificado SSL..."
+chmod +x nginx/install-ssl.sh nginx/generate-selfsigned.sh
+./nginx/install-ssl.sh
+
+echo "[2/5] Parando containers antigos..."
 docker compose down --remove-orphans 2>/dev/null || true
 
-echo "[2/4] Construindo imagens..."
-docker compose build --no-cache
+echo "[3/5] Construindo imagens..."
+docker compose build
 
-echo "[3/4] Subindo serviços..."
+echo "[4/5] Subindo serviços..."
 docker compose up -d
 
-echo "[4/4] Aguardando serviços ficarem prontos..."
+echo "[5/5] Aguardando serviços ficarem prontos..."
 sleep 8
 
 echo ""
@@ -27,15 +31,19 @@ echo "--- Status dos containers ---"
 docker compose ps
 
 echo ""
-echo "--- Teste de saúde do backend ---"
+echo "--- Teste de saúde (HTTPS local :443) ---"
 for i in $(seq 1 12); do
-  if curl -sf http://localhost:2000/api/backend/api/health > /dev/null 2>&1; then
-    echo "Backend OK"
+  if curl -kfsS https://localhost/api/backend/api/health > /dev/null 2>&1; then
+    echo "HTTPS OK (nginx :443)"
     break
   fi
-  echo "Aguardando backend... ($i/12)"
+  echo "Aguardando nginx... ($i/12)"
   sleep 5
 done
 
 echo ""
-echo "=== Deploy concluído! Acesse: http://<REDACTED-IP>:2000 ==="
+echo "=== Deploy concluído! ==="
+echo "  Interno:  https://<REDACTED-IP>"
+echo "  Externo:  https://fut.conversys.global:9443  (firewall WAN 9443 → nginx 443)"
+echo ""
+echo "Certificado oficial: ~/conversys-wildcard-cert.tar.gz → ./nginx/install-ssl.sh && docker compose restart nginx"

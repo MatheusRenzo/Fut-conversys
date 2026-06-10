@@ -11,6 +11,7 @@ import type {
   WorldCupChampion,
   WorldCupGame,
   WorldCupLeaderboardEntry,
+  WorldCupSquads,
 } from "@/types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -144,6 +145,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  updateEvent: (id: number, payload: EventCreatePayload) =>
+    apiFetch<Event>(`/api/events/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  deleteEvent: (id: number) =>
+    apiFetch<{ ok: boolean }>(`/api/events/${id}`, {
+      method: "DELETE",
+    }),
   event: (id: number) => apiFetch<Event>(`/api/events/${id}`),
   rsvp: (eventId: number, status: "going" | "not_going") =>
     apiFetch<Event>(`/api/events/${eventId}/rsvp`, {
@@ -186,6 +196,14 @@ export const api = {
     apiFetch<{ game: WorldCupGame; leaderboard: WorldCupLeaderboardEntry[] }>(`/api/world-cup/games/${gameId}/result`, {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  worldCupLeaderboard: () =>
+    apiFetch<{ leaderboard: WorldCupLeaderboardEntry[] }>("/api/world-cup/leaderboard"),
+  worldCupPlayers: () =>
+    apiFetch<{ players: WorldCupSquads; last_sync?: string | null }>("/api/world-cup/players"),
+  syncWorldCupSquads: () =>
+    apiFetch<{ imported: number; updated: number; players: WorldCupSquads }>("/api/world-cup/sync/squads", {
+      method: "POST",
     }),
   submitWorldCupChampionPick: (team: string) =>
     apiFetch<WorldCupChampion>("/api/world-cup/champion-pick", {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, CalendarDays, CheckCircle2, MapPin, UsersRound } from "lucide-react";
+import { ArrowRight, CalendarDays, CheckCircle2, MapPin, Pencil, Trash2, UsersRound } from "lucide-react";
 import type { Event } from "@/types";
 import { formatEventDate } from "@/lib/format";
 import { Avatar } from "./Avatar";
@@ -10,10 +10,16 @@ export function EventCard({
   event,
   onRSVP,
   compact = false,
+  isAdmin = false,
+  onEdit,
+  onDelete,
 }: {
   event: Event;
   onRSVP?: (eventId: number, status: "going" | "not_going") => void;
   compact?: boolean;
+  isAdmin?: boolean;
+  onEdit?: (event: Event) => void;
+  onDelete?: (event: Event) => void;
 }) {
   const fill = Math.min(100, (event.confirmed_players / event.max_players) * 100);
 
@@ -21,6 +27,18 @@ export function EventCard({
     <article className={compact ? "event-card compact" : "event-card glass-panel"}>
       {event.cover_url && <img className="event-cover" src={event.cover_url} alt={event.title} />}
       <div className="event-content">
+        {isAdmin && (
+          <div className="event-admin-actions">
+            <button aria-label={`Editar ${event.title}`} className="event-admin-button" onClick={() => onEdit?.(event)} type="button">
+              <Pencil size={15} />
+              <span>Editar</span>
+            </button>
+            <button aria-label={`Excluir ${event.title}`} className="event-admin-button danger" onClick={() => onDelete?.(event)} type="button">
+              <Trash2 size={15} />
+              <span>Excluir</span>
+            </button>
+          </div>
+        )}
         <div className="event-meta">
           <span>{event.event_type}</span>
           <span>

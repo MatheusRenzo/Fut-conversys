@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { BadgeCheck, Check, Clock3, Pencil, Save, ShieldCheck, Sparkles, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
@@ -84,6 +84,62 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function cloneProfile(profile: UserProfile): UserProfile {
+  return JSON.parse(JSON.stringify(profile)) as UserProfile;
+}
+
+function profileSnapshot(profile: UserProfile, verified: boolean) {
+  if (verified) {
+    return {
+      display_name: profile.display_name || profile.name || "",
+      title: profile.title || "",
+      position: profile.position || "",
+      favorite_team: profile.favorite_team || "",
+      favorite_player: profile.favorite_player || "",
+      bio: profile.bio || "",
+      avatar_url: profile.avatar_url || "",
+      banner_url: profile.banner_url || "",
+      banner_position_x: profile.banner_position_x ?? 50,
+      banner_position_y: profile.banner_position_y ?? 50,
+      profile_frame: profile.profile_frame ?? "conversys",
+      profile_effect: profile.profile_effect ?? "off",
+      show_verified_badge: profile.show_verified_badge !== false,
+    };
+  }
+
+  return {
+    avatar_url: profile.avatar_url || "",
+    banner_url: profile.banner_url || "",
+    banner_position_x: profile.banner_position_x ?? 50,
+    banner_position_y: profile.banner_position_y ?? 50,
+  };
+}
+
+function isProfileDirty(original: UserProfile, draft: UserProfile) {
+  const verified = Boolean(original.verified_enabled);
+  return JSON.stringify(profileSnapshot(original, verified)) !== JSON.stringify(profileSnapshot(draft, verified));
+}
+
+function ProfileField({
+  label,
+  hint,
+  children,
+  className,
+}: {
+  label: string;
+  hint: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className ? `profile-field ${className}` : "profile-field"}>
+      <span>{label}</span>
+      <small>{hint}</small>
+      {children}
+    </div>
+  );
+}
+
 export default function MePage() {
   const router = useRouter();
   const bannerDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
@@ -93,7 +149,8 @@ export default function MePage() {
   const [adminUsers, setAdminUsers] = useState<UserProfile[]>([]);
   const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
   const [saved, setSaved] = useState(false);
-  const [editingProfile, setEditingProfile] = useState(false);
+  const [draft, setDraft] = useState<UserProfile | null>(null);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [goalReviewLoading, setGoalReviewLoading] = useState<string | null>(null);
   const [verifiedLoading, setVerifiedLoading] = useState<number | null>(null);
 
@@ -121,14 +178,32 @@ export default function MePage() {
     load();
   }, [router]);
 
-  const updateField = <K extends keyof UserProfile>(field: K, value: UserProfile[K]) => {
-    setProfile((current) => (current ? { ...current, [field]: value } : current));
+  const isEditing = draft !== null;
+  const editProfile = draft ?? profile;
+
+  const updateDraftField = <K extends keyof UserProfile>(field: K, value: UserProfile[K]) => {
+    setDraft((current) => (current ? { ...current, [field]: value } : current));
+    setSaved(false);
+  };
+
+  const startEditing = () => {
+    if (!profile) return;
+    setDraft(cloneProfile(profile));
+    setSaved(false);
+  };
+
+  const stopEditing = () => {
+    if (profile && draft && isProfileDirty(profile, draft)) {
+      const discard = window.confirm("Descartar alterações que ainda não foram confirmadas?");
+      if (!discard) return;
+    }
+    setDraft(null);
     setSaved(false);
   };
 
   const selectProfileFrame = (frame: NonNullable<UserProfile["profile_frame"]>) => {
-    if (!profile?.verified_enabled) return;
-    setProfile((current) =>
+    if (!draft?.verified_enabled) return;
+    setDraft((current) =>
       current
         ? {
             ...current,
@@ -143,28 +218,66 @@ export default function MePage() {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!profile) return;
-    const payload = profile.verified_enabled
-      ? profile
-      : {
-          avatar_url: profile.avatar_url,
-          banner_url: profile.banner_url,
-          banner_position_x: profile.banner_position_x,
-          banner_position_y: profile.banner_position_y,
-        };
-    const updated = await api.updateMe(payload);
-    setProfile(updated);
-    setSaved(true);
+    if (!profile || !draft) return;
+
+    setSavingProfile(true);
+    try {
+      const payload = draft.verified_enabled
+        ? draft
+        : {
+            avatar_url: draft.avatar_url,
+            banner_url: draft.banner_url,
+            banner_position_x: draft.banner_position_x,
+            banner_position_y: draft.banner_position_y,
+          };
+      const updated = await api.updateMe(payload);
+      setProfile(updated);
+      setDraft(null);
+      setSaved(true);
+    } finally {
+      setSavingProfile(false);
+    }
   };
+
+  // Recorta a foto em quadrado centralizado para encaixar no círculo do avatar em qualquer tela
+  const cropToSquare = (dataUrl: string, maxSide = 512): Promise<string> =>
+    new Promise((resolve) => {
+      const image = new Image();
+      image.onload = () => {
+        const side = Math.min(image.width, image.height);
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = Math.min(maxSide, side);
+        const context = canvas.getContext("2d");
+        if (!context || !side) {
+          resolve(dataUrl);
+          return;
+        }
+        context.drawImage(
+          image,
+          (image.width - side) / 2,
+          (image.height - side) / 2,
+          side,
+          side,
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        );
+        resolve(canvas.toDataURL("image/jpeg", 0.92));
+      };
+      image.onerror = () => resolve(dataUrl);
+      image.src = dataUrl;
+    });
 
   const selectImage = (field: "avatar_url" | "banner_url") => (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file || !draft) return;
 
     const reader = new FileReader();
-    reader.onload = () => {
-      const imageUrl = String(reader.result) as UserProfile[typeof field];
-      setProfile((current) =>
+    reader.onload = async () => {
+      const rawUrl = String(reader.result);
+      const imageUrl = (field === "avatar_url" ? await cropToSquare(rawUrl) : rawUrl) as UserProfile[typeof field];
+      setDraft((current) =>
         current
           ? {
               ...current,
@@ -185,7 +298,7 @@ export default function MePage() {
   };
 
   const updateBannerPosition = (x: number, y: number) => {
-    setProfile((current) =>
+    setDraft((current) =>
       current
         ? {
             ...current,
@@ -198,13 +311,13 @@ export default function MePage() {
   };
 
   const startBannerDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!profile?.banner_url) return;
+    if (!draft?.banner_url) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     bannerDragRef.current = {
       startX: event.clientX,
       startY: event.clientY,
-      originX: profile.banner_position_x ?? 50,
-      originY: profile.banner_position_y ?? 50,
+      originX: draft.banner_position_x ?? 50,
+      originY: draft.banner_position_y ?? 50,
     };
   };
 
@@ -226,8 +339,8 @@ export default function MePage() {
   };
 
   const selectProfileEffect = (effect: NonNullable<UserProfile["profile_effect"]>) => {
-    if (!profile?.verified_enabled) return;
-    setProfile((current) =>
+    if (!draft?.verified_enabled) return;
+    setDraft((current) =>
       current
         ? {
             ...current,
@@ -266,22 +379,26 @@ export default function MePage() {
     }
   };
 
-  if (!profile) return <div className="empty-state">Carregando seu perfil...</div>;
+  if (!profile || !editProfile) return <div className="empty-state">Carregando seu perfil...</div>;
 
-  const currentFrame = profile.profile_frame ?? "conversys";
-  const bannerPositionX = profile.banner_position_x ?? 50;
-  const bannerPositionY = profile.banner_position_y ?? 50;
-  const profileEffect = effectOptions.some((option) => option.value === profile.profile_effect) ? profile.profile_effect : "off";
+  const previewProfile = isEditing ? draft ?? profile : profile;
+  const currentFrame = editProfile.profile_frame ?? "conversys";
+  const bannerPositionX = editProfile.banner_position_x ?? 50;
+  const bannerPositionY = editProfile.banner_position_y ?? 50;
+  const profileEffect = effectOptions.some((option) => option.value === editProfile.profile_effect)
+    ? editProfile.profile_effect
+    : "off";
   const currentEffect = currentFrame !== "none" && profileEffect && profileEffect !== "off" ? profileEffect : "off";
   const isAdmin = profile.is_admin;
   const canUseVerifiedFeatures = profile.verified_enabled;
+  const hasUnsavedChanges = Boolean(draft && isProfileDirty(profile, draft));
   const pendingGoalClaims = isAdmin
     ? posts.filter((post) => (post.goals_scored ?? 0) > 0 && post.goal_status === "pending")
     : [];
 
   return (
     <AppShell user={profile} nextEvent={events[0] ?? null} leaderboard={leaderboard}>
-      <ProfileHeader profile={profile} />
+      <ProfileHeader profile={previewProfile} />
 
       {isAdmin && (
         <section className="content-card glass-panel goal-approval-panel">
@@ -386,61 +503,90 @@ export default function MePage() {
         <div className="section-heading compact-heading">
           <div>
             <span className="eyebrow">Perfil</span>
-            <h2>Atualização de perfil</h2>
-            <p>Dados do jogador ficam protegidos até você abrir a edição.</p>
+            <h2>Meu perfil</h2>
+            <p>Abra a edição, ajuste os campos e confirme no final. Nada é salvo automaticamente.</p>
           </div>
           <button
-            className={editingProfile ? "profile-edit-toggle active" : "profile-edit-toggle"}
-            onClick={() => setEditingProfile((current) => !current)}
+            className={isEditing ? "profile-edit-toggle active" : "profile-edit-toggle"}
+            onClick={() => (isEditing ? stopEditing() : startEditing())}
             type="button"
           >
-            {editingProfile ? <X size={17} /> : <Pencil size={17} />}
-            <span>{editingProfile ? "Fechar edição" : "Editar perfil"}</span>
+            {isEditing ? <X size={17} /> : <Pencil size={17} />}
+            <span>{isEditing ? "Fechar edição" : "Editar perfil"}</span>
           </button>
         </div>
 
-        {editingProfile && (
+        {isEditing && draft && (
           <form className="profile-edit-form" onSubmit={submit}>
+            <div className="profile-save-notice">
+              <strong>Alterações pendentes</strong>
+              <span>
+                Você está vendo uma prévia local. Clique em <em>Confirmar alterações</em> no final para publicar no
+                perfil.
+              </span>
+            </div>
+
             <div className="profile-editor-layout">
               <div className="profile-editor-fields">
                 {canUseVerifiedFeatures ? (
-                  <div className="settings-grid">
-                    <input
-                      className="input-field"
-                      placeholder="Nome de perfil"
-                      value={profile.display_name || profile.name || ""}
-                      onChange={(event) => updateField("display_name", event.target.value)}
-                    />
-                    <input
-                      className="input-field"
-                      placeholder="Título da resenha"
-                      value={profile.title || ""}
-                      onChange={(event) => updateField("title", event.target.value)}
-                    />
-                    <div className="position-field-picker">
-                      <div>
-                        <span>Posição em campo</span>
-                        <strong>Clique no campo para escolher onde você joga</strong>
-                        <small>O jogador vai para o ponto selecionado e essa posição será salva no perfil.</small>
-                      </div>
-                      <LineupPreview
-                        profile={profile}
-                        selectable
-                        onSelectPosition={(position) => updateField("position", position)}
+                  <div className="settings-grid profile-settings-grid">
+                    <ProfileField
+                      hint="Nome que aparece no feed, comentários, rankings e cards de evento."
+                      label="Nome de exibição"
+                    >
+                      <input
+                        className="input-field"
+                        id="profile-display-name"
+                        onChange={(event) => updateDraftField("display_name", event.target.value)}
+                        value={editProfile.display_name || editProfile.name || ""}
                       />
-                    </div>
-                    <input
-                      className="input-field"
-                      placeholder="Time preferido"
-                      value={profile.favorite_team || ""}
-                      onChange={(event) => updateField("favorite_team", event.target.value)}
-                    />
-                    <input
-                      className="input-field"
-                      placeholder="Jogador favorito"
-                      value={profile.favorite_player || ""}
-                      onChange={(event) => updateField("favorite_player", event.target.value)}
-                    />
+                    </ProfileField>
+                    <ProfileField
+                      hint="Frase curta abaixo do nome, tipo apelido da resenha ou vibe do jogador."
+                      label="Título da resenha"
+                    >
+                      <input
+                        className="input-field"
+                        id="profile-title"
+                        onChange={(event) => updateDraftField("title", event.target.value)}
+                        value={editProfile.title || ""}
+                      />
+                    </ProfileField>
+                    <ProfileField
+                      className="profile-field-wide"
+                      hint="Posição que aparece no seu perfil e ajuda o time a te reconhecer em campo."
+                      label="Posição em campo"
+                    >
+                      <div className="position-field-picker">
+                        <LineupPreview
+                          profile={editProfile}
+                          selectable
+                          onSelectPosition={(position) => updateDraftField("position", position)}
+                        />
+                      </div>
+                    </ProfileField>
+                    <ProfileField
+                      hint="Time de coração exibido no perfil e usado nas conversas do app."
+                      label="Time preferido"
+                    >
+                      <input
+                        className="input-field"
+                        id="profile-favorite-team"
+                        onChange={(event) => updateDraftField("favorite_team", event.target.value)}
+                        value={editProfile.favorite_team || ""}
+                      />
+                    </ProfileField>
+                    <ProfileField
+                      hint="Jogador referência que aparece como curiosidade no seu perfil."
+                      label="Jogador favorito"
+                    >
+                      <input
+                        className="input-field"
+                        id="profile-favorite-player"
+                        onChange={(event) => updateDraftField("favorite_player", event.target.value)}
+                        value={editProfile.favorite_player || ""}
+                      />
+                    </ProfileField>
                   </div>
                 ) : (
                   <div className="verified-locked-card">
@@ -453,56 +599,59 @@ export default function MePage() {
                 )}
 
                 <div className="media-picker-grid">
-                  <div className="profile-photo-stack">
+                  <ProfileField
+                    hint="Foto circular exibida no avatar, comentários, rankings e confirmações de evento."
+                    label="Foto de perfil"
+                  >
                     <label className="media-picker">
-                      <span>Foto de perfil</span>
                       <div className="media-preview avatar-media-preview">
-                        <Avatar user={profile} size="lg" />
+                        <Avatar user={editProfile} size="lg" />
                       </div>
                       <strong>Escolher foto</strong>
                       <input accept="image/*" className="file-input" onChange={selectImage("avatar_url")} type="file" />
                     </label>
-                  </div>
+                  </ProfileField>
 
-                  <div className="media-picker banner-position-editor">
-                    <div className="banner-position-head">
-                      <span>Banner do perfil</span>
-                      <strong>Prévia da área real</strong>
-                      <small>Arraste a imagem com o mouse para escolher exatamente o que aparece no perfil.</small>
-                    </div>
-                    <div
-                      className={`media-preview banner-media-preview banner-real-preview frame-banner-preview banner-frame-${currentFrame}`}
-                      onPointerCancel={stopBannerDrag}
-                      onPointerDown={startBannerDrag}
-                      onPointerMove={moveBannerDrag}
-                      onPointerUp={stopBannerDrag}
-                      role="img"
-                      aria-label="Prévia reposicionável do banner"
-                      style={{
-                        backgroundImage: profile.banner_url ? `url(${profile.banner_url})` : undefined,
-                        backgroundPosition: `${bannerPositionX}% ${bannerPositionY}%`,
-                      }}
-                    >
-                      {profile.banner_url ? (
-                        <>
-                          <span className="banner-visible-frame" />
-                          <em>Arraste para reposicionar</em>
-                        </>
-                      ) : (
-                        <label className="banner-empty-hint">
-                          <strong>Escolher banner</strong>
-                          <span>Depois de subir, arraste para ajustar o recorte.</span>
+                  <ProfileField
+                    className="profile-field-wide"
+                    hint="Imagem de capa do perfil. Depois de enviar, arraste a prévia para definir o recorte."
+                    label="Banner do perfil"
+                  >
+                    <div className="media-picker banner-position-editor">
+                      <div
+                        className={`media-preview banner-media-preview banner-real-preview frame-banner-preview banner-frame-${currentFrame}`}
+                        onPointerCancel={stopBannerDrag}
+                        onPointerDown={startBannerDrag}
+                        onPointerMove={moveBannerDrag}
+                        onPointerUp={stopBannerDrag}
+                        role="img"
+                        aria-label="Prévia reposicionável do banner"
+                        style={{
+                          backgroundImage: editProfile.banner_url ? `url(${editProfile.banner_url})` : undefined,
+                          backgroundPosition: `${bannerPositionX}% ${bannerPositionY}%`,
+                        }}
+                      >
+                        {editProfile.banner_url ? (
+                          <>
+                            <span className="banner-visible-frame" />
+                            <em>Arraste para reposicionar</em>
+                          </>
+                        ) : (
+                          <label className="banner-empty-hint">
+                            <strong>Escolher banner</strong>
+                            <span>Depois de subir, arraste para ajustar o recorte.</span>
+                            <input accept="image/*" className="file-input" onChange={selectImage("banner_url")} type="file" />
+                          </label>
+                        )}
+                      </div>
+                      {editProfile.banner_url && (
+                        <label className="banner-change-button">
+                          Alterar foto do banner
                           <input accept="image/*" className="file-input" onChange={selectImage("banner_url")} type="file" />
                         </label>
                       )}
                     </div>
-                    {profile.banner_url && (
-                      <label className="banner-change-button">
-                        Alterar foto do banner
-                        <input accept="image/*" className="file-input" onChange={selectImage("banner_url")} type="file" />
-                      </label>
-                    )}
-                  </div>
+                  </ProfileField>
                 </div>
 
                 {canUseVerifiedFeatures && (
@@ -511,7 +660,7 @@ export default function MePage() {
                     <div>
                       <span className="eyebrow">Personalização</span>
                       <h3>Bordas do perfil</h3>
-                      <p>A mesma borda aparece na foto e em volta do banner. O movimento é opcional.</p>
+                      <p>A mesma borda aparece na foto e em volta do banner. O movimento é opcional e só entra após confirmar.</p>
                     </div>
                     <Sparkles size={20} />
                   </div>
@@ -557,7 +706,7 @@ export default function MePage() {
                       >
                         <span className="effect-preview-stack">
                           <Avatar
-                            user={{ ...profile, profile_frame: currentFrame, profile_effect: option.value }}
+                            user={{ ...editProfile, profile_frame: currentFrame, profile_effect: option.value }}
                             size="sm"
                           />
                           <span className={`banner-effect-preview banner-frame-${currentFrame} banner-effect-${option.value}`} />
@@ -571,19 +720,19 @@ export default function MePage() {
                   </div>
 
                   <button
-                    className={profile.verified_enabled && profile.show_verified_badge !== false ? "verified-visibility-toggle active" : "verified-visibility-toggle"}
-                    onClick={() => updateField("show_verified_badge", !(profile.show_verified_badge !== false))}
+                    className={editProfile.verified_enabled && editProfile.show_verified_badge !== false ? "verified-visibility-toggle active" : "verified-visibility-toggle"}
+                    onClick={() => updateDraftField("show_verified_badge", !(editProfile.show_verified_badge !== false))}
                     type="button"
                   >
                     <BadgeCheck size={18} />
                     <span>
                       <strong>
-                        {profile.show_verified_badge === false
+                        {editProfile.show_verified_badge === false
                             ? "Mostrar verificado"
                             : "Verificado visível"}
                       </strong>
                       <small>
-                        Você pode exibir ou esconder o selo no perfil e nos posts.
+                        Controla se o selo aparece no perfil e nos posts depois de confirmar.
                       </small>
                     </span>
                   </button>
@@ -591,21 +740,32 @@ export default function MePage() {
                 )}
 
                 {canUseVerifiedFeatures && (
-                  <textarea
-                    className="input-field"
-                    placeholder="Bio"
-                    value={profile.bio || ""}
-                    onChange={(event) => updateField("bio", event.target.value)}
-                  />
+                  <ProfileField
+                    hint="Texto livre sobre você. Aparece na área principal do perfil público."
+                    label="Bio"
+                  >
+                    <textarea
+                      className="input-field"
+                      id="profile-bio"
+                      onChange={(event) => updateDraftField("bio", event.target.value)}
+                      value={editProfile.bio || ""}
+                    />
+                  </ProfileField>
                 )}
               </div>
             </div>
-            <div className="action-row">
-              <button className="btn-primary">
-                <Save size={17} />
-                <span>Salvar perfil</span>
-              </button>
-              {saved && <span className="verified-badge">Perfil atualizado</span>}
+            <div className="profile-save-footer">
+              <div className="action-row">
+                <button className="btn-primary" disabled={savingProfile || !hasUnsavedChanges}>
+                  <Save size={17} />
+                  <span>{savingProfile ? "Salvando..." : "Confirmar alterações"}</span>
+                </button>
+                <button className="btn-secondary" disabled={savingProfile} onClick={stopEditing} type="button">
+                  Descartar
+                </button>
+              </div>
+              {hasUnsavedChanges && !savingProfile && <span className="profile-unsaved-badge">Alterações ainda não publicadas</span>}
+              {saved && !isEditing && <span className="verified-badge">Perfil atualizado</span>}
             </div>
           </form>
         )}

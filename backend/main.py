@@ -1,4 +1,5 @@
 import base64
+import fcntl
 import hashlib
 import hmac
 import json
@@ -48,6 +49,23 @@ OPENFOOTBALL_2026_FINALS_URL = os.getenv(
     "WORLD_CUP_OPENFOOTBALL_FINALS_URL",
     "https://raw.githubusercontent.com/openfootball/worldcup/master/2026--usa/cup_finals.txt",
 )
+WIKIPEDIA_SQUADS_URL = os.getenv(
+    "WORLD_CUP_SQUADS_URL",
+    "https://en.wikipedia.org/w/api.php?action=parse&page=2026_FIFA_World_Cup_squads&prop=wikitext&format=json&formatversion=2",
+)
+# Wikipedia usa nomes diferentes do openfootball para algumas seleções
+WIKIPEDIA_TEAM_ALIASES = {
+    "United States": "USA",
+    "Bosnia and Herzegovina": "Bosnia & Herzegovina",
+}
+OPENFOOTBALL_SQUAD_ALIASES = {
+    "United States": "USA",
+    "Bosnia and Herzegovina": "Bosnia & Herzegovina",
+}
+PLACEHOLDER_TEAM_PATTERN = re.compile(
+    r"^(?:[12][A-L]|W\d+|L\d+|3[A-L](?:/[A-L])+(?:/[A-L])*)$"
+)
+WORLD_CUP_YEAR = int(os.getenv("WORLD_CUP_YEAR", "2026"))
 MONTHS_EN = {
     "jan": 1,
     "feb": 2,
@@ -62,6 +80,28 @@ MONTHS_EN = {
     "nov": 11,
     "dec": 12,
 }
+
+
+def normalize_world_cup_team(team: str) -> str:
+    cleaned = re.sub(r"\s+", " ", team or "").strip()
+    return OPENFOOTBALL_SQUAD_ALIASES.get(cleaned, cleaned)
+
+
+def is_placeholder_world_cup_team(team: str) -> bool:
+    name = re.sub(r"\s+", " ", team or "").strip()
+    if not name:
+        return True
+    if "/" in name:
+        return True
+    return bool(PLACEHOLDER_TEAM_PATTERN.fullmatch(name))
+
+
+def is_bettable_world_cup_game(game: models.WorldCupGame) -> bool:
+    return not is_placeholder_world_cup_team(game.home_team) and not is_placeholder_world_cup_team(game.away_team)
+
+
+def squad_team_key(team: str) -> str:
+    return normalize_world_cup_team(team)
 
 
 def hash_password(password: str) -> str:
@@ -374,10 +414,43 @@ ensure_schema()
 app = FastAPI(title="Conversys Fut App API")
 
 
+_sync_lock_handle = None
+
+
+def world_cup_sync_leader() -> bool:
+    global _sync_lock_handle
+    lock_path = os.getenv("WORLD_CUP_SYNC_LOCK", "/tmp/fut-world-cup-sync.lock")
+    try:
+        handle = open(lock_path, "w")
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _sync_lock_handle = handle
+        return True
+    except BlockingIOError:
+        return False
+
+
 @app.on_event("startup")
 def start_world_cup_auto_sync() -> None:
     if os.getenv("WORLD_CUP_AUTO_SYNC", "1") == "0":
         return
+    if not world_cup_sync_leader():
+        return
+
+    def bootstrap_sync() -> None:
+        try:
+            session = SessionLocal()
+            try:
+                imported, updated = apply_world_cup_sync(session)
+                print(
+                    f"[world-cup-sync] bootstrap ok: imported={imported} updated={updated}",
+                    flush=True,
+                )
+            finally:
+                session.close()
+        except Exception as exc:
+            print(f"[world-cup-sync] bootstrap failed: {exc}", flush=True)
+
+    threading.Thread(target=bootstrap_sync, daemon=True, name="world-cup-sync-bootstrap").start()
     thread = threading.Thread(target=world_cup_sync_loop, daemon=True, name="world-cup-sync")
     thread.start()
 
@@ -851,10 +924,6 @@ def world_cup_prediction_points(
     return 0
 
 
-def normalize_scorer_name(value: str | None) -> str:
-    return re.sub(r"\s+", " ", value or "").strip().lower()
-
-
 def game_scorer_names(game: models.WorldCupGame) -> list[str]:
     if not game.scorers:
         return []
@@ -871,8 +940,7 @@ def score_world_cup_game(game: models.WorldCupGame) -> None:
             game.home_score,
             game.away_score,
         )
-        guess = normalize_scorer_name(prediction.scorer_guess)
-        hit = bool(guess and scorers and any(guess == name or guess in name or name in guess for name in scorers))
+        hit = scorer_guess_matches(scorers, prediction.scorer_guess)
         if hit:
             points += WORLD_CUP_POINTS_SCORER
         prediction.scorer_hit = hit
@@ -918,6 +986,8 @@ def world_cup_game_response(game: models.WorldCupGame, user: models.User | None 
         "scorers": game.scorers,
         "source": game.source,
         "predictions_count": len(game.predictions),
+        "is_placeholder": not is_bettable_world_cup_game(game),
+        "bettable": is_bettable_world_cup_game(game),
         "viewer_prediction": world_cup_prediction_response(viewer_prediction) if viewer_prediction else None,
     }
 
@@ -984,8 +1054,9 @@ def world_cup_leaderboard_response(db: Session) -> list[dict[str, Any]]:
         row["champion_points"] = pick.points or 0
         row["points"] += pick.points or 0
 
+    # Só entra no ranking quem palpitou em jogos ou já pontuou; palpite de campeão sozinho não lista
     leaderboard = sorted(
-        rows.values(),
+        (row for row in rows.values() if row["predictions"] > 0 or row["points"] > 0),
         key=lambda item: (item["points"], item["exact_scores"], item["outcome_hits"], item["scorer_hits"], item["predictions"]),
         reverse=True,
     )
@@ -1013,11 +1084,194 @@ def world_cup_stage_from_section(section: str) -> tuple[str, str | None]:
     return "group-stage", None
 
 
-def parse_openfootball_world_cup(text_data: str) -> list[dict[str, Any]]:
+def normalize_scorer_name(value: str | None) -> str:
+    cleaned = re.sub(r"\s+", " ", value or "").strip().lower()
+    cleaned = cleaned.replace(".", "")
+    return cleaned
+
+
+def scorer_guess_matches(actual_names: list[str], guess: str | None) -> bool:
+    normalized_guess = normalize_scorer_name(guess)
+    if not normalized_guess or not actual_names:
+        return False
+    for name in actual_names:
+        if normalized_guess == name:
+            return True
+        if normalized_guess in name or name in normalized_guess:
+            return True
+        guess_parts = [part for part in normalized_guess.split(" ") if len(part) > 2]
+        name_parts = [part for part in name.split(" ") if len(part) > 2]
+        if guess_parts and any(part in name_parts for part in guess_parts):
+            return True
+    return False
+
+
+def parse_openfootball_scorers_line(line: str) -> str | None:
+    stripped = line.strip()
+    if not stripped.startswith("(") or ")" not in stripped:
+        return None
+    if re.fullmatch(r"\(\d+\)", stripped):
+        return None
+
+    inner = stripped[1 : stripped.rfind(")")].strip()
+    if not inner:
+        return None
+
+    names: list[str] = []
+    for section in inner.split(";"):
+        section = re.sub(r"\([^)]*\)", " ", section)
+        for match in re.finditer(
+            r"([A-Za-zÀ-ÿ'`.-]+(?:\s+[A-Za-zÀ-ÿ'`.-]+)*)\s+\d{1,2}(?:\+\d{1,2})?'",
+            section,
+        ):
+            name = re.sub(r"\s+", " ", match.group(1)).strip(" ,")
+            if name:
+                names.append(name)
+
+    if not names:
+        return None
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for name in names:
+        key = normalize_scorer_name(name)
+        if key and key not in seen:
+            seen.add(key)
+            ordered.append(name)
+    return ", ".join(ordered)
+
+
+def parse_openfootball_matchup(matchup: str) -> tuple[str, str, int | None, int | None] | None:
+    matchup = re.sub(r"\s+", " ", matchup).strip()
+    versus_match = re.match(r"^(.+?)\s+v\s+(.+)$", matchup, re.IGNORECASE)
+    if versus_match:
+        return versus_match.group(1).strip(), versus_match.group(2).strip(), None, None
+
+    cleaned = re.sub(r"\([^)]*\)", " ", matchup)
+    cleaned = re.sub(r"\ba\.e\.t\.?", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bpen\.?\s+\d{1,2}-\d{1,2}", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    score_match = re.match(r"^(.+?)\s+(\d{1,2})-(\d{1,2})\s+(.+)$", cleaned)
+    if not score_match:
+        return None
+    return (
+        score_match.group(1).strip(),
+        score_match.group(4).strip(),
+        int(score_match.group(2)),
+        int(score_match.group(3)),
+    )
+
+
+def parse_openfootball_kickoff(
+    current_date: tuple[int, int],
+    hour: int,
+    minute: int,
+    offset_hours: int | None,
+    year: int = WORLD_CUP_YEAR,
+) -> datetime:
+    month, day = current_date
+    if offset_hours is None:
+        return datetime(year, month, day, hour, minute)
+    kickoff_local = datetime(
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        tzinfo=timezone(timedelta(hours=offset_hours)),
+    )
+    return kickoff_local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def parse_openfootball_game_line(
+    line: str,
+    current_date: tuple[int, int] | None,
+    match_counter: int,
+    year: int = WORLD_CUP_YEAR,
+) -> dict[str, Any] | None:
+    if not current_date:
+        return None
+
+    utc_match = re.match(
+        r"^(?:\((\d+)\)\s*)?(\d{1,2}:\d{2})\s+UTC([+-]\d{1,2})\s+(.+?)(?:\s+@\s+(.+))?$",
+        line,
+        re.IGNORECASE,
+    )
+    if utc_match:
+        parsed = parse_openfootball_matchup(utc_match.group(4).strip())
+        if not parsed:
+            return None
+        home_team, away_team, home_score, away_score = parsed
+        hour, minute = [int(part) for part in utc_match.group(2).split(":", 1)]
+        match_number = int(utc_match.group(1)) if utc_match.group(1) else match_counter
+        return {
+            "external_id": f"openfootball-{year}-{match_number}",
+            "match_number": match_number,
+            "home_team": normalize_world_cup_team(home_team),
+            "away_team": normalize_world_cup_team(away_team),
+            "kickoff_at": parse_openfootball_kickoff(current_date, hour, minute, int(utc_match.group(3)), year),
+            "venue": re.sub(r"\s+", " ", utc_match.group(5)).strip() if utc_match.group(5) else None,
+            "home_score": home_score,
+            "away_score": away_score,
+            "scorers": None,
+            "source": "openfootball",
+        }
+
+    legacy_time_match = re.match(
+        r"^(?:\((\d+)\)\s*)?(\d{1,2}:\d{2})\s+(.+?)(?:\s+@\s+(.+))?$",
+        line,
+    )
+    if legacy_time_match and "UTC" not in line.upper():
+        parsed = parse_openfootball_matchup(legacy_time_match.group(3).strip())
+        if not parsed:
+            return None
+        home_team, away_team, home_score, away_score = parsed
+        hour, minute = [int(part) for part in legacy_time_match.group(2).split(":", 1)]
+        match_number = int(legacy_time_match.group(1)) if legacy_time_match.group(1) else match_counter
+        return {
+            "external_id": f"openfootball-{year}-{match_number}",
+            "match_number": match_number,
+            "home_team": normalize_world_cup_team(home_team),
+            "away_team": normalize_world_cup_team(away_team),
+            "kickoff_at": parse_openfootball_kickoff(current_date, hour, minute, None, year),
+            "venue": re.sub(r"\s+", " ", legacy_time_match.group(4)).strip() if legacy_time_match.group(4) else None,
+            "home_score": home_score,
+            "away_score": away_score,
+            "scorers": None,
+            "source": "openfootball",
+        }
+
+    no_time_match = re.match(r"^(?:\((\d+)\)\s*)?(.+?)(?:\s+@\s+(.+))?$", line)
+    if no_time_match and ":" not in no_time_match.group(2)[:5]:
+        parsed = parse_openfootball_matchup(no_time_match.group(2).strip())
+        if not parsed:
+            return None
+        home_team, away_team, home_score, away_score = parsed
+        if home_score is None and away_score is None:
+            return None
+        match_number = int(no_time_match.group(1)) if no_time_match.group(1) else match_counter
+        return {
+            "external_id": f"openfootball-{year}-{match_number}",
+            "match_number": match_number,
+            "home_team": normalize_world_cup_team(home_team),
+            "away_team": normalize_world_cup_team(away_team),
+            "kickoff_at": parse_openfootball_kickoff(current_date, 12, 0, None, year),
+            "venue": re.sub(r"\s+", " ", no_time_match.group(3)).strip() if no_time_match.group(3) else None,
+            "home_score": home_score,
+            "away_score": away_score,
+            "scorers": None,
+            "source": "openfootball",
+        }
+
+    return None
+
+
+def parse_openfootball_world_cup(text_data: str, year: int = WORLD_CUP_YEAR) -> list[dict[str, Any]]:
     games: list[dict[str, Any]] = []
     stage = "group-stage"
     group_label = None
     current_date: tuple[int, int] | None = None
+    match_counter = 1
 
     for raw_line in text_data.splitlines():
         line = raw_line.strip()
@@ -1036,66 +1290,19 @@ def parse_openfootball_world_cup(text_data: str) -> list[dict[str, Any]]:
                 current_date = (month, int(date_match.group(3)))
             continue
 
-        line_match = re.match(
-            r"^(?:\((\d+)\)\s*)?(\d{1,2}:\d{2})\s+UTC([+-]\d{1,2})\s+(.+?)(?:\s+@\s+(.+))?$",
-            line,
-        )
-        if not line_match or not current_date:
+        scorers = parse_openfootball_scorers_line(line)
+        if scorers and games:
+            games[-1]["scorers"] = scorers
             continue
 
-        matchup = re.sub(r"\s+", " ", line_match.group(4)).strip()
-        home_team = away_team = None
-        home_score = away_score = None
-
-        versus_match = re.match(r"^(.+?)\s+v\s+(.+)$", matchup)
-        if versus_match:
-            home_team = versus_match.group(1).strip()
-            away_team = versus_match.group(2).strip()
-        else:
-            # Jogo com resultado: "Brasil 2-1 (1-0) Itália", com possíveis "a.e.t." e "pen. X-Y"
-            cleaned = re.sub(r"\([^)]*\)", " ", matchup)
-            cleaned = re.sub(r"\ba\.e\.t\.?", " ", cleaned)
-            cleaned = re.sub(r"\bpen\.?\s+\d{1,2}-\d{1,2}", " ", cleaned)
-            cleaned = re.sub(r"\s+", " ", cleaned).strip()
-            score_match = re.match(r"^(.+?)\s+(\d{1,2})-(\d{1,2})\s+(.+)$", cleaned)
-            if not score_match:
-                continue
-            home_team = score_match.group(1).strip()
-            away_team = score_match.group(4).strip()
-            home_score = int(score_match.group(2))
-            away_score = int(score_match.group(3))
-
-        if not home_team or not away_team:
+        item = parse_openfootball_game_line(line, current_date, match_counter, year)
+        if not item:
             continue
 
-        offset_hours = int(line_match.group(3))
-        hour, minute = [int(part) for part in line_match.group(2).split(":", 1)]
-        month, day = current_date
-        kickoff_local = datetime(
-            2026,
-            month,
-            day,
-            hour,
-            minute,
-            tzinfo=timezone(timedelta(hours=offset_hours)),
-        )
-        kickoff_at = kickoff_local.astimezone(timezone.utc).replace(tzinfo=None)
-        match_number = int(line_match.group(1)) if line_match.group(1) else len(games) + 1
-        games.append(
-            {
-                "external_id": f"openfootball-2026-{match_number}",
-                "match_number": match_number,
-                "home_team": home_team,
-                "away_team": away_team,
-                "group_label": group_label,
-                "stage": stage,
-                "venue": re.sub(r"\s+", " ", line_match.group(5)).strip() if line_match.group(5) else None,
-                "kickoff_at": kickoff_at,
-                "home_score": home_score,
-                "away_score": away_score,
-                "source": "openfootball",
-            }
-        )
+        item["group_label"] = group_label
+        item["stage"] = stage
+        games.append(item)
+        match_counter = max(match_counter, (item["match_number"] or 0) + 1)
 
     return games
 
@@ -1113,6 +1320,97 @@ def fetch_openfootball_world_cup_games() -> list[dict[str, Any]]:
     if not games:
         raise HTTPException(status_code=400, detail="A fonte openfootball não retornou jogos válidos")
     return sorted(games, key=lambda item: item["match_number"])
+
+
+def fetch_world_cup_squads() -> dict[str, list[dict[str, Any]]]:
+    request = urllib.request.Request(WIKIPEDIA_SQUADS_URL, headers={"User-Agent": "ConversysFut/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Não foi possível buscar os elencos na Wikipedia") from exc
+
+    text = payload.get("parse", {}).get("wikitext", "")
+    squads: dict[str, list[dict[str, Any]]] = {}
+    team: str | None = None
+    for line in text.splitlines():
+        header = re.match(r"^===([^=]+)===\s*$", line)
+        if header:
+            name = header.group(1).strip()
+            team = WIKIPEDIA_TEAM_ALIASES.get(name, name)
+            continue
+        if not team or not re.match(r"^\{\{nat fs g? ?player", line, re.IGNORECASE):
+            continue
+
+        name_match = re.search(r"\|\s*name\s*=\s*\[\[(?:[^|\]]*\|)?([^\]]+)\]\]", line)
+        if not name_match:
+            name_match = re.search(r"\|\s*name\s*=\s*([^|}\[]+)", line)
+        if not name_match:
+            continue
+        number_match = re.search(r"\|\s*no\s*=\s*(\d+)", line)
+        position_match = re.search(r"\|\s*pos\s*=\s*([A-Za-z]+)", line)
+        club_match = re.search(r"\|\s*club\s*=\s*\[\[(?:[^|\]]*\|)?([^\]]+)\]\]", line)
+        squads.setdefault(team, []).append(
+            {
+                "name": re.sub(r"\s+", " ", name_match.group(1)).strip(),
+                "number": int(number_match.group(1)) if number_match else None,
+                "position": position_match.group(1).upper() if position_match else None,
+                "club": club_match.group(1).strip() if club_match else None,
+            }
+        )
+
+    return squads
+
+
+def apply_world_cup_squads_sync(db: Session) -> tuple[int, int]:
+    squads = fetch_world_cup_squads()
+    if not squads:
+        return 0, 0
+
+    imported = 0
+    updated = 0
+    existing = {
+        (player.team, player.name.lower()): player
+        for player in db.query(models.WorldCupPlayer).all()
+    }
+    for team, players in squads.items():
+        for item in players:
+            key = (team, item["name"].lower())
+            player = existing.get(key)
+            if not player:
+                player = models.WorldCupPlayer(team=team, name=item["name"], created_at=datetime.utcnow())
+                db.add(player)
+                existing[key] = player
+                imported += 1
+            else:
+                updated += 1
+            player.number = item["number"]
+            player.position = item["position"]
+            player.club = item["club"]
+
+    set_app_setting(db, "world_cup_last_squad_sync", datetime.utcnow().isoformat())
+    db.commit()
+    return imported, updated
+
+
+def world_cup_players_grouped(db: Session) -> dict[str, list[dict[str, Any]]]:
+    players = (
+        db.query(models.WorldCupPlayer)
+        .order_by(models.WorldCupPlayer.team.asc(), models.WorldCupPlayer.number.asc().nulls_last())
+        .all()
+    )
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for player in players:
+        grouped.setdefault(player.team, []).append(
+            {
+                "id": player.id,
+                "name": player.name,
+                "number": player.number,
+                "position": player.position,
+                "club": player.club,
+            }
+        )
+    return grouped
 
 
 def get_app_setting(db: Session, key: str) -> str | None:
@@ -1151,6 +1449,7 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
         data = dict(item)
         home_score = data.pop("home_score", None)
         away_score = data.pop("away_score", None)
+        scorers = data.pop("scorers", None)
         game = (
             db.query(models.WorldCupGame)
             .filter(models.WorldCupGame.external_id == data["external_id"])
@@ -1176,6 +1475,8 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
             game.home_score = home_score
             game.away_score = away_score
             game.status = "finished"
+        if scorers:
+            game.scorers = scorers
 
     db.flush()
     refresh_world_cup_live_statuses(db)
@@ -1187,18 +1488,46 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
     return imported, updated
 
 
+def world_cup_squads_due(db: Session) -> bool:
+    last_sync = get_app_setting(db, "world_cup_last_squad_sync")
+    if not last_sync:
+        return True
+    try:
+        last = datetime.fromisoformat(last_sync)
+    except ValueError:
+        return True
+    return datetime.utcnow() - last >= timedelta(hours=24)
+
+
 def world_cup_sync_loop() -> None:
     interval = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600")))
     while True:
+        time_module.sleep(interval)
         try:
             session = SessionLocal()
             try:
-                apply_world_cup_sync(session)
+                imported, updated = apply_world_cup_sync(session)
+                print(
+                    f"[world-cup-sync] schedule/results imported={imported} updated={updated}",
+                    flush=True,
+                )
             finally:
                 session.close()
-        except Exception:
-            pass
-        time_module.sleep(interval)
+        except Exception as exc:
+            print(f"[world-cup-sync] schedule/results failed: {exc}", flush=True)
+        try:
+            session = SessionLocal()
+            try:
+                if world_cup_squads_due(session):
+                    imported, updated = apply_world_cup_squads_sync(session)
+                    print(
+                        f"[world-cup-sync] squads imported={imported} updated={updated}",
+                        flush=True,
+                    )
+            finally:
+                session.close()
+        except Exception as exc:
+            print(f"[world-cup-sync] squads failed: {exc}", flush=True)
 
 
 def world_cup_first_kickoff(db: Session) -> datetime | None:
@@ -1806,9 +2135,10 @@ def leaderboard(db: Session = Depends(get_db), _user: models.User = Depends(get_
     )
     return {
         "top_scorers": [
-            {**user_summary(user), "score": approved_goals_for_user(user)}
-            for user in sorted(users, key=approved_goals_for_user, reverse=True)[:5]
-        ],
+            {**user_summary(user), "score": score}
+            for user in sorted(users, key=approved_goals_for_user, reverse=True)
+            if (score := approved_goals_for_user(user)) > 0
+        ][:10],
         "top_barbecue": [
             {**user_summary(user), "score": user.barbecue_score or 0}
             for user in sorted(users, key=lambda item: item.barbecue_score or 0, reverse=True)[:5]
@@ -1910,6 +2240,33 @@ def sync_world_cup_openfootball(
     }
 
 
+@app.get("/api/world-cup/players")
+def list_world_cup_players(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    return {
+        "players": world_cup_players_grouped(db),
+        "last_sync": get_app_setting(db, "world_cup_last_squad_sync"),
+    }
+
+
+@app.post("/api/world-cup/sync/squads")
+def sync_world_cup_squads(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Apenas o admin pode importar os elencos")
+
+    imported, updated = apply_world_cup_squads_sync(db)
+    return {
+        "imported": imported,
+        "updated": updated,
+        "players": world_cup_players_grouped(db),
+    }
+
+
 @app.post("/api/world-cup/games/{game_id}/prediction")
 def submit_world_cup_prediction(
     game_id: int,
@@ -1920,6 +2277,8 @@ def submit_world_cup_prediction(
     game = db.query(models.WorldCupGame).filter(models.WorldCupGame.id == game_id).first()
     if not game:
         raise HTTPException(status_code=404, detail="Jogo do bolão não encontrado")
+    if not is_bettable_world_cup_game(game):
+        raise HTTPException(status_code=400, detail="Este jogo ainda não tem seleções definidas para palpite")
     if (game.status or "scheduled") != "scheduled" or game.kickoff_at <= datetime.utcnow():
         raise HTTPException(status_code=400, detail="Palpites deste jogo já estão fechados")
 
@@ -1928,9 +2287,11 @@ def submit_world_cup_prediction(
         .filter_by(user_id=user.id, game_id=game_id)
         .first()
     )
-    if not prediction:
-        prediction = models.WorldCupPrediction(user_id=user.id, game_id=game_id, created_at=datetime.utcnow())
-        db.add(prediction)
+    if prediction:
+        raise HTTPException(status_code=400, detail="Palpite já registrado e não pode ser alterado")
+
+    prediction = models.WorldCupPrediction(user_id=user.id, game_id=game_id, created_at=datetime.utcnow())
+    db.add(prediction)
 
     scorer_guess = re.sub(r"\s+", " ", request.scorer_guess or "").strip()[:80]
     prediction.home_score = clamp_prediction_score(request.home_score)
@@ -1991,9 +2352,11 @@ def submit_world_cup_champion_pick(
         raise HTTPException(status_code=400, detail="Informe a seleção campeã")
 
     pick = db.query(models.WorldCupChampionPick).filter_by(user_id=user.id).first()
-    if not pick:
-        pick = models.WorldCupChampionPick(user_id=user.id, created_at=datetime.utcnow())
-        db.add(pick)
+    if pick:
+        raise HTTPException(status_code=400, detail="Palpite de campeão já registrado e não pode ser alterado")
+
+    pick = models.WorldCupChampionPick(user_id=user.id, created_at=datetime.utcnow())
+    db.add(pick)
     pick.team = team
     pick.points = 0
     pick.status = "pending"
@@ -2270,6 +2633,69 @@ def create_event(
     db.commit()
     db.refresh(match)
     return match_response(match, user)
+
+
+@app.put("/api/events/{match_id}")
+def update_event(
+    match_id: int,
+    request: EventCreateRequest,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Apenas o admin pode editar eventos")
+
+    match = db.query(models.Match).filter(models.Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Evento não encontrado")
+
+    title = request.title.strip()
+    location = request.location.strip()
+    description = request.description.strip()
+    event_type = (request.event_type or "pelada").strip().lower()
+    cover_url = validate_url(request.cover_url.strip() if request.cover_url else None)
+
+    if not title:
+        raise HTTPException(status_code=400, detail="Informe o nome do evento")
+    if not location:
+        raise HTTPException(status_code=400, detail="Informe o local do evento")
+    if not description:
+        raise HTTPException(status_code=400, detail="Informe a descrição do evento")
+
+    match.title = title
+    match.event_type = event_type or "pelada"
+    match.location = location
+    match.date = request.date
+    match.description = description
+    match.max_players = max(2, min(request.max_players or 20, 200))
+    match.cover_url = cover_url
+
+    db.commit()
+    db.refresh(match)
+    return match_response(match, user)
+
+
+@app.delete("/api/events/{match_id}")
+def delete_event(
+    match_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Apenas o admin pode excluir eventos")
+
+    match = db.query(models.Match).filter(models.Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Evento não encontrado")
+
+    db.query(models.MatchRSVP).filter(models.MatchRSVP.match_id == match_id).delete(synchronize_session=False)
+    db.query(models.Post).filter(models.Post.match_id == match_id).update(
+        {models.Post.match_id: None},
+        synchronize_session=False,
+    )
+    db.delete(match)
+    db.commit()
+    return {"ok": True}
 
 
 @app.get("/api/events/{match_id}")

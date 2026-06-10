@@ -42,15 +42,35 @@ const sortOptions: Array<{
   { value: "available", label: "Mais vagas" },
 ];
 
-const emptyEventDraft = (): EventDraft => ({
-  title: "",
-  event_type: "pelada",
-  location: "",
-  date: "",
-  description: "",
-  max_players: "20",
-  cover_url: "",
-});
+function emptyEventDraft(): EventDraft {
+  return {
+    title: "",
+    event_type: "pelada",
+    location: "",
+    date: "",
+    description: "",
+    max_players: "20",
+    cover_url: "",
+  };
+}
+
+function toDatetimeLocal(iso: string) {
+  const date = new Date(iso);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function draftFromEvent(event: Event): EventDraft {
+  return {
+    title: event.title,
+    event_type: event.event_type || "pelada",
+    location: event.location,
+    date: toDatetimeLocal(event.date),
+    description: event.description,
+    max_players: String(event.max_players),
+    cover_url: event.cover_url ?? "",
+  };
+}
 
 function normalizeType(value: string) {
   return value.trim().toLowerCase();
@@ -77,9 +97,12 @@ export default function EventsPage() {
   const [sortBy, setSortBy] = useState<EventSort>("upcoming");
   const [currentTime, setCurrentTime] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
-  const [creatingEvent, setCreatingEvent] = useState(false);
+  const [editingEventId, setEditingEventId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Event | null>(null);
+  const [savingEvent, setSavingEvent] = useState(false);
+  const [deletingEvent, setDeletingEvent] = useState(false);
   const [eventDraft, setEventDraft] = useState<EventDraft>(emptyEventDraft);
-  const [createError, setCreateError] = useState("");
+  const [formError, setFormError] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -116,43 +139,101 @@ export default function EventsPage() {
 
   const updateDraft = <K extends keyof EventDraft>(field: K, value: EventDraft[K]) => {
     setEventDraft((current) => ({ ...current, [field]: value }));
-    setCreateError("");
+    setFormError("");
   };
 
-  const closeCreateModal = () => {
+  const closeEventModal = () => {
     setCreateOpen(false);
-    setCreateError("");
+    setEditingEventId(null);
+    setFormError("");
     setEventDraft(emptyEventDraft());
   };
 
-  const handleCreateEvent = async (event: React.FormEvent<HTMLFormElement>) => {
+  const openCreateModal = () => {
+    setEditingEventId(null);
+    setEventDraft(emptyEventDraft());
+    setFormError("");
+    setCreateOpen(true);
+  };
+
+  const openEditModal = (event: Event) => {
+    setEditingEventId(event.id);
+    setEventDraft(draftFromEvent(event));
+    setFormError("");
+    setCreateOpen(true);
+  };
+
+  const openDeleteConfirm = (event: Event) => {
+    setDeleteTarget(event);
+    setFormError("");
+  };
+
+  const closeDeleteConfirm = () => {
+    setDeleteTarget(null);
+  };
+
+  const buildEventPayload = (): EventCreatePayload => ({
+    title: eventDraft.title.trim(),
+    event_type: eventDraft.event_type.trim(),
+    location: eventDraft.location.trim(),
+    date: new Date(eventDraft.date).toISOString(),
+    description: eventDraft.description.trim(),
+    max_players: Number(eventDraft.max_players) || 20,
+    cover_url: eventDraft.cover_url?.trim() || null,
+  });
+
+  const handleSaveEvent = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setCreatingEvent(true);
-    setCreateError("");
+    setSavingEvent(true);
+    setFormError("");
 
     try {
-      const created = await api.createEvent({
-        title: eventDraft.title.trim(),
-        event_type: eventDraft.event_type.trim(),
-        location: eventDraft.location.trim(),
-        date: new Date(eventDraft.date).toISOString(),
-        description: eventDraft.description.trim(),
-        max_players: Number(eventDraft.max_players) || 20,
-        cover_url: eventDraft.cover_url?.trim() || null,
-      });
+      const payload = buildEventPayload();
 
-      setEvents((current) =>
-        [...current, created].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
-      );
-      closeCreateModal();
+      if (editingEventId) {
+        const updated = await api.updateEvent(editingEventId, payload);
+        setEvents((current) =>
+          current
+            .map((item) => (item.id === editingEventId ? updated : item))
+            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+        );
+      } else {
+        const created = await api.createEvent(payload);
+        setEvents((current) =>
+          [...current, created].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+        );
+      }
+
+      closeEventModal();
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : "Não foi possível cadastrar o evento");
+      setFormError(error instanceof Error ? error.message : "Não foi possível salvar o evento");
     } finally {
-      setCreatingEvent(false);
+      setSavingEvent(false);
+    }
+  };
+
+  const handleDeleteEvent = async () => {
+    if (!deleteTarget) return;
+
+    setDeletingEvent(true);
+    setFormError("");
+
+    try {
+      await api.deleteEvent(deleteTarget.id);
+      setEvents((current) => current.filter((item) => item.id !== deleteTarget.id));
+      setDeleteTarget(null);
+      if (editingEventId === deleteTarget.id) {
+        closeEventModal();
+      }
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Não foi possível excluir o evento");
+    } finally {
+      setDeletingEvent(false);
     }
   };
 
   const isAdmin = Boolean(profile?.is_admin);
+  const isEditing = editingEventId !== null;
   const now = currentTime;
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -228,7 +309,7 @@ export default function EventsPage() {
         </div>
         <div className="heading-actions">
           {isAdmin && (
-            <button className="btn-primary" onClick={() => setCreateOpen(true)} type="button">
+            <button className="btn-primary" onClick={openCreateModal} type="button">
               <CalendarPlus size={17} />
               <span>Cadastrar evento</span>
             </button>
@@ -342,7 +423,14 @@ export default function EventsPage() {
 
       <section className="events-grid">
         {filteredEvents.map((event) => (
-          <EventCard event={event} onRSVP={handleRSVP} key={event.id} />
+          <EventCard
+            event={event}
+            isAdmin={isAdmin}
+            key={event.id}
+            onDelete={openDeleteConfirm}
+            onEdit={openEditModal}
+            onRSVP={handleRSVP}
+          />
         ))}
       </section>
 
@@ -355,7 +443,7 @@ export default function EventsPage() {
       )}
 
       {isAdmin && createOpen && (
-        <div className="event-modal-backdrop" onClick={closeCreateModal}>
+        <div className="event-modal-backdrop" onClick={closeEventModal}>
           <section
             aria-modal="true"
             className="event-modal glass-panel"
@@ -365,15 +453,19 @@ export default function EventsPage() {
             <div className="modal-head">
               <div>
                 <span className="eyebrow">Admin</span>
-                <h2>Cadastrar evento</h2>
-                <p>Crie uma nova partida ou encontro para aparecer no cronograma do app.</p>
+                <h2>{isEditing ? "Editar evento" : "Cadastrar evento"}</h2>
+                <p>
+                  {isEditing
+                    ? "Atualize as informações do evento no cronograma."
+                    : "Crie uma nova partida ou encontro para aparecer no cronograma do app."}
+                </p>
               </div>
-              <button aria-label="Fechar modal" className="modal-close" onClick={closeCreateModal} type="button">
+              <button aria-label="Fechar modal" className="modal-close" onClick={closeEventModal} type="button">
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleCreateEvent}>
+            <form onSubmit={handleSaveEvent}>
               <div className="modal-field">
                 <label htmlFor="event-title">Nome do evento</label>
                 <input
@@ -461,18 +553,54 @@ export default function EventsPage() {
                 />
               </div>
 
-              {createError && <div className="error-box">{createError}</div>}
+              {formError && <div className="error-box">{formError}</div>}
 
               <div className="action-row">
-                <button className="btn-primary" disabled={creatingEvent}>
+                <button className="btn-primary" disabled={savingEvent}>
                   <Save size={17} />
-                  <span>{creatingEvent ? "Cadastrando..." : "Salvar evento"}</span>
+                  <span>{savingEvent ? "Salvando..." : isEditing ? "Salvar alterações" : "Salvar evento"}</span>
                 </button>
-                <button className="btn-secondary" onClick={closeCreateModal} type="button">
+                <button className="btn-secondary" onClick={closeEventModal} type="button">
                   Cancelar
                 </button>
               </div>
             </form>
+          </section>
+        </div>
+      )}
+
+      {isAdmin && deleteTarget && (
+        <div className="event-modal-backdrop" onClick={closeDeleteConfirm}>
+          <section
+            aria-modal="true"
+            className="event-modal glass-panel event-delete-modal"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="modal-head">
+              <div>
+                <span className="eyebrow">Admin</span>
+                <h2>Excluir evento</h2>
+                <p>
+                  Tem certeza que deseja excluir <strong>{deleteTarget.title}</strong>? Os RSVPs serão removidos e
+                  posts vinculados ficarão sem evento.
+                </p>
+              </div>
+              <button aria-label="Fechar modal" className="modal-close" onClick={closeDeleteConfirm} type="button">
+                <X size={18} />
+              </button>
+            </div>
+
+            {formError && <div className="error-box">{formError}</div>}
+
+            <div className="action-row">
+              <button className="btn-danger" disabled={deletingEvent} onClick={handleDeleteEvent} type="button">
+                <span>{deletingEvent ? "Excluindo..." : "Excluir evento"}</span>
+              </button>
+              <button className="btn-secondary" disabled={deletingEvent} onClick={closeDeleteConfirm} type="button">
+                Cancelar
+              </button>
+            </div>
           </section>
         </div>
       )}

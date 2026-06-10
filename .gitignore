@@ -48,6 +48,12 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# SSL / certificados
+nginx/ssl/*.pem
+nginx/ssl/*.crt
+nginx/ssl/*.key
+conversys-wildcard-cert.tar.gz
+
 # OS and editor files
 .DS_Store
 Thumbs.db

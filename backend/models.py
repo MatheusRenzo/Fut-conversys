@@ -214,6 +214,22 @@ class WorldCupChampionPick(Base):
     user = relationship("User")
 
 
+class WorldCupPlayer(Base):
+    __tablename__ = "world_cup_players"
+    __table_args__ = (
+        UniqueConstraint("team", "name", name="uq_world_cup_player_team_name"),
+        Index("ix_world_cup_players_team", "team"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    team = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    number = Column(Integer, nullable=True)
+    position = Column(String, nullable=True)
+    club = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class AppSetting(Base):
     __tablename__ = "app_settings"
 

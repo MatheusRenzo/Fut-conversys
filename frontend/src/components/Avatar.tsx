@@ -13,7 +13,7 @@ export function Avatar({ user, size = "md" }: { user: UserProfile; size?: "sm" |
   return (
     <div aria-label={user.name} className={`avatar avatar-${size} avatar-frame-${frame} avatar-effect-${effect}`} role="img">
       {user.avatar_url ? (
-        <span aria-hidden="true" className="avatar-photo" style={{ backgroundImage: `url(${user.avatar_url})` }} />
+        <img alt="" aria-hidden="true" className="avatar-photo" draggable={false} src={user.avatar_url} />
       ) : (
         <SvgAvatarFace seed={buildAvatarSeed(user)} />
       )}

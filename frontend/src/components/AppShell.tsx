@@ -1,23 +1,25 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   CalendarDays,
   ChevronRight,
   FileText,
-  Flame,
+  Goal,
   Home,
   LoaderCircle,
   LogOut,
   Search,
+  Target,
   Trophy,
   UserRound,
 } from "lucide-react";
 import { api, clearSession } from "@/lib/api";
-import type { Event, Leaderboard, SearchResults, UserProfile } from "@/types";
+import type { Event, Leaderboard, SearchResults, UserProfile, WorldCupLeaderboardEntry } from "@/types";
 import { Avatar } from "./Avatar";
 import { formatEventDate, formatShortDate } from "@/lib/format";
 
@@ -28,17 +30,18 @@ const navItems = [
   { href: "/me", label: "Meu perfil", icon: UserRound },
 ];
 
-function SoccerBallMark() {
+function BrandLogo({ compact = false }: { compact?: boolean }) {
   return (
-    <svg className="sidebar-brand-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <path d="m12 7 3.8 2.8-1.45 4.45h-4.7L8.2 9.8 12 7Z" />
-      <path d="m12 7 .55-3.9" />
-      <path d="m15.8 9.8 3.75-1.25" />
-      <path d="m14.35 14.25 2.35 3.25" />
-      <path d="m9.65 14.25-2.35 3.25" />
-      <path d="M8.2 9.8 4.45 8.55" />
-    </svg>
+    <span className={compact ? "sidebar-brand-logo compact" : "sidebar-brand-logo"}>
+      <Image
+        alt="Fut Conversys"
+        className="sidebar-brand-image"
+        height={compact ? 40 : 72}
+        priority
+        src="/icons/fut-conversys-logo.png"
+        width={compact ? 120 : 220}
+      />
+    </span>
   );
 }
 
@@ -198,14 +201,52 @@ export function AppShell({
   user,
   nextEvent,
   leaderboard,
+  hideRightRail = false,
 }: {
   children: ReactNode;
   user: UserProfile | null;
   nextEvent?: Event | null;
   leaderboard?: Leaderboard | null;
+  hideRightRail?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [worldCupRanking, setWorldCupRanking] = useState<WorldCupLeaderboardEntry[]>([]);
+  const [companyLeaderboard, setCompanyLeaderboard] = useState<Leaderboard | null>(leaderboard ?? null);
+
+  useEffect(() => {
+    if (leaderboard) {
+      setCompanyLeaderboard(leaderboard);
+    }
+  }, [leaderboard]);
+
+  useEffect(() => {
+    if (!user || leaderboard) return;
+    let active = true;
+    api
+      .leaderboard()
+      .then((response) => {
+        if (active) setCompanyLeaderboard(response);
+      })
+      .catch(() => null);
+    return () => {
+      active = false;
+    };
+  }, [leaderboard, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    api
+      .worldCupLeaderboard()
+      .then((response) => {
+        if (active) setWorldCupRanking(response.leaderboard);
+      })
+      .catch(() => null);
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   const logout = async () => {
     await api.logout().catch(() => null);
@@ -216,16 +257,30 @@ export function AppShell({
   const isActive = (href: string) => pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
   const eventFill = nextEvent ? Math.min(100, (nextEvent.confirmed_players / nextEvent.max_players) * 100) : 0;
 
+  const bolaoRanking = useMemo(
+    () => worldCupRanking.filter((entry) => entry.points > 0),
+    [worldCupRanking],
+  );
+
+  const bolaoScorerRanking = useMemo(
+    () =>
+      [...worldCupRanking]
+        .filter((entry) => entry.scorer_hits > 0)
+        .sort((first, second) => second.scorer_hits - first.scorer_hits || second.points - first.points)
+        .slice(0, 5),
+    [worldCupRanking],
+  );
+
+  const topMarcadores = useMemo(
+    () => (companyLeaderboard?.top_scorers ?? []).filter((player) => player.score > 0).slice(0, 10),
+    [companyLeaderboard?.top_scorers],
+  );
+
   return (
-    <div className="app-shell">
+    <div className={hideRightRail ? "app-shell bolao-focus" : "app-shell"}>
       <header className="mobile-topbar">
-        <Link href="/dashboard" className="brand-mark sidebar-brand-panel">
-          <span className="sidebar-brand-copy">
-            <span className="sidebar-brand-title">
-              <SoccerBallMark />
-              <strong>Fut Conversys</strong>
-            </span>
-          </span>
+        <Link href="/dashboard" aria-label="Fut Conversys — ir para o feed" className="brand-mark sidebar-brand-link compact">
+          <BrandLogo compact />
         </Link>
         <GlobalSearch compact />
         {user && (
@@ -241,13 +296,8 @@ export function AppShell({
       </header>
 
       <aside className="desktop-sidebar glass-panel">
-        <Link href="/dashboard" className="brand-mark sidebar-brand-panel app-brand-panel">
-          <span className="sidebar-brand-copy">
-            <span className="sidebar-brand-title">
-              <SoccerBallMark />
-              <strong>Fut Conversys</strong>
-            </span>
-          </span>
+        <Link href="/dashboard" aria-label="Fut Conversys — ir para o feed" className="brand-mark sidebar-brand-link">
+          <BrandLogo />
         </Link>
 
         <GlobalSearch />
@@ -268,12 +318,6 @@ export function AppShell({
           })}
         </nav>
 
-        <section className="sidebar-card">
-          <span className="eyebrow">Clube interno</span>
-          <strong>Temporada Conversys</strong>
-          <p>Feed, presença, ranking e resenha em um só lugar.</p>
-        </section>
-
         {user && (
           <div className="sidebar-profile">
             <Avatar user={user} />
@@ -292,72 +336,131 @@ export function AppShell({
 
       <main className="app-main">{children}</main>
 
-      <aside className="right-rail">
-        {nextEvent && (
-          <section className="glass-panel rail-card rail-match-card">
+      {!hideRightRail && (
+        <aside className="right-rail">
+          <section className="glass-panel rail-card rail-bolao-card rail-featured">
             <div className="rail-card-head">
-              <span className="eyebrow">Próximo jogo</span>
-              <CalendarDays size={18} />
+              <span className="eyebrow">Bolão da Copa 2026</span>
+              <Trophy size={18} />
             </div>
-            <h3>{nextEvent.title}</h3>
-            <div className="rail-meta">
-              <span>{formatEventDate(nextEvent.date)}</span>
-              <span>{nextEvent.location}</span>
-            </div>
-            <div className="capacity-row">
-              <strong>
-                {nextEvent.confirmed_players}/{nextEvent.max_players}
-              </strong>
-              <span>confirmados</span>
-            </div>
-            <div className="progress-track" aria-label="Lotação do evento">
-              <span style={{ width: `${eventFill}%` }} />
-            </div>
-            <Link href={`/events/${nextEvent.id}`} className="inline-link">
-              <span>Ver evento</span>
+            <h3>Quem mais pontuou</h3>
+            <p className="rail-card-desc">Placares certos, vencedor e campeão somam pontos.</p>
+            {bolaoRanking.length > 0 ? (
+              <>
+                <div className="rail-podium">
+                  {[bolaoRanking[1], bolaoRanking[0], bolaoRanking[2]].map((entry, column) =>
+                    entry ? (
+                      <Link
+                        href={`/profile/${entry.user.id}`}
+                        className={["rail-podium-step", column === 1 ? "first" : column === 0 ? "second" : "third"].join(" ")}
+                        key={entry.user.id}
+                      >
+                        <span className="rail-podium-medal">{entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : "🥉"}</span>
+                        <Avatar user={entry.user} size="sm" />
+                        <span className="rail-podium-name">{entry.user.name.split(" ")[0]}</span>
+                        <strong>{entry.points} pts</strong>
+                        <small>{entry.exact_scores} exatos</small>
+                      </Link>
+                    ) : (
+                      <span className="rail-podium-step empty" key={`empty-${column}`} />
+                    ),
+                  )}
+                </div>
+                {bolaoRanking.length > 3 && (
+                  <div className="mini-list rail-rank-list">
+                    {bolaoRanking.slice(3, 10).map((entry) => (
+                      <Link href={`/profile/${entry.user.id}`} className="mini-player" key={entry.user.id}>
+                        <strong className="rail-rank-badge">{entry.rank}º</strong>
+                        <Avatar user={entry.user} size="sm" />
+                        <span>{entry.user.name}</span>
+                        <small>{entry.exact_scores} ex.</small>
+                        <strong>{entry.points} pts</strong>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="rail-empty-copy">Ninguém pontuou ainda. Crava teu palpite e lidera o bolão.</p>
+            )}
+            <Link href="/bolao" className="inline-link rail-bolao-cta">
+              <span>Ir pro bolão</span>
               <ChevronRight size={16} />
             </Link>
           </section>
-        )}
 
-        {leaderboard && (
-          <section className="glass-panel rail-card">
-            <div className="rail-card-head">
-              <span className="eyebrow">Destaques</span>
-              <Trophy size={18} />
-            </div>
-            <h3>Artilharia da firma</h3>
-            <div className="mini-list">
-              {leaderboard.top_scorers.slice(0, 3).map((player) => (
-                <Link href={`/profile/${player.id}`} className="mini-player" key={player.id}>
-                  <Avatar user={player} size="sm" />
-                  <span>{player.name}</span>
-                  <strong>{player.score}</strong>
-                </Link>
-              ))}
-            </div>
-          </section>
-        )}
+          {bolaoScorerRanking.length > 0 && (
+            <section className="glass-panel rail-card rail-bolao-scorers-card">
+              <div className="rail-card-head">
+                <span className="eyebrow">Bolão</span>
+                <Target size={18} />
+              </div>
+              <h3>Quem acertou mais artilheiros</h3>
+              <p className="rail-card-desc">Palpite de quem marca gol no jogo da Copa.</p>
+              <div className="mini-list">
+                {bolaoScorerRanking.map((entry, index) => (
+                  <Link href={`/profile/${entry.user.id}`} className="mini-player" key={entry.user.id}>
+                    <strong className="rail-rank-badge">{index + 1}º</strong>
+                    <Avatar user={entry.user} size="sm" />
+                    <span>{entry.user.name}</span>
+                    <strong>{entry.scorer_hits} acertos</strong>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
 
-        {leaderboard && (
-          <section className="glass-panel rail-card">
+          {nextEvent && (
+            <section className="glass-panel rail-card rail-match-card">
+              <div className="rail-card-head">
+                <span className="eyebrow">Próxima pelada</span>
+                <CalendarDays size={18} />
+              </div>
+              <h3>{nextEvent.title}</h3>
+              <div className="rail-meta">
+                <span>{formatEventDate(nextEvent.date)}</span>
+                <span>{nextEvent.location}</span>
+              </div>
+              <div className="capacity-row">
+                <strong>
+                  {nextEvent.confirmed_players}/{nextEvent.max_players}
+                </strong>
+                <span>confirmados</span>
+              </div>
+              <div className="progress-track" aria-label="Lotação do evento">
+                <span style={{ width: `${eventFill}%` }} />
+              </div>
+              <Link href={`/events/${nextEvent.id}`} className="inline-link">
+                <span>Confirmar presença</span>
+                <ChevronRight size={16} />
+              </Link>
+            </section>
+          )}
+
+          <section className="glass-panel rail-card rail-artilharia-card">
             <div className="rail-card-head">
-              <span className="eyebrow">Resenha</span>
-              <Flame size={18} />
+              <span className="eyebrow">Peladas</span>
+              <Goal size={18} />
             </div>
-            <h3>Ranking do churras</h3>
-            <div className="mini-list">
-              {leaderboard.top_barbecue.slice(0, 3).map((player) => (
-                <Link href={`/profile/${player.id}`} className="mini-player" key={player.id}>
-                  <Avatar user={player} size="sm" />
-                  <span>{player.name}</span>
-                  <strong>{player.score}</strong>
-                </Link>
-              ))}
-            </div>
+            <h3>Top artilheiros</h3>
+            <p className="rail-card-desc">Quem mais marcou gol nas peladas da firma.</p>
+            {topMarcadores.length > 0 ? (
+              <div className="mini-list rail-rank-list">
+                {topMarcadores.map((player, index) => (
+                  <Link href={`/profile/${player.id}`} className="mini-player" key={player.id}>
+                    <strong className="rail-rank-badge">{index + 1}º</strong>
+                    <Avatar user={player} size="sm" />
+                    <span>{player.name}</span>
+                    <strong>{player.score} gols</strong>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="rail-empty-copy">Ninguém marcou gol nas peladas ainda.</p>
+            )}
           </section>
-        )}
-      </aside>
+        </aside>
+      )}
 
       <nav className="mobile-nav glass-panel">
         {navItems.map((item) => {
