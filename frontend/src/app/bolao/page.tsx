@@ -118,8 +118,15 @@ function scoreValue(value: string) {
   return Math.max(0, Math.min(30, Math.round(parsed)));
 }
 
+// Palpites fecham 1 hora antes do início do jogo (mesma regra do backend)
+const BET_CUTOFF_MS = 60 * 60 * 1000;
+
+function betCloseAt(game: WorldCupGame) {
+  return new Date(game.kickoff_at).getTime() - BET_CUTOFF_MS;
+}
+
 function isGameLocked(game: WorldCupGame, now: number) {
-  return game.status !== "scheduled" || new Date(game.kickoff_at).getTime() <= now;
+  return game.status !== "scheduled" || betCloseAt(game) <= now;
 }
 
 function isUpcomingGame(game: WorldCupGame, now: number) {
@@ -149,8 +156,8 @@ function pad(value: number) {
   return String(value).padStart(2, "0");
 }
 
-function minutesUntil(iso: string, now: number) {
-  return Math.max(0, Math.floor((new Date(iso).getTime() - now) / 60_000));
+function minutesUntilBetClose(game: WorldCupGame, now: number) {
+  return Math.max(0, Math.floor((betCloseAt(game) - now) / 60_000));
 }
 
 function urgencyLabel(minutes: number) {
@@ -801,7 +808,7 @@ export default function BolaoPage() {
             <span className="eyebrow">Bolão da Copa 2026</span>
             <h1>Crave. Torça. Domine.</h1>
             <p className="wc-hero-sub">
-              Placar exato vale até <strong>+{maxPoints(board?.rules)} pts</strong>. Quem palpitar antes da bola rolar, sobe no ranking.
+              Placar exato vale até <strong>+{maxPoints(board?.rules)} pts</strong>. Palpites fecham 1 hora antes de cada jogo.
             </p>
           </div>
           <div className="wc-hero-actions">
@@ -925,7 +932,7 @@ export default function BolaoPage() {
             <strong>
               {unpickedOpen} jogo{unpickedOpen > 1 ? "s" : ""} aberto{unpickedOpen > 1 ? "s" : ""} sem teu palpite
             </strong>
-            <span>Depois que a bola rola, acabou. Não fica de fora.</span>
+            <span>Palpites fecham 1 hora antes da bola rolar. Não fica de fora.</span>
           </div>
           {nextGame && !nextGame.viewer_prediction && (
             <button className="wc-urgency-action" onClick={() => scrollToGame(nextGame.id)} type="button">
@@ -1115,7 +1122,7 @@ export default function BolaoPage() {
           {upcomingGames.map((game) => {
             const draft = predictionDraftFor(game);
             const players = gamePlayers(game);
-            const lockMinutes = minutesUntil(game.kickoff_at, currentTime);
+            const lockMinutes = minutesUntilBetClose(game, currentTime);
             const justSaved = savedFlash === game.id;
             const hasBet = Boolean(game.viewer_prediction);
             const isNextScheduled = nextGame?.id === game.id;
@@ -1577,7 +1584,7 @@ export default function BolaoPage() {
             <span className="wc-sticky-flags">
               <TeamFlag team={nextGame.home_team} /> x <TeamFlag team={nextGame.away_team} />
             </span>
-            <strong>{urgencyLabel(minutesUntil(nextGame.kickoff_at, currentTime))}</strong>
+            <strong>{urgencyLabel(minutesUntilBetClose(nextGame, currentTime))}</strong>
           </div>
           <button className="wc-sticky-bet-button" onClick={() => scrollToGame(nextGame.id)} type="button">
             <Zap size={16} />

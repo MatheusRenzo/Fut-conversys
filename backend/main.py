@@ -66,6 +66,8 @@ PLACEHOLDER_TEAM_PATTERN = re.compile(
     r"^(?:[12][A-L]|W\d+|L\d+|3[A-L](?:/[A-L])+(?:/[A-L])*)$"
 )
 WORLD_CUP_YEAR = int(os.getenv("WORLD_CUP_YEAR", "2026"))
+# Palpites fecham 1 hora antes do início de cada jogo
+WORLD_CUP_BET_CUTOFF = timedelta(hours=1)
 MONTHS_EN = {
     "jan": 1,
     "feb": 2,
@@ -2279,8 +2281,8 @@ def submit_world_cup_prediction(
         raise HTTPException(status_code=404, detail="Jogo do bolão não encontrado")
     if not is_bettable_world_cup_game(game):
         raise HTTPException(status_code=400, detail="Este jogo ainda não tem seleções definidas para palpite")
-    if (game.status or "scheduled") != "scheduled" or game.kickoff_at <= datetime.utcnow():
-        raise HTTPException(status_code=400, detail="Palpites deste jogo já estão fechados")
+    if (game.status or "scheduled") != "scheduled" or game.kickoff_at - WORLD_CUP_BET_CUTOFF <= datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Palpites fecham 1 hora antes do jogo e este já está fechado")
 
     prediction = (
         db.query(models.WorldCupPrediction)
