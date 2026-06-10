@@ -8,19 +8,16 @@ import { api } from "@/lib/api";
 
 export default function Home() {
   const router = useRouter();
-  const [mounted, setMounted] = useState(false);
   const [microsoftEnabled, setMicrosoftEnabled] = useState(false);
   const [configLoaded, setConfigLoaded] = useState(false);
 
   useEffect(() => {
-    const mountTimer = window.setTimeout(() => setMounted(true), 0);
     api.sessionMe().then(() => router.push("/dashboard")).catch(() => null);
     api
       .microsoftConfig()
       .then((config) => setMicrosoftEnabled(config.enabled))
       .catch(() => setMicrosoftEnabled(false))
       .finally(() => setConfigLoaded(true));
-    return () => window.clearTimeout(mountTimer);
   }, [router]);
 
   const startMicrosoftLogin = () => {
@@ -41,50 +38,46 @@ export default function Home() {
         </p>
       </section>
 
-      <section className="login-card glass-panel" suppressHydrationWarning>
-        {mounted ? (
-          <>
-            <div className="login-provider-mark" aria-hidden="true">
-              <span className="microsoft-window-mark">
-                <i />
-                <i />
-                <i />
-                <i />
-              </span>
-              <span>Microsoft Entra</span>
-            </div>
+      <section className="login-card glass-panel">
+        <div className="login-provider-mark" aria-hidden="true">
+          <span className="microsoft-window-mark">
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
+          <span>Microsoft Entra</span>
+        </div>
 
-            <div className="login-card-head">
-              <span className="eyebrow">Acesso restrito</span>
-              <h2>Acesse o Fut Conversys</h2>
-              <p>Entre com sua conta corporativa para ver eventos, publicações e perfis do time.</p>
-            </div>
+        <div className="login-card-head">
+          <span className="eyebrow">Acesso restrito</span>
+          <h2>Acesse o Fut Conversys</h2>
+          <p>Entre com sua conta corporativa para ver eventos, publicações e perfis do time.</p>
+        </div>
 
-            <button
-              className="btn-primary microsoft-login"
-              disabled={!configLoaded || !microsoftEnabled}
-              onClick={startMicrosoftLogin}
-              type="button"
-            >
-              <span>
-                {!configLoaded
-                  ? "Preparando acesso..."
-                  : microsoftEnabled
-                    ? "Continuar com Microsoft"
-                    : "Microsoft não configurado"}
-              </span>
-              <ArrowRight size={17} />
-            </button>
+        <button
+          className="btn-primary microsoft-login"
+          disabled={!configLoaded || !microsoftEnabled}
+          onClick={startMicrosoftLogin}
+          type="button"
+        >
+          <span>
+            {!configLoaded
+              ? "Preparando acesso..."
+              : microsoftEnabled
+                ? "Continuar com Microsoft"
+                : "Microsoft não configurado"}
+          </span>
+          <ArrowRight size={17} />
+        </button>
 
-            {microsoftEnabled ? (
-              <p className="login-card-note">
-                <ShieldCheck size={15} />
-                Login protegido pela autenticação corporativa da Microsoft.
-              </p>
-            ) : configLoaded ? (
-              <p className="login-card-note warning">Configure o Microsoft Entra no ambiente para liberar o acesso.</p>
-            ) : null}
-          </>
+        {microsoftEnabled ? (
+          <p className="login-card-note">
+            <ShieldCheck size={15} />
+            Login protegido pela autenticação corporativa da Microsoft.
+          </p>
+        ) : configLoaded ? (
+          <p className="login-card-note warning">Configure o Microsoft Entra no ambiente para liberar o acesso.</p>
         ) : null}
       </section>
     </main>

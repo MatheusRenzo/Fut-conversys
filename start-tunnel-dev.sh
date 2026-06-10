@@ -5,6 +5,22 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 TUNNEL_LOG="$(mktemp -t fut-conversys-cloudflared.XXXXXX.log)"
+BACKEND_PORT="${BACKEND_PORT:-8010}"
+FRONTEND_PORT="${FRONTEND_PORT:-3010}"
+
+check_port() {
+  local port="$1"
+  local label="$2"
+
+  if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "$label port $port is already in use."
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN
+    echo ""
+    echo "Stop the process above or run with custom ports, for example:"
+    echo "BACKEND_PORT=8011 FRONTEND_PORT=3011 fut-dev"
+    exit 1
+  fi
+}
 
 if ! command -v cloudflared >/dev/null 2>&1; then
   echo "cloudflared não encontrado. Instale com: brew install cloudflared"
@@ -21,6 +37,9 @@ if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
   (cd "$FRONTEND_DIR" && npm install)
 fi
 
+check_port "$BACKEND_PORT" "Backend"
+check_port "$FRONTEND_PORT" "Frontend"
+
 cleanup() {
   echo ""
   echo "Stopping tunnel and servers..."
@@ -29,7 +48,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "Opening Cloudflare Tunnel..."
-cloudflared tunnel --url http://localhost:3000 --no-autoupdate >"$TUNNEL_LOG" 2>&1 &
+cloudflared tunnel --url "http://localhost:$FRONTEND_PORT" --no-autoupdate >"$TUNNEL_LOG" 2>&1 &
 TUNNEL_PID=$!
 
 PUBLIC_URL=""
@@ -55,6 +74,8 @@ fi
 MICROSOFT_TUNNEL_REDIRECT_URI="$PUBLIC_URL/api/auth/callback/microsoft"
 
 echo "Starting Conversys Fut with Cloudflare Tunnel..."
+echo "Backend local:  http://localhost:$BACKEND_PORT"
+echo "Frontend local: http://localhost:$FRONTEND_PORT"
 echo "Frontend: $PUBLIC_URL"
 echo "Azure Redirect URI:"
 echo "$MICROSOFT_TUNNEL_REDIRECT_URI"
@@ -71,18 +92,18 @@ echo "Press Ctrl+C to stop tunnel and servers."
     set +a
   fi
   export MICROSOFT_REDIRECT_URI="$MICROSOFT_TUNNEL_REDIRECT_URI"
-  uvicorn main:app --reload --host 0.0.0.0 --port 8000
+  uvicorn main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT"
 ) &
 BACKEND_PID=$!
 
 (
   cd "$FRONTEND_DIR"
-  export BACKEND_API_URL="http://localhost:8000"
+  export BACKEND_API_URL="http://localhost:$BACKEND_PORT"
   export MICROSOFT_REDIRECT_URI="$MICROSOFT_TUNNEL_REDIRECT_URI"
   export PUBLIC_APP_URL="$PUBLIC_URL"
   export NEXT_PUBLIC_API_URL="$PUBLIC_URL"
   export NEXT_ALLOWED_DEV_ORIGINS="${PUBLIC_URL#https://}"
-  npm run dev
+  npm run dev -- --port "$FRONTEND_PORT"
 ) &
 FRONTEND_PID=$!
 
