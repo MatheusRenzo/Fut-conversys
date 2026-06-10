@@ -22,11 +22,12 @@ export async function GET(request: NextRequest) {
   });
 
   if (!backendResponse.ok) {
-    const errorBody = await backendResponse.text();
-    console.error("Microsoft login failed", errorBody);
+    const errorData = await backendResponse.json().catch(() => null);
+    const isDomainBlocked =
+      backendResponse.status === 403 && errorData?.detail === "domain_not_allowed";
+    console.error("Microsoft login failed", backendResponse.status);
     const redirectUrl = appUrl("/") ?? new URL("/", request.url);
-    redirectUrl.searchParams.set("error", "microsoft_login");
-    redirectUrl.searchParams.set("detail", errorBody.slice(0, 500));
+    redirectUrl.searchParams.set("error", isDomainBlocked ? "domain_not_allowed" : "microsoft_login");
     return NextResponse.redirect(redirectUrl);
   }
 

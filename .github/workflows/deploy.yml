@@ -1,0 +1,66 @@
+name: Deploy — Produção
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy no servidor
+    runs-on: self-hosted
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild e restart dos containers
+        id: deploy
+        working-directory: /home/matheusdev/Fut-conversys
+        run: bash deploy.sh
+
+      - name: Notificar sucesso por e-mail
+        if: success()
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "✅ Deploy concluído — Fut Conversys"
+          to: redacted@example.com
+          from: "GitHub Actions <${{ secrets.MAIL_USERNAME }}>"
+          body: |
+            Deploy realizado com sucesso no servidor conversysfut.
+
+            Repositório : ${{ github.repository }}
+            Branch      : ${{ github.ref_name }}
+            Commit      : ${{ github.sha }}
+            Autor       : ${{ github.actor }}
+            Hora        : ${{ github.event.head_commit.timestamp }}
+
+            Acesse: http://<REDACTED-IP>:2000
+
+      - name: Notificar falha por e-mail
+        if: failure()
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "❌ FALHA no deploy — Fut Conversys"
+          to: redacted@example.com
+          from: "GitHub Actions <${{ secrets.MAIL_USERNAME }}>"
+          body: |
+            O deploy FALHOU no servidor conversysfut.
+
+            Repositório : ${{ github.repository }}
+            Branch      : ${{ github.ref_name }}
+            Commit      : ${{ github.sha }}
+            Autor       : ${{ github.actor }}
+
+            Veja os logs em: https://github.com/${{ github.repository }}/actions

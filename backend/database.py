@@ -1,22 +1,35 @@
 import os
 from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import NullPool, QueuePool
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# We will try to use the DATABASE_URL from .env. If not set, we fallback to SQLite locally.
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./conversys_fut.db")
 
-# For SQLite we need connect_args={"check_same_thread": False}. For Postgres we don't.
 is_sqlite = SQLALCHEMY_DATABASE_URL.startswith("sqlite")
-engine_args = {"check_same_thread": False} if is_sqlite else {}
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=engine_args)
+if is_sqlite:
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        poolclass=NullPool,
+    )
+else:
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        poolclass=QueuePool,
+        pool_size=10,
+        max_overflow=20,
+        pool_timeout=30,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+    )
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
 Base = declarative_base()
+
 
 def get_db():
     db = SessionLocal()

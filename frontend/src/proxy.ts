@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const protectedRoutes = ["/dashboard", "/events", "/profile", "/me"];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const hasSession = Boolean(request.cookies.get("conversys_session")?.value);
   const pathname = request.nextUrl.pathname;
   const isProtected = protectedRoutes.some((route) => pathname === route || pathname.startsWith(`${route}/`));

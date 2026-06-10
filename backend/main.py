@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect, or_, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, subqueryload
 
 from database import Base, SessionLocal, engine, get_db
 import models
@@ -27,7 +27,15 @@ ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "redacted@example.com")
 VERIFIED_DOMAIN = "conversys.global"
 PASSWORD_ITERATIONS = 260000
 TOKEN_TTL_SECONDS = 60 * 60 * 8
-AUTH_SECRET = os.getenv("AUTH_SECRET") or os.getenv("SECRET_KEY") or "fut-conversys-dev-secret"
+
+_raw_secret = os.getenv("AUTH_SECRET") or os.getenv("SECRET_KEY")
+if not _raw_secret:
+    import sys
+    if os.getenv("DATABASE_URL", "").startswith("postgresql"):
+        print("ERRO FATAL: AUTH_SECRET não definido. Defina no arquivo .env antes de iniciar.", file=sys.stderr)
+        sys.exit(1)
+    _raw_secret = "fut-conversys-dev-secret-insecure"
+AUTH_SECRET = _raw_secret
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 USERNAME_PATTERN = re.compile(r"[^a-z0-9._-]+")
 OPENFOOTBALL_2026_CUP_URL = os.getenv(
@@ -118,6 +126,19 @@ def get_user_id_from_token(token: str) -> int | None:
         return None
 
     return user_id
+
+
+SAFE_URL_SCHEMES = ("http://", "https://")
+
+def validate_url(value: str | None) -> str | None:
+    if not value:
+        return value
+    stripped = value.strip()
+    if not any(stripped.lower().startswith(scheme) for scheme in SAFE_URL_SCHEMES):
+        raise HTTPException(status_code=400, detail="URL inválida: apenas http e https são permitidos")
+    if len(stripped) > 2048:
+        raise HTTPException(status_code=400, detail="URL muito longa")
+    return stripped
 
 
 def normalize_email(email: str) -> str:
@@ -347,10 +368,12 @@ ensure_schema()
 
 app = FastAPI(title="Conversys Fut App API")
 
+_cors_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+_cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+):\d+",
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -687,6 +710,13 @@ def get_current_user(
     return user
 
 
+def public_user_summary(user: models.User) -> dict[str, Any]:
+    """Resposta pública: sem email, sem info de provider."""
+    data = user_summary(user)
+    data.pop("email", None)
+    return data
+
+
 def user_summary(user: models.User) -> dict[str, Any]:
     return {
         "id": user.id,
@@ -844,7 +874,20 @@ def world_cup_game_response(game: models.WorldCupGame, user: models.User | None 
 
 def world_cup_leaderboard_response(db: Session) -> list[dict[str, Any]]:
     rows: dict[int, dict[str, Any]] = {}
-    predictions = db.query(models.WorldCupPrediction).all()
+    predictions = (
+        db.query(models.WorldCupPrediction)
+        .options(
+            joinedload(models.WorldCupPrediction.user)
+            .subqueryload(models.User.posts)
+            .subqueryload(models.Post.likes),
+            joinedload(models.WorldCupPrediction.user)
+            .subqueryload(models.User.rsvps),
+            joinedload(models.WorldCupPrediction.user)
+            .subqueryload(models.User.comments),
+            joinedload(models.WorldCupPrediction.game),
+        )
+        .all()
+    )
     for prediction in predictions:
         if prediction.user_id not in rows:
             rows[prediction.user_id] = {
@@ -1048,7 +1091,7 @@ def seed_user(
 ) -> models.User:
     user = db.query(models.User).filter(models.User.username == username).first()
     if not user:
-        user = models.User(username=username, password_hash=hash_password("admin123"))
+        user = models.User(username=username, password_hash=hash_password(secrets.token_urlsafe(24)))
         db.add(user)
 
     user.email = email
@@ -1286,6 +1329,12 @@ def microsoft_callback(request: MicrosoftCallbackRequest, db: Session = Depends(
     if not provider_subject or not email:
         raise HTTPException(status_code=400, detail="Perfil Microsoft sem id/email")
 
+    if not is_conversys_email(email):
+        raise HTTPException(
+            status_code=403,
+            detail="domain_not_allowed",
+        )
+
     user = (
         db.query(models.User)
         .filter(models.User.provider == "microsoft_entra", models.User.provider_subject == provider_subject)
@@ -1418,6 +1467,8 @@ def update_my_profile(
             value = clamp_banner_position(value)
         if field == "avatar_config" and value is not None:
             value = json.dumps({**default_avatar_config(user), **value})
+        if field in {"avatar_url", "banner_url"}:
+            value = validate_url(value)
         setattr(user, field, value)
 
     if not has_verified_features(user):
@@ -1470,13 +1521,24 @@ def set_user_verified(
 
 
 @app.get("/api/users/{user_id}")
-def get_user_profile(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.id == user_id).first()
+def get_user_profile(user_id: int, db: Session = Depends(get_db), _viewer: models.User = Depends(get_current_user)):
+    user = (
+        db.query(models.User)
+        .options(
+            subqueryload(models.User.posts).subqueryload(models.Post.likes),
+            subqueryload(models.User.posts).subqueryload(models.Post.comments).joinedload(models.Comment.user),
+            subqueryload(models.User.posts).joinedload(models.Post.match),
+            subqueryload(models.User.rsvps),
+            subqueryload(models.User.comments),
+        )
+        .filter(models.User.id == user_id)
+        .first()
+    )
     if not user:
         raise HTTPException(status_code=404, detail="Jogador não encontrado")
 
     return {
-        **user_summary(user),
+        **public_user_summary(user),
         "stats": player_stats(user),
         "posts": [
             post_response(post)
@@ -1486,8 +1548,16 @@ def get_user_profile(user_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/leaderboard")
-def leaderboard(db: Session = Depends(get_db)):
-    users = db.query(models.User).all()
+def leaderboard(db: Session = Depends(get_db), _user: models.User = Depends(get_current_user)):
+    users = (
+        db.query(models.User)
+        .options(
+            subqueryload(models.User.posts).subqueryload(models.Post.likes),
+            subqueryload(models.User.rsvps),
+            subqueryload(models.User.comments),
+        )
+        .all()
+    )
     return {
         "top_scorers": [
             {**user_summary(user), "score": approved_goals_for_user(user)}
@@ -1681,7 +1751,21 @@ def feed(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    posts = db.query(models.Post).order_by(models.Post.created_at.desc()).all()
+    posts = (
+        db.query(models.Post)
+        .options(
+            joinedload(models.Post.user)
+            .subqueryload(models.User.posts)
+            .subqueryload(models.Post.likes),
+            joinedload(models.Post.user).subqueryload(models.User.rsvps),
+            joinedload(models.Post.user).subqueryload(models.User.comments),
+            subqueryload(models.Post.likes),
+            subqueryload(models.Post.comments).joinedload(models.Comment.user),
+            joinedload(models.Post.match),
+        )
+        .order_by(models.Post.created_at.desc())
+        .all()
+    )
     return {"posts": [post_response(post, user) for post in posts]}
 
 
@@ -1699,6 +1783,7 @@ def create_post(
         if not match:
             raise HTTPException(status_code=404, detail="Evento não encontrado")
 
+    image_url = validate_url(request.image_url)
     claimed_goals = max(0, min(20, request.goals_scored or 0))
     if claimed_goals > 0 and not request.match_id:
         raise HTTPException(status_code=400, detail="Selecione o evento para solicitar validação dos gols")
@@ -1717,7 +1802,7 @@ def create_post(
         match_id=request.match_id,
         title=request.title,
         description=request.description,
-        image_url=request.image_url,
+        image_url=image_url,
         goals_scored=claimed_goals,
         goal_status=goal_status,
         goal_reviewed_by_id=reviewed_by_id,
@@ -1812,7 +1897,7 @@ def add_comment(
             raise HTTPException(status_code=404, detail="Comentário original não encontrado")
 
     media_type = request.media_type.strip().lower() if request.media_type else None
-    media_url = request.media_url.strip() if request.media_url else None
+    media_url = validate_url(request.media_url.strip() if request.media_url else None)
     if media_type and media_type not in SUPPORTED_MEDIA_TYPES:
         raise HTTPException(status_code=400, detail="Tipo de mídia inválido")
     if media_type and not media_url:
@@ -1837,7 +1922,23 @@ def list_events(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    matches = db.query(models.Match).order_by(models.Match.date.asc()).all()
+    matches = (
+        db.query(models.Match)
+        .options(
+            subqueryload(models.Match.rsvps)
+            .joinedload(models.MatchRSVP.user)
+            .subqueryload(models.User.posts)
+            .subqueryload(models.Post.likes),
+            subqueryload(models.Match.rsvps)
+            .joinedload(models.MatchRSVP.user)
+            .subqueryload(models.User.rsvps),
+            subqueryload(models.Match.rsvps)
+            .joinedload(models.MatchRSVP.user)
+            .subqueryload(models.User.comments),
+        )
+        .order_by(models.Match.date.asc())
+        .all()
+    )
     return {"events": [match_response(match, user) for match in matches]}
 
 
@@ -1854,7 +1955,7 @@ def create_event(
     location = request.location.strip()
     description = request.description.strip()
     event_type = (request.event_type or "pelada").strip().lower()
-    cover_url = request.cover_url.strip() if request.cover_url else None
+    cover_url = validate_url(request.cover_url.strip() if request.cover_url else None)
 
     if not title:
         raise HTTPException(status_code=400, detail="Informe o nome do evento")

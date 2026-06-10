@@ -1,7 +1,8 @@
-from sqlalchemy import Boolean, Column, Integer, String, ForeignKey, DateTime, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Index, Integer, String, ForeignKey, DateTime, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
+
 
 class User(Base):
     __tablename__ = "users"
@@ -40,11 +41,12 @@ class User(Base):
     barbecue_score = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    rsvps = relationship("MatchRSVP", back_populates="user")
-    posts = relationship("Post", back_populates="user")
-    comments = relationship("Comment", back_populates="user")
-    likes = relationship("Like", back_populates="user")
-    world_cup_predictions = relationship("WorldCupPrediction", back_populates="user")
+    rsvps = relationship("MatchRSVP", back_populates="user", lazy="select")
+    posts = relationship("Post", back_populates="user", lazy="select")
+    comments = relationship("Comment", back_populates="user", lazy="select")
+    likes = relationship("Like", back_populates="user", lazy="select")
+    world_cup_predictions = relationship("WorldCupPrediction", back_populates="user", lazy="select")
+
 
 class Match(Base):
     __tablename__ = "matches"
@@ -53,54 +55,71 @@ class Match(Base):
     title = Column(String)
     event_type = Column(String, default="pelada")
     location = Column(String)
-    date = Column(DateTime)
+    date = Column(DateTime, index=True)
     description = Column(Text)
     max_players = Column(Integer, default=20)
     status = Column(String, default="scheduled")
     cover_url = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    rsvps = relationship("MatchRSVP", back_populates="match")
-    posts = relationship("Post", back_populates="match")
+    rsvps = relationship("MatchRSVP", back_populates="match", lazy="select")
+    posts = relationship("Post", back_populates="match", lazy="select")
+
 
 class MatchRSVP(Base):
     __tablename__ = "match_rsvps"
+    __table_args__ = (
+        Index("ix_match_rsvps_user_id", "user_id"),
+        Index("ix_match_rsvps_match_id", "match_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    match_id = Column(Integer, ForeignKey("matches.id"))
-    status = Column(String) # 'going', 'not_going'
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    match_id = Column(Integer, ForeignKey("matches.id"), nullable=False)
+    status = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="rsvps")
     match = relationship("Match", back_populates="rsvps")
 
+
 class Post(Base):
     __tablename__ = "posts"
+    __table_args__ = (
+        Index("ix_posts_user_id", "user_id"),
+        Index("ix_posts_match_id", "match_id"),
+        Index("ix_posts_created_at", "created_at"),
+        Index("ix_posts_goal_status", "goal_status"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     match_id = Column(Integer, ForeignKey("matches.id"), nullable=True)
     image_url = Column(String, nullable=True)
     title = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     goals_scored = Column(Integer, default=0)
-    goal_status = Column(String, default="none") # 'none', 'pending', 'approved', 'rejected'
+    goal_status = Column(String, default="none")
     goal_reviewed_by_id = Column(Integer, nullable=True)
     goal_reviewed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="posts")
     match = relationship("Match", back_populates="posts")
-    comments = relationship("Comment", back_populates="post")
-    likes = relationship("Like", back_populates="post")
+    comments = relationship("Comment", back_populates="post", lazy="select")
+    likes = relationship("Like", back_populates="post", lazy="select")
+
 
 class Comment(Base):
     __tablename__ = "comments"
+    __table_args__ = (
+        Index("ix_comments_post_id", "post_id"),
+        Index("ix_comments_user_id", "user_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    post_id = Column(Integer, ForeignKey("posts.id"))
-    user_id = Column(Integer, ForeignKey("users.id"))
+    post_id = Column(Integer, ForeignKey("posts.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     parent_id = Column(Integer, ForeignKey("comments.id"), nullable=True)
     text = Column(Text)
     media_url = Column(String, nullable=True)
@@ -110,12 +129,17 @@ class Comment(Base):
     post = relationship("Post", back_populates="comments")
     user = relationship("User", back_populates="comments")
 
+
 class Like(Base):
     __tablename__ = "likes"
+    __table_args__ = (
+        Index("ix_likes_post_id", "post_id"),
+        Index("ix_likes_user_id", "user_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    post_id = Column(Integer, ForeignKey("posts.id"))
-    user_id = Column(Integer, ForeignKey("users.id"))
+    post_id = Column(Integer, ForeignKey("posts.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     reaction_type = Column(String, default="torcida")
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -125,6 +149,10 @@ class Like(Base):
 
 class WorldCupGame(Base):
     __tablename__ = "world_cup_games"
+    __table_args__ = (
+        Index("ix_world_cup_games_kickoff_at", "kickoff_at"),
+        Index("ix_world_cup_games_status", "status"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     external_id = Column(String, unique=True, nullable=True)
@@ -141,16 +169,20 @@ class WorldCupGame(Base):
     source = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    predictions = relationship("WorldCupPrediction", back_populates="game")
+    predictions = relationship("WorldCupPrediction", back_populates="game", lazy="select")
 
 
 class WorldCupPrediction(Base):
     __tablename__ = "world_cup_predictions"
-    __table_args__ = (UniqueConstraint("user_id", "game_id", name="uq_world_cup_prediction_user_game"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "game_id", name="uq_world_cup_prediction_user_game"),
+        Index("ix_world_cup_predictions_user_id", "user_id"),
+        Index("ix_world_cup_predictions_game_id", "game_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    game_id = Column(Integer, ForeignKey("world_cup_games.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    game_id = Column(Integer, ForeignKey("world_cup_games.id"), nullable=False)
     home_score = Column(Integer, default=0)
     away_score = Column(Integer, default=0)
     points = Column(Integer, default=0)
