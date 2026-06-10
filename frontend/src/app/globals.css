@@ -2054,6 +2054,195 @@ textarea {
   color: var(--brand-cyan);
 }
 
+.bolao-champion {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.bolao-champion-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bolao-champion-head > div {
+  display: grid;
+  gap: 6px;
+}
+
+.bolao-champion-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 1.3rem;
+  line-height: 1.1;
+}
+
+.bolao-champion-head h2 svg {
+  color: #ffd75e;
+  flex: 0 0 auto;
+}
+
+.bolao-champion-award {
+  border: 1px solid rgba(255, 215, 94, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 215, 94, 0.08);
+  color: #ffe9a8;
+  flex: 0 0 auto;
+  font-size: 0.74rem;
+  font-weight: 900;
+  padding: 7px 11px;
+  text-transform: uppercase;
+}
+
+.bolao-champion-mine {
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.bolao-champion-mine strong {
+  color: #fff;
+}
+
+.bolao-champion-mine b {
+  color: var(--brand-green);
+}
+
+.bolao-champion-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.bolao-champion-form button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.bolao-champion-picks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.bolao-champion-pick {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.035);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px 11px;
+}
+
+.bolao-champion-pick span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 850;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bolao-champion-pick strong {
+  margin-left: auto;
+  color: #fff;
+  font-size: 0.84rem;
+  white-space: nowrap;
+}
+
+.bolao-champion-pick b {
+  color: var(--brand-green);
+  flex: 0 0 auto;
+}
+
+.bolao-scorers {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 215, 94, 0.18);
+  border-radius: var(--radius);
+  background: rgba(255, 215, 94, 0.05);
+  color: #ffe9a8;
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 8px 10px;
+}
+
+.bolao-scorers svg {
+  flex: 0 0 auto;
+}
+
+.bolao-scorer-guess {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.bolao-scorer-guess svg {
+  color: var(--brand-cyan);
+}
+
+.bolao-scorer-guess .input-field {
+  min-height: 40px;
+}
+
+.bolao-admin-result-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.bolao-highlight {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.bolao-highlight h2 {
+  font-size: 1.02rem;
+  line-height: 1.3;
+}
+
+.bolao-highlight-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.bolao-ranking-tabs {
+  flex-wrap: wrap;
+}
+
+.bolao-ranking-tabs button {
+  flex: 1 1 auto;
+  font-size: 0.78rem;
+  min-height: 32px;
+  padding: 6px 8px;
+}
+
+.bolao-sync-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.bolao-sync-info svg {
+  color: var(--brand-green);
+  flex: 0 0 auto;
+}
+
 .segmented-control {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -7698,6 +7887,18 @@ textarea {
   .score-input-row input,
   .score-input-row button {
     width: 100%;
+  }
+
+  .bolao-champion-form {
+    grid-template-columns: 1fr;
+  }
+
+  .bolao-champion-picks {
+    grid-template-columns: 1fr;
+  }
+
+  .bolao-champion-head h2 {
+    font-size: 1.12rem;
   }
 
 }

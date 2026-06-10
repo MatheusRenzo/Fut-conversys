@@ -8,6 +8,7 @@ import type {
   SearchResults,
   UserProfile,
   WorldCupBoard,
+  WorldCupChampion,
   WorldCupGame,
   WorldCupLeaderboardEntry,
 } from "@/types";
@@ -167,17 +168,33 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   syncWorldCupOpenfootball: () =>
-    apiFetch<{ imported: number; updated: number; games: WorldCupGame[] }>("/api/world-cup/sync/openfootball", {
-      method: "POST",
-    }),
-  submitWorldCupPrediction: (gameId: number, payload: { home_score: number; away_score: number }) =>
+    apiFetch<{ imported: number; updated: number; games: WorldCupGame[]; leaderboard: WorldCupLeaderboardEntry[] }>(
+      "/api/world-cup/sync/openfootball",
+      {
+        method: "POST",
+      },
+    ),
+  submitWorldCupPrediction: (gameId: number, payload: { home_score: number; away_score: number; scorer_guess?: string | null }) =>
     apiFetch<WorldCupGame>(`/api/world-cup/games/${gameId}/prediction`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  setWorldCupGameResult: (gameId: number, payload: { home_score: number; away_score: number; status?: string }) =>
+  setWorldCupGameResult: (
+    gameId: number,
+    payload: { home_score: number; away_score: number; status?: string; scorers?: string | null },
+  ) =>
     apiFetch<{ game: WorldCupGame; leaderboard: WorldCupLeaderboardEntry[] }>(`/api/world-cup/games/${gameId}/result`, {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  submitWorldCupChampionPick: (team: string) =>
+    apiFetch<WorldCupChampion>("/api/world-cup/champion-pick", {
+      method: "POST",
+      body: JSON.stringify({ team }),
+    }),
+  announceWorldCupChampion: (team: string) =>
+    apiFetch<{ champion: WorldCupChampion; leaderboard: WorldCupLeaderboardEntry[] }>("/api/world-cup/champion", {
+      method: "POST",
+      body: JSON.stringify({ team }),
     }),
 };

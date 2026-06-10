@@ -166,6 +166,7 @@ class WorldCupGame(Base):
     status = Column(String, default="scheduled")
     home_score = Column(Integer, nullable=True)
     away_score = Column(Integer, nullable=True)
+    scorers = Column(Text, nullable=True)
     source = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -185,6 +186,8 @@ class WorldCupPrediction(Base):
     game_id = Column(Integer, ForeignKey("world_cup_games.id"), nullable=False)
     home_score = Column(Integer, default=0)
     away_score = Column(Integer, default=0)
+    scorer_guess = Column(String, nullable=True)
+    scorer_hit = Column(Boolean, default=False)
     points = Column(Integer, default=0)
     status = Column(String, default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -192,3 +195,28 @@ class WorldCupPrediction(Base):
 
     user = relationship("User", back_populates="world_cup_predictions")
     game = relationship("WorldCupGame", back_populates="predictions")
+
+
+class WorldCupChampionPick(Base):
+    __tablename__ = "world_cup_champion_picks"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_world_cup_champion_pick_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    team = Column(String, nullable=False)
+    points = Column(Integer, default=0)
+    status = Column(String, default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)

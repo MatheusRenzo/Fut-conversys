@@ -45,7 +45,7 @@ jobs:
             Autor       : ${{ github.actor }}
             Hora        : ${{ github.event.head_commit.timestamp }}
 
-            Acesse: http://<REDACTED-IP>:2000
+            Acesse: http://<REDACTED-IP>
 
       - name: Notificar falha por e-mail
         if: failure()

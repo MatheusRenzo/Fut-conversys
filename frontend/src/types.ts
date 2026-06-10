@@ -211,6 +211,8 @@ export type WorldCupPrediction = {
   game_id: number;
   home_score: number;
   away_score: number;
+  scorer_guess?: string | null;
+  scorer_hit?: boolean;
   points: number;
   status: "pending" | "scored";
   created_at?: string | null;
@@ -231,6 +233,7 @@ export type WorldCupGame = {
   status: "scheduled" | "live" | "finished" | "postponed";
   home_score?: number | null;
   away_score?: number | null;
+  scorers?: string | null;
   source?: string | null;
   predictions_count: number;
   viewer_prediction?: WorldCupPrediction | null;
@@ -243,14 +246,45 @@ export type WorldCupLeaderboardEntry = {
   predictions: number;
   scored_predictions: number;
   exact_scores: number;
+  outcome_hits: number;
+  scorer_hits: number;
+  champion_team?: string | null;
+  champion_points: number;
+};
+
+export type WorldCupChampionPick = {
+  id: number;
+  team: string;
+  points: number;
+  status: "pending" | "scored";
+  user: UserProfile;
+};
+
+export type WorldCupChampion = {
+  team?: string | null;
+  locked: boolean;
+  points_award: number;
+  picks_count: number;
+  viewer_pick?: WorldCupChampionPick | null;
+  picks: WorldCupChampionPick[];
+};
+
+export type WorldCupHighlights = {
+  last_game?: WorldCupGame | null;
+  last_game_winners: WorldCupPrediction[];
 };
 
 export type WorldCupBoard = {
   games: WorldCupGame[];
   leaderboard: WorldCupLeaderboardEntry[];
+  champion: WorldCupChampion;
+  highlights: WorldCupHighlights;
+  last_sync?: string | null;
   rules: {
     exact_score: number;
     correct_outcome: number;
+    scorer_bonus: number;
+    champion: number;
     locked_after_kickoff: boolean;
   };
 };
