@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import Session, joinedload, subqueryload
 
@@ -35,10 +35,17 @@ TOKEN_TTL_SECONDS = 60 * 60 * 8
 _raw_secret = os.getenv("AUTH_SECRET") or os.getenv("SECRET_KEY")
 if not _raw_secret:
     import sys
-    if os.getenv("DATABASE_URL", "").startswith("postgresql"):
-        print("ERRO FATAL: AUTH_SECRET não definido. Defina no arquivo .env antes de iniciar.", file=sys.stderr)
+    # Sem segredo o token vira forjável (HMAC com chave conhecida). Falha de
+    # forma segura por padrão; só libera fallback de dev com opt-in explícito.
+    if os.getenv("ALLOW_INSECURE_AUTH_SECRET") == "1":
+        print("AVISO: AUTH_SECRET ausente — usando segredo de dev inseguro.", file=sys.stderr)
+        _raw_secret = "fut-conversys-dev-secret-insecure"
+    else:
+        print(
+            "ERRO FATAL: AUTH_SECRET não definido. Defina no .env (ou ALLOW_INSECURE_AUTH_SECRET=1 só em dev).",
+            file=sys.stderr,
+        )
         sys.exit(1)
-    _raw_secret = "fut-conversys-dev-secret-insecure"
 AUTH_SECRET = _raw_secret
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 USERNAME_PATTERN = re.compile(r"[^a-z0-9._-]+")
@@ -330,11 +337,13 @@ def microsoft_is_configured() -> bool:
     return all(config.values())
 
 
-def microsoft_authorize_url() -> str:
+def microsoft_authorize_url(state: str | None = None) -> str:
     config = microsoft_env()
     if not microsoft_is_configured():
         raise HTTPException(status_code=500, detail="Microsoft Auth não configurado")
 
+    # O state é gerado e validado na camada Next (cookie de mesma origem) para
+    # proteger contra login-CSRF; aqui só repassamos o valor recebido.
     query = urllib.parse.urlencode(
         {
             "client_id": config["client_id"],
@@ -342,11 +351,23 @@ def microsoft_authorize_url() -> str:
             "redirect_uri": config["redirect_uri"],
             "response_mode": "query",
             "scope": "openid profile email User.Read",
-            "state": secrets.token_urlsafe(24),
+            "state": state or secrets.token_urlsafe(24),
             "prompt": "select_account",
         }
     )
     return f"https://login.microsoftonline.com/{config['tenant_id']}/oauth2/v2.0/authorize?{query}"
+
+
+# Teto de leitura de respostas externas: evita estourar memória se uma fonte
+# (ou um MITM) devolver um corpo gigante. 25 MB cobre folgado os maiores JSONs.
+MAX_EXTERNAL_RESPONSE_BYTES = 25 * 1024 * 1024
+
+
+def read_capped(response, limit: int = MAX_EXTERNAL_RESPONSE_BYTES) -> bytes:
+    data = response.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(status_code=502, detail="Resposta da fonte externa excedeu o limite permitido")
+    return data
 
 
 def request_json(url: str, data: dict[str, str] | None = None, token: str | None = None) -> dict[str, Any]:
@@ -359,7 +380,7 @@ def request_json(url: str, data: dict[str, str] | None = None, token: str | None
 
     try:
         with urllib.request.urlopen(request, timeout=12) as response:
-            return json.loads(response.read().decode("utf-8"))
+            return json.loads(read_capped(response).decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8")
         raise HTTPException(status_code=400, detail=f"Falha Microsoft Auth: {body}") from exc
@@ -374,7 +395,7 @@ def request_microsoft_photo_data_url(token: str) -> str | None:
     try:
         with urllib.request.urlopen(request, timeout=12) as response:
             content_type = response.headers.get("Content-Type", "image/jpeg")
-            photo = response.read()
+            photo = read_capped(response)
     except urllib.error.HTTPError as exc:
         if exc.code in {404, 403}:
             return None
@@ -567,11 +588,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+# Tetos de tamanho fecham flood/DoS por texto gigante (rejeita com 422 na borda)
 class RegisterRequest(BaseModel):
-    name: str
-    email: str
-    password: str
-    username: str | None = None
+    name: str = Field(max_length=120)
+    email: str = Field(max_length=160)
+    password: str = Field(max_length=200)
+    username: str | None = Field(default=None, max_length=40)
 
 
 class MicrosoftCallbackRequest(BaseModel):
@@ -580,18 +602,18 @@ class MicrosoftCallbackRequest(BaseModel):
 
 
 class PostCreateRequest(BaseModel):
-    title: str | None = None
-    description: str
-    image_url: str | None = None
+    title: str | None = Field(default=None, max_length=200)
+    description: str = Field(max_length=5000)
+    image_url: str | None = Field(default=None, max_length=4_200_000)
     match_id: int | None = None
     goals_scored: int | None = None
 
 
 class CommentCreateRequest(BaseModel):
-    text: str
+    text: str = Field(max_length=2000)
     parent_id: int | None = None
-    media_url: str | None = None
-    media_type: str | None = None
+    media_url: str | None = Field(default=None, max_length=4_200_000)
+    media_type: str | None = Field(default=None, max_length=20)
 
 
 class ReactionRequest(BaseModel):
@@ -611,13 +633,13 @@ class RSVPRequest(BaseModel):
 
 
 class EventCreateRequest(BaseModel):
-    title: str
-    event_type: str = "pelada"
-    location: str
+    title: str = Field(max_length=160)
+    event_type: str = Field(default="pelada", max_length=40)
+    location: str = Field(max_length=200)
     date: datetime
-    description: str
+    description: str = Field(max_length=3000)
     max_players: int = 20
-    cover_url: str | None = None
+    cover_url: str | None = Field(default=None, max_length=4_200_000)
 
 
 class WorldCupGameCreateRequest(BaseModel):
@@ -640,9 +662,9 @@ class WorldCupGameResultRequest(BaseModel):
 
 
 class WorldCupPredictionRequest(BaseModel):
-    home_score: int
-    away_score: int
-    scorer_guess: str | None = None
+    home_score: int = Field(ge=0, le=99)
+    away_score: int = Field(ge=0, le=99)
+    scorer_guess: str | None = Field(default=None, max_length=80)
 
 
 class WorldCupChampionPickRequest(BaseModel):
@@ -654,20 +676,20 @@ class WorldCupChampionAnnounceRequest(BaseModel):
 
 
 class ProfileUpdateRequest(BaseModel):
-    display_name: str | None = None
-    title: str | None = None
-    bio: str | None = None
-    position: str | None = None
-    favorite_team: str | None = None
-    favorite_player: str | None = None
-    avatar_url: str | None = None
-    banner_url: str | None = None
+    display_name: str | None = Field(default=None, max_length=80)
+    title: str | None = Field(default=None, max_length=120)
+    bio: str | None = Field(default=None, max_length=600)
+    position: str | None = Field(default=None, max_length=60)
+    favorite_team: str | None = Field(default=None, max_length=80)
+    favorite_player: str | None = Field(default=None, max_length=80)
+    avatar_url: str | None = Field(default=None, max_length=4_200_000)
+    banner_url: str | None = Field(default=None, max_length=4_200_000)
     banner_position_x: int | None = None
     banner_position_y: int | None = None
-    profile_frame: str | None = None
-    cosmetic_tier: str | None = None
+    profile_frame: str | None = Field(default=None, max_length=40)
+    cosmetic_tier: str | None = Field(default=None, max_length=40)
     animated_banner: bool | None = None
-    profile_effect: str | None = None
+    profile_effect: str | None = Field(default=None, max_length=40)
     show_verified_badge: bool | None = None
     avatar_config: dict[str, Any] | None = None
     player_rating: int | None = None
@@ -1470,9 +1492,9 @@ def parse_openfootball_world_cup(text_data: str, year: int = WORLD_CUP_YEAR) -> 
 def fetch_openfootball_world_cup_games() -> list[dict[str, Any]]:
     try:
         with urllib.request.urlopen(OPENFOOTBALL_2026_CUP_URL, timeout=15) as response:
-            group_stage_text = response.read().decode("utf-8")
+            group_stage_text = read_capped(response).decode("utf-8")
         with urllib.request.urlopen(OPENFOOTBALL_2026_FINALS_URL, timeout=15) as response:
-            knockout_text = response.read().decode("utf-8")
+            knockout_text = read_capped(response).decode("utf-8")
     except urllib.error.URLError as exc:
         raise HTTPException(status_code=400, detail="Não foi possível buscar a tabela openfootball") from exc
 
@@ -1486,7 +1508,7 @@ def fetch_world_cup_squads() -> dict[str, list[dict[str, Any]]]:
     request = urllib.request.Request(WIKIPEDIA_SQUADS_URL, headers={"User-Agent": "ConversysFut/1.0"})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(read_capped(response).decode("utf-8"))
     except (urllib.error.URLError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail="Não foi possível buscar os elencos na Wikipedia") from exc
 
@@ -1625,7 +1647,7 @@ def fetch_football_data_results() -> list[dict[str, Any]]:
         headers={"X-Auth-Token": FOOTBALL_DATA_API_KEY, "User-Agent": "ConversysFut/1.0"},
     )
     with urllib.request.urlopen(request, timeout=20) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+        payload = json.loads(read_capped(response).decode("utf-8"))
     results: list[dict[str, Any]] = []
     for match in payload.get("matches", []):
         home = normalize_world_cup_team(((match.get("homeTeam") or {}).get("name")) or "")
@@ -1766,7 +1788,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     )
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(read_capped(response).decode("utf-8"))
     except Exception as exc:
         status["error"] = str(exc)[:300]
         return status
@@ -2313,8 +2335,8 @@ def microsoft_config():
 
 
 @app.get("/api/auth/microsoft/start")
-def microsoft_start():
-    return RedirectResponse(microsoft_authorize_url())
+def microsoft_start(state: str | None = None):
+    return RedirectResponse(microsoft_authorize_url(state))
 
 
 @app.post("/api/auth/microsoft/callback")
@@ -2330,7 +2352,9 @@ def microsoft_callback(request: MicrosoftCallbackRequest, db: Session = Depends(
             "client_id": config["client_id"],
             "client_secret": config["client_secret"],
             "code": request.code,
-            "redirect_uri": request.redirect_uri or config["redirect_uri"],
+            # redirect_uri sempre o do servidor (ignora valor do cliente) — fecha
+            # o vetor de troca de código com redirect_uri controlado pelo atacante
+            "redirect_uri": config["redirect_uri"],
             "grant_type": "authorization_code",
             "scope": "openid profile email User.Read",
         },

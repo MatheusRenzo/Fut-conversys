@@ -28,7 +28,7 @@ function HomeContent() {
   }, [router]);
 
   const startMicrosoftLogin = () => {
-    window.location.href = "/api/backend/api/auth/microsoft/start";
+    window.location.href = "/api/auth/microsoft/start";
   };
 
   if (isDomainBlocked) {
