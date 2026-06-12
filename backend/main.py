@@ -1008,8 +1008,7 @@ def game_outcome(home_score: int, away_score: int) -> str:
 
 
 WORLD_CUP_POINTS_EXACT = 3
-# Acertar só o vencedor não vale ponto: ou crava o placar (3), ou o artilheiro (+1), ou nada
-WORLD_CUP_POINTS_OUTCOME = 0
+WORLD_CUP_POINTS_OUTCOME = 1
 WORLD_CUP_POINTS_SCORER = 1
 WORLD_CUP_POINTS_CHAMPION = 10
 
@@ -1024,6 +1023,8 @@ def world_cup_prediction_points(
         return 0
     if prediction_home == game_home and prediction_away == game_away:
         return WORLD_CUP_POINTS_EXACT
+    if game_outcome(prediction_home, prediction_away) == game_outcome(game_home, game_away):
+        return WORLD_CUP_POINTS_OUTCOME
     return 0
 
 

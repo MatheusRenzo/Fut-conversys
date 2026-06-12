@@ -106,6 +106,7 @@ const quickFilters: Array<{ key: QuickFilter; label: string }> = [
 const rankingTabs: Array<{ key: RankingTab; label: string }> = [
   { key: "geral", label: "Geral" },
   { key: "exatos", label: "Exatos" },
+  { key: "resultados", label: "Vencedor" },
   { key: "artilheiro", label: "Artilheiro" },
 ];
 
@@ -232,10 +233,17 @@ function BolaoRankingPanel({
               </div>
             </li>
             <li>
+              <CheckCircle2 size={16} />
+              <div>
+                <strong>Vencedor certo — {board?.rules.correct_outcome ?? 1} pt</strong>
+                <span>Acertou quem vence (ou o empate), mas errou o placar. Não soma com o placar exato.</span>
+              </div>
+            </li>
+            <li>
               <Goal size={16} />
               <div>
                 <strong>Artilheiro — {board?.rules.scorer_bonus ?? 1} pt</strong>
-                <span>O jogador que você escolheu marcou gol no jogo. Vale sozinho ou somado ao placar exato.</span>
+                <span>O jogador que você escolheu marcou gol no jogo. Vale sozinho ou somado aos pontos acima.</span>
               </div>
             </li>
             <li>
@@ -247,9 +255,8 @@ function BolaoRankingPanel({
             </li>
           </ul>
           <p className="bolao-rules-note">
-            Num jogo dá pra somar até <strong>{maxPoints(board?.rules)} pts</strong> (placar exato + artilheiro). Acertar
-            só o vencedor não pontua. Palpites fecham 1 hora antes da bola rolar e a pontuação entra automaticamente
-            quando o jogo termina.
+            Num jogo dá pra somar até <strong>{maxPoints(board?.rules)} pts</strong> (placar exato + artilheiro).
+            Palpites fecham 1 hora antes da bola rolar e a pontuação entra automaticamente quando o jogo termina.
           </p>
         </div>
       )}
