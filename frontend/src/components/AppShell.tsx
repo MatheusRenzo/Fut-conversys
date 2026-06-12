@@ -320,15 +320,12 @@ export function AppShell({
             <div>
               <strong>{user.name}</strong>
               <small>{user.position || user.title || "Jogador Conversys"}</small>
+              <Link className="sidebar-profile-edit" href="/me">
+                <Pencil size={12} />
+                <span>Editar perfil</span>
+              </Link>
             </div>
           </div>
-        )}
-
-        {user && (
-          <Link className="sidebar-edit-profile" href="/me">
-            <Pencil size={15} />
-            <span>Editar perfil</span>
-          </Link>
         )}
 
         <button className="btn-secondary" onClick={logout}>

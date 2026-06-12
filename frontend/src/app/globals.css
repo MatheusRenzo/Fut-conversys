@@ -11264,3 +11264,121 @@ img.team-flag {
     overflow: visible;
   }
 }
+
+/* Chip do palpite de campeã no ranking (coroa + bandeirinha) */
+
+.bolao-pick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(255, 215, 94, 0.35);
+  border-radius: 999px;
+  background: rgba(255, 215, 94, 0.1);
+  padding: 2px 7px;
+  font-size: 0.72rem;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.bolao-pick-chip .team-flag {
+  width: 16px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.bolao-rank-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bolao-podium-step .bolao-pick-chip {
+  margin-top: 2px;
+}
+
+/* "Ver ranking completo" — botão em duas pontas com gradiente */
+
+.wc-ranking-show-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid rgba(0, 207, 180, 0.4);
+  border-radius: var(--radius);
+  background: linear-gradient(120deg, rgba(0, 90, 255, 0.18), rgba(0, 207, 180, 0.14));
+  color: #fff;
+  cursor: pointer;
+  padding: 10px 14px;
+  transition: border-color 0.15s ease, box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.wc-ranking-show-more:hover {
+  border-color: rgba(0, 207, 180, 0.7);
+  box-shadow: 0 6px 22px rgba(0, 207, 180, 0.16);
+  transform: translateY(-1px);
+}
+
+.wc-ranking-show-more-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  font-weight: 950;
+}
+
+.wc-ranking-show-more-copy svg {
+  color: #ffd75e;
+}
+
+.wc-ranking-show-more-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #bafff2;
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+/* Editar perfil — botão no header do perfil e link na sidebar */
+
+.profile-hero-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(0, 207, 180, 0.45);
+  border-radius: 999px;
+  background: rgba(0, 207, 180, 0.12);
+  color: #bafff2;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 900;
+  padding: 7px 13px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.profile-hero-edit:hover {
+  border-color: rgba(0, 207, 180, 0.75);
+  background: rgba(0, 207, 180, 0.2);
+}
+
+.sidebar-profile-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  color: var(--brand-cyan);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.sidebar-profile-edit:hover {
+  text-decoration: underline;
+}

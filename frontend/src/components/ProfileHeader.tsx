@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { UserProfile } from "@/types";
 import { BadgeCheck, CalendarDays, Flame, Goal, Handshake, ShieldCheck, Trophy } from "lucide-react";
 import { Avatar } from "./Avatar";
@@ -13,7 +14,7 @@ function resolveEffect(profile: UserProfile) {
   return "off";
 }
 
-export function ProfileHeader({ profile }: { profile: UserProfile }) {
+export function ProfileHeader({ profile, action }: { profile: UserProfile; action?: ReactNode }) {
   const frame = profile.profile_frame ?? "conversys";
   const effect = frame !== "none" ? resolveEffect(profile) : "off";
   const hasMotion = effect !== "off";
@@ -40,6 +41,7 @@ export function ProfileHeader({ profile }: { profile: UserProfile }) {
           <div className="profile-copy">
             <div className="profile-title-row">
               <h1>{profile.name}</h1>
+              {action}
             </div>
             <p>{profile.title || profile.position || "Jogador Conversys"}</p>
             <span>{profile.bio}</span>

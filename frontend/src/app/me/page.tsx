@@ -398,7 +398,26 @@ export default function MePage() {
 
   return (
     <AppShell user={profile} nextEvent={events[0] ?? null} leaderboard={leaderboard}>
-      <ProfileHeader profile={previewProfile} />
+      <ProfileHeader
+        action={
+          !isEditing ? (
+            <button
+              className="profile-hero-edit"
+              onClick={() => {
+                startEditing();
+                window.setTimeout(() => {
+                  document.querySelector(".profile-edit-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }, 60);
+              }}
+              type="button"
+            >
+              <Pencil size={14} />
+              <span>Editar perfil</span>
+            </button>
+          ) : undefined
+        }
+        profile={previewProfile}
+      />
 
       {!isEditing && (
         <section className="content-card glass-panel profile-edit-cta">

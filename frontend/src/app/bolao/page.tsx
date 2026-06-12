@@ -29,7 +29,7 @@ import { AppShell } from "@/components/AppShell";
 import { Avatar } from "@/components/Avatar";
 import { TeamFlag } from "@/components/TeamFlag";
 import { api } from "@/lib/api";
-import { squadTeamKey } from "@/lib/teams";
+import { squadTeamKey, teamLabel } from "@/lib/teams";
 import { formatEventDate, formatShortDate } from "@/lib/format";
 import type {
   Event as AppEvent,
@@ -286,6 +286,11 @@ function BolaoRankingPanel({
                 <small>
                   {entry.exact_scores} exatos · {entry.scorer_hits} ⚽
                 </small>
+                {entry.champion_team && (
+                  <span className="bolao-pick-chip" title={`Palpite de campeã: ${teamLabel(entry.champion_team)}`}>
+                    👑 <TeamFlag team={entry.champion_team} />
+                  </span>
+                )}
               </button>
             ) : (
               <span className="bolao-podium-step empty" key={`empty-${column}`} />
@@ -304,7 +309,14 @@ function BolaoRankingPanel({
             <strong>{rankingTab === "geral" ? entry.rank : index + podium.length + 1}</strong>
             <Avatar user={entry.user} size="sm" />
             <span className="bolao-rank-main">
-              {entry.user.name}
+              <span className="bolao-rank-name">
+                {entry.user.name}
+                {entry.champion_team && (
+                  <span className="bolao-pick-chip" title={`Palpite de campeã: ${teamLabel(entry.champion_team)}`}>
+                    👑 <TeamFlag team={entry.champion_team} />
+                  </span>
+                )}
+              </span>
               <small>
                 {entry.exact_scores} exatos · {entry.scorer_hits} artilheiros · {entry.predictions} palpites
               </small>
@@ -320,8 +332,13 @@ function BolaoRankingPanel({
 
       {compact && onShowAll && sortedRanking.length > entries.length && (
         <button className="wc-ranking-show-more" onClick={onShowAll} type="button">
-          <Medal size={15} />
-          <span>Mostrar mais</span>
+          <span className="wc-ranking-show-more-copy">
+            <Medal size={16} />
+            <span>Ver ranking completo</span>
+          </span>
+          <span className="wc-ranking-show-more-count">
+            {sortedRanking.length} participantes <ChevronRight size={15} />
+          </span>
         </button>
       )}
 
@@ -329,9 +346,9 @@ function BolaoRankingPanel({
         <div className="wc-last-game">
           <span className="eyebrow">Último jogo</span>
           <strong>
-            <TeamFlag team={highlights.last_game.home_team} /> {highlights.last_game.home_team}{" "}
+            <TeamFlag team={highlights.last_game.home_team} /> {teamLabel(highlights.last_game.home_team)}{" "}
             {highlights.last_game.home_score} x {highlights.last_game.away_score}{" "}
-            {highlights.last_game.away_team} <TeamFlag team={highlights.last_game.away_team} />
+            {teamLabel(highlights.last_game.away_team)} <TeamFlag team={highlights.last_game.away_team} />
           </strong>
           {highlights.last_game_winners.length > 0 ? (
             <div className="bolao-ranking-list">
@@ -405,7 +422,7 @@ function BolaoPersonModal({
           <div className="wc-person-champion">
             <Crown size={15} />
             <span>
-              Campeã: <TeamFlag team={entry.champion_team} /> <strong>{entry.champion_team}</strong>
+              Campeã: <TeamFlag team={entry.champion_team} /> <strong>{teamLabel(entry.champion_team)}</strong>
               {entry.champion_points > 0 ? ` (+${entry.champion_points} pts)` : ""}
             </span>
           </div>
@@ -423,7 +440,7 @@ function BolaoPersonModal({
                   <div className={exact ? "wc-person-bet exact" : "wc-person-bet"} key={game.id}>
                     <div className="wc-person-bet-match">
                       <span>
-                        <TeamFlag team={game.home_team} /> {game.home_team} x {game.away_team}{" "}
+                        <TeamFlag team={game.home_team} /> {teamLabel(game.home_team)} x {teamLabel(game.away_team)}{" "}
                         <TeamFlag team={game.away_team} />
                       </span>
                       <small>
@@ -546,7 +563,7 @@ function ScorerPicker({
               <div>
                 <span className="eyebrow">Palpite de artilheiro (+1 pt)</span>
                 <h2>
-                  {game.home_team} x {game.away_team}
+                  {teamLabel(game.home_team)} x {teamLabel(game.away_team)}
                 </h2>
               </div>
               <button className="modal-close" onClick={() => setOpen(false)} type="button">
@@ -572,7 +589,7 @@ function ScorerPicker({
               {groups.map((group) => (
                 <div className="wc-scorer-group" key={group.team}>
                   <span className="wc-scorer-group-label">
-                    <TeamFlag team={group.team} /> {group.team}
+                    <TeamFlag team={group.team} /> {teamLabel(group.team)}
                   </span>
                   {group.players.map((player) => (
                     <button
@@ -761,6 +778,9 @@ export default function BolaoPage() {
     [upcomingGames],
   );
 
+  // Lista da grade respeita o filtro escolhido (abertos, ao vivo, encerrados...)
+  const gridGames = useMemo(() => sortGames(filteredGames), [filteredGames]);
+
   const championTeams = useMemo(() => {
     const names = new Set(Object.keys(squads));
     for (const team of teams) names.add(team);
@@ -770,7 +790,9 @@ export default function BolaoPage() {
   const filteredChampionTeams = useMemo(() => {
     const query = championQuery.trim().toLowerCase();
     if (!query) return championTeams;
-    return championTeams.filter((team) => team.toLowerCase().includes(query));
+    return championTeams.filter(
+      (team) => team.toLowerCase().includes(query) || teamLabel(team).toLowerCase().includes(query),
+    );
   }, [championQuery, championTeams]);
 
   const summary = useMemo(() => {
@@ -1067,8 +1089,8 @@ export default function BolaoPage() {
           <div className="wc-live-banner">
             <span className="wc-live-dot" />
             <strong>
-              {liveGames[0].home_team} {liveGames[0].home_score ?? 0} x {liveGames[0].away_score ?? 0}{" "}
-              {liveGames[0].away_team}
+              {teamLabel(liveGames[0].home_team)} {liveGames[0].home_score ?? 0} x {liveGames[0].away_score ?? 0}{" "}
+              {teamLabel(liveGames[0].away_team)}
             </strong>
             <span>rolando agora{liveGames.length > 1 ? ` +${liveGames.length - 1} jogos` : ""}</span>
           </div>
@@ -1079,7 +1101,7 @@ export default function BolaoPage() {
               <div className="wc-countdown-match">
                 <span className="wc-countdown-flag"><TeamFlag team={nextGame.home_team} /></span>
                 <strong>
-                  {nextGame.home_team} x {nextGame.away_team}
+                  {teamLabel(nextGame.home_team)} x {teamLabel(nextGame.away_team)}
                 </strong>
                 <span className="wc-countdown-flag"><TeamFlag team={nextGame.away_team} /></span>
               </div>
@@ -1182,7 +1204,7 @@ export default function BolaoPage() {
           <div className="wc-champion-result">
             <span className="wc-champion-result-flag"><TeamFlag team={champion.team} /></span>
             <div>
-              <strong>Campeã: {champion.team}</strong>
+              <strong>Campeã: {teamLabel(champion.team)}</strong>
               <span>A Copa acabou — confere os pontos no ranking.</span>
             </div>
           </div>
@@ -1190,7 +1212,7 @@ export default function BolaoPage() {
           <div className="wc-champion-result locked">
             <span className="wc-champion-result-flag"><TeamFlag team={champion.viewer_pick.team} /></span>
             <div>
-              <strong>{champion.viewer_pick.team}</strong>
+              <strong>{teamLabel(champion.viewer_pick.team)}</strong>
               <span>Palpite cravado. Não dá pra mudar.</span>
             </div>
             <span className="wc-champion-seal">Cravado</span>
@@ -1215,7 +1237,7 @@ export default function BolaoPage() {
                   type="button"
                 >
                   <span className="wc-champion-team-flag"><TeamFlag team={team} /></span>
-                  <span>{team}</span>
+                  <span>{teamLabel(team)}</span>
                 </button>
               ))}
             </div>
@@ -1231,7 +1253,7 @@ export default function BolaoPage() {
                   "Cravando..."
                 ) : championDraft ? (
                   <>
-                    Cravar <TeamFlag team={championDraft} /> {championDraft}
+                    Cravar <TeamFlag team={championDraft} /> {teamLabel(championDraft)}
                   </>
                 ) : (
                   "Escolha uma seleção"
@@ -1252,7 +1274,7 @@ export default function BolaoPage() {
         )}
       </section>
 
-      {recentResults.length > 0 && (
+      {recentResults.length > 0 && quickFilter !== "finished" && (
         <section className="wc-results-panel glass-panel">
           <div className="wc-section-head">
             <div>
@@ -1274,12 +1296,12 @@ export default function BolaoPage() {
                   <span className="wc-game-date">{formatEventDate(game.kickoff_at)}</span>
                 </div>
                 <div className="wc-result-scoreline">
-                  <span><TeamFlag team={game.home_team} /> {game.home_team}</span>
+                  <span><TeamFlag team={game.home_team} /> {teamLabel(game.home_team)}</span>
                   <strong>
                     {game.home_score} x {game.away_score}
                   </strong>
                   <span>
-                    {game.away_team} <TeamFlag team={game.away_team} />
+                    {teamLabel(game.away_team)} <TeamFlag team={game.away_team} />
                   </span>
                 </div>
                 {game.scorers ? (
@@ -1343,19 +1365,120 @@ export default function BolaoPage() {
 
       <section className="wc-section-head">
         <div>
-          <span className="eyebrow">Próximos jogos</span>
-          <h2>Ordem do calendário da Copa</h2>
-          <p className="wc-section-copy">A fila segue o horário oficial. Apostar não tira o jogo da lista — ele só sai quando começar ou finalizar.</p>
+          <span className="eyebrow">
+            {quickFilter === "finished"
+              ? "Encerrados"
+              : quickFilter === "live"
+                ? "Ao vivo"
+                : quickFilter === "today"
+                  ? "Hoje"
+                  : quickFilter === "all"
+                    ? "Calendário completo"
+                    : "Próximos jogos"}
+          </span>
+          <h2>
+            {quickFilter === "finished"
+              ? "Jogos encerrados e palpites"
+              : quickFilter === "live"
+                ? "Rolando agora"
+                : quickFilter === "today"
+                  ? "Jogos de hoje"
+                  : quickFilter === "all"
+                    ? "Todos os jogos da Copa"
+                    : "Ordem do calendário da Copa"}
+          </h2>
+          {quickFilter === "open" && (
+            <p className="wc-section-copy">A fila segue o horário oficial. Apostar não tira o jogo da lista — ele só sai quando começar ou finalizar.</p>
+          )}
         </div>
         <span className="wc-section-count">
-          {upcomingGames.length} jogo{upcomingGames.length === 1 ? "" : "s"}
-          {unpickedOpen > 0 ? ` · ${unpickedOpen} sem palpite` : ""}
+          {gridGames.length} jogo{gridGames.length === 1 ? "" : "s"}
+          {quickFilter === "open" && unpickedOpen > 0 ? ` · ${unpickedOpen} sem palpite` : ""}
         </span>
       </section>
 
-      {upcomingGames.length > 0 ? (
+      {gridGames.length > 0 ? (
         <section className="wc-game-grid">
-          {upcomingGames.map((game) => {
+          {gridGames.map((game) => {
+            // Jogo fechado/ao vivo/encerrado: card de resultado com palpites da galera
+            if (isGameLocked(game, currentTime)) {
+              const viewerPick = game.viewer_prediction;
+              return (
+                <article className="wc-game-card glass-panel closed-card" id={`game-${game.id}`} key={game.id}>
+                  <div className="wc-game-top">
+                    <span className="wc-game-stage">
+                      {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
+                    </span>
+                    <span className="wc-game-date">{formatEventDate(game.kickoff_at)}</span>
+                    <div className="wc-game-top-actions">
+                      <span className={`wc-game-status ${game.status}`}>
+                        {game.status === "live" && <span className="wc-live-dot small" />}
+                        {game.status === "scheduled" ? "Fechado" : statusLabels[game.status]}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="wc-result-scoreline">
+                    <span>
+                      <TeamFlag team={game.home_team} /> {teamLabel(game.home_team)}
+                    </span>
+                    <strong>
+                      {game.home_score ?? "–"} x {game.away_score ?? "–"}
+                    </strong>
+                    <span>
+                      {teamLabel(game.away_team)} <TeamFlag team={game.away_team} />
+                    </span>
+                  </div>
+                  {game.scorers && (
+                    <div className="wc-result-scorers">
+                      <Goal size={14} />
+                      <span>{game.scorers}</span>
+                    </div>
+                  )}
+                  {viewerPick && (
+                    <div className="wc-bet-slip-pick">
+                      <span>
+                        Seu palpite: <strong>{viewerPick.home_score}x{viewerPick.away_score}</strong>
+                        {viewerPick.scorer_guess ? (
+                          <>
+                            {" · "}
+                            <strong className={viewerPick.scorer_hit ? "hit" : ""}>⚽ {viewerPick.scorer_guess}</strong>
+                          </>
+                        ) : null}
+                      </span>
+                      {viewerPick.status === "scored" ? (
+                        <b className={viewerPick.points > 0 ? "wc-points-badge won" : "wc-points-badge"}>
+                          {viewerPick.points > 0 ? `+${viewerPick.points} pts` : "0 pts"}
+                        </b>
+                      ) : (
+                        <b className="wc-points-badge pending">Aguardando</b>
+                      )}
+                    </div>
+                  )}
+                  {(game.predictions ?? []).length > 0 && (
+                    <div className="wc-result-preds">
+                      <span className="wc-result-preds-label">Palpites da galera</span>
+                      {(game.predictions ?? []).map((prediction) => (
+                        <div
+                          className={prediction.points > 0 ? "wc-result-pred scored" : "wc-result-pred"}
+                          key={prediction.id}
+                        >
+                          <Avatar user={prediction.user} size="sm" />
+                          <span>{prediction.user.name.split(" ")[0]}</span>
+                          <small>
+                            {prediction.home_score}x{prediction.away_score}
+                            {prediction.scorer_guess ? ` · ⚽ ${prediction.scorer_guess}${prediction.scorer_hit ? " ✓" : ""}` : ""}
+                          </small>
+                          <b className={prediction.points > 0 ? "wc-points-badge won" : "wc-points-badge"}>
+                            {prediction.points > 0 ? `+${prediction.points}` : "0"}
+                          </b>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              );
+            }
+
             const draft = predictionDraftFor(game);
             const players = gamePlayers(game);
             const lockMinutes = minutesUntilBetClose(game, currentTime);
@@ -1400,7 +1523,7 @@ export default function BolaoPage() {
                   {!isExpanded && (
                     <div className="wc-game-summary-row">
                       <span className="wc-game-summary-team">
-                        <TeamFlag team={game.home_team} /> {game.home_team}
+                        <TeamFlag team={game.home_team} /> {teamLabel(game.home_team)}
                       </span>
                       <strong className="wc-game-summary-score">
                         {hasBet && game.viewer_prediction
@@ -1408,7 +1531,7 @@ export default function BolaoPage() {
                           : "x"}
                       </strong>
                       <span className="wc-game-summary-team away">
-                        {game.away_team} <TeamFlag team={game.away_team} />
+                        {teamLabel(game.away_team)} <TeamFlag team={game.away_team} />
                       </span>
                       <ChevronRight className="wc-game-summary-chevron" size={17} />
                     </div>
@@ -1432,7 +1555,7 @@ export default function BolaoPage() {
                     <div className="wc-matchup readonly">
                       <div className="wc-team">
                         <span className="wc-team-flag"><TeamFlag team={game.home_team} /></span>
-                        <span className="wc-team-name">{game.home_team}</span>
+                        <span className="wc-team-name">{teamLabel(game.home_team)}</span>
                       </div>
                       <div className="wc-score readonly-score">
                         <strong>
@@ -1441,7 +1564,7 @@ export default function BolaoPage() {
                       </div>
                       <div className="wc-team away">
                         <span className="wc-team-flag"><TeamFlag team={game.away_team} /></span>
-                        <span className="wc-team-name">{game.away_team}</span>
+                        <span className="wc-team-name">{teamLabel(game.away_team)}</span>
                       </div>
                     </div>
                     {game.viewer_prediction.scorer_guess && (
@@ -1460,12 +1583,12 @@ export default function BolaoPage() {
                     <div className="wc-matchup">
                       <div className="wc-team">
                         <span className="wc-team-flag"><TeamFlag team={game.home_team} /></span>
-                        <span className="wc-team-name">{game.home_team}</span>
+                        <span className="wc-team-name">{teamLabel(game.home_team)}</span>
                       </div>
                       <div className="wc-score">
                         <div className="wc-score-inputs">
                           <input
-                            aria-label={`Gols de ${game.home_team}`}
+                            aria-label={`Gols de ${teamLabel(game.home_team)}`}
                             inputMode="numeric"
                             min={0}
                             onChange={(event) => updatePredictionDraft(game, "home", event.target.value)}
@@ -1474,7 +1597,7 @@ export default function BolaoPage() {
                           />
                           <small>x</small>
                           <input
-                            aria-label={`Gols de ${game.away_team}`}
+                            aria-label={`Gols de ${teamLabel(game.away_team)}`}
                             inputMode="numeric"
                             min={0}
                             onChange={(event) => updatePredictionDraft(game, "away", event.target.value)}
@@ -1485,7 +1608,7 @@ export default function BolaoPage() {
                       </div>
                       <div className="wc-team away">
                         <span className="wc-team-flag"><TeamFlag team={game.away_team} /></span>
-                        <span className="wc-team-name">{game.away_team}</span>
+                        <span className="wc-team-name">{teamLabel(game.away_team)}</span>
                       </div>
                     </div>
 
@@ -1549,13 +1672,15 @@ export default function BolaoPage() {
       ) : (
         <section className="empty-state bolao-empty">
           <Trophy size={24} />
-          <strong>Nenhum jogo aberto nesse filtro</strong>
+          <strong>Nenhum jogo nesse filtro</strong>
           <span>
-            {summary.predicted > 0
-              ? "Seus palpites fechados estão em Minhas apostas."
+            {quickFilter === "live"
+              ? "Nenhum jogo rolando agora. Confere os próximos em Abertos."
               : quickFilter === "today"
                 ? "Nenhum jogo hoje. Confere os próximos em Abertos."
-                : "Tenta outro filtro ou aguarda a próxima rodada."}
+                : summary.predicted > 0
+                  ? "Seus palpites fechados estão em Minhas apostas."
+                  : "Tenta outro filtro ou aguarda a próxima rodada."}
           </span>
           {summary.predicted > 0 && (
             <button className="wc-urgency-action" onClick={() => setMyBetsModalOpen(true)} type="button">
@@ -1596,13 +1721,13 @@ export default function BolaoPage() {
                       </div>
                       <div className="wc-bet-slip-match">
                         <span>
-                          <TeamFlag team={game.home_team} /> {game.home_team}
+                          <TeamFlag team={game.home_team} /> {teamLabel(game.home_team)}
                         </span>
                         <strong>
                           {showScore ? `${game.home_score} x ${game.away_score}` : `${prediction.home_score} x ${prediction.away_score}`}
                         </strong>
                         <span>
-                          {game.away_team} <TeamFlag team={game.away_team} />
+                          {teamLabel(game.away_team)} <TeamFlag team={game.away_team} />
                         </span>
                       </div>
                       <div className="wc-bet-slip-meta">
@@ -1678,7 +1803,7 @@ export default function BolaoPage() {
               <div>
                 <span className="eyebrow">Resultado oficial</span>
                 <h2>
-                  <TeamFlag team={resultModalGame.home_team} /> {resultModalGame.home_team} x {resultModalGame.away_team}{" "}
+                  <TeamFlag team={resultModalGame.home_team} /> {teamLabel(resultModalGame.home_team)} x {teamLabel(resultModalGame.away_team)}{" "}
                   <TeamFlag team={resultModalGame.away_team} />
                 </h2>
               </div>
@@ -1689,7 +1814,7 @@ export default function BolaoPage() {
             <form onSubmit={handleResult}>
               <div className="modal-grid">
                 <div className="modal-field">
-                  <label htmlFor="result-home">{resultModalGame.home_team}</label>
+                  <label htmlFor="result-home">{teamLabel(resultModalGame.home_team)}</label>
                   <input
                     className="input-field"
                     id="result-home"
@@ -1701,7 +1826,7 @@ export default function BolaoPage() {
                   />
                 </div>
                 <div className="modal-field">
-                  <label htmlFor="result-away">{resultModalGame.away_team}</label>
+                  <label htmlFor="result-away">{teamLabel(resultModalGame.away_team)}</label>
                   <input
                     className="input-field"
                     id="result-away"

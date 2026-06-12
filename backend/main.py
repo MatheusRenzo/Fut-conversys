@@ -1150,13 +1150,12 @@ def world_cup_leaderboard_response(db: Session) -> list[dict[str, Any]]:
         .options(joinedload(models.WorldCupChampionPick.user))
         .all()
     )
-    # O palpite de campeã só fica visível para os outros depois que fecha
-    champion_visible = world_cup_champion_locked(db)
+    # Palpite de campeã é público no ranking (é único e não pode ser trocado)
     for pick in champion_picks:
         if pick.user_id not in rows:
             rows[pick.user_id] = empty_row(pick.user)
         row = rows[pick.user_id]
-        row["champion_team"] = pick.team if champion_visible else None
+        row["champion_team"] = pick.team
         row["champion_points"] = pick.points or 0
         row["points"] += pick.points or 0
 
