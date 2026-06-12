@@ -1035,108 +1035,144 @@ export default function BolaoPage() {
   return (
     <AppShell hideRightRail user={profile} nextEvent={events[0] ?? null} leaderboard={leaderboard}>
       <div className="wc-page">
-      <section className="wc-hero glass-panel">
-        <div className="wc-hero-top">
-          <div className="wc-hero-title">
-            <span className="eyebrow">Bolão da Copa 2026</span>
-            <h1>Crave. Torça. Domine.</h1>
-            <p className="wc-hero-sub">
-              Placar exato vale até <strong>+{maxPoints(board?.rules)} pts</strong>. Palpites fecham 1 hora antes de cada jogo.
+      <section className="wc-hero2">
+        <span className="wc-hero2-aurora" aria-hidden="true" />
+        <span className="wc-hero2-pitch" aria-hidden="true" />
+
+        <div className="wc-hero2-head">
+          <div className="wc-hero2-title">
+            <span className="wc-hero2-eyebrow">
+              <Trophy size={13} />
+              Bolão da Copa 2026
+            </span>
+            <h1>
+              Crave. Torça. <em>Domine.</em>
+            </h1>
+            <p className="wc-hero2-sub">
+              Placar exato + artilheiro valem <strong>{maxPoints(board?.rules)} pts</strong> por jogo. Fecha 1h antes da
+              bola rolar.
             </p>
           </div>
-          <div className="wc-hero-actions">
-            <button className="wc-ranking-button" onClick={() => setMyBetsModalOpen(true)} type="button">
-              <Ticket size={16} />
-              <span>Minhas apostas ({summary.predicted})</span>
+          <div className="wc-hero2-actions">
+            <button className="wc-hero2-btn" onClick={() => setMyBetsModalOpen(true)} type="button">
+              <Ticket size={15} />
+              <span>Minhas apostas</span>
+              <b>{summary.predicted}</b>
             </button>
-            <button className="wc-ranking-button" onClick={() => setRankingModalOpen(true)} type="button">
-              <Medal size={16} />
+            <button className="wc-hero2-btn" onClick={() => setRankingModalOpen(true)} type="button">
+              <Medal size={15} />
               <span>Ranking</span>
             </button>
             {isAdmin && (
-              <button className="wc-admin-button" onClick={() => setAdminModalOpen(true)} type="button">
-                <Settings2 size={16} />
+              <button className="wc-hero2-btn" onClick={() => setAdminModalOpen(true)} type="button">
+                <Settings2 size={15} />
                 <span>Gerenciar</span>
               </button>
             )}
           </div>
         </div>
 
-        <div className="wc-hero-stats">
-          <div className="wc-stat">
-            <Sparkles size={16} />
-            <strong>{summary.points}</strong>
-            <span>pontos</span>
-          </div>
-          <div className="wc-stat">
-            <Medal size={16} />
-            <strong>{summary.rank ? `${summary.rank}º` : "—"}</strong>
-            <span>posição</span>
-          </div>
-          <div className="wc-stat">
-            <Zap size={16} />
-            <strong>{summary.predicted}</strong>
-            <span>palpites</span>
-          </div>
-          <div className="wc-stat">
-            <Flame size={16} />
-            <strong>{summary.open}</strong>
-            <span>abertos</span>
-          </div>
-        </div>
-
         {liveGames.length > 0 ? (
-          <div className="wc-live-banner">
-            <span className="wc-live-dot" />
-            <strong>
-              {teamLabel(liveGames[0].home_team)} {liveGames[0].home_score ?? 0} x {liveGames[0].away_score ?? 0}{" "}
-              {teamLabel(liveGames[0].away_team)}
-            </strong>
-            <span>rolando agora{liveGames.length > 1 ? ` +${liveGames.length - 1} jogos` : ""}</span>
+          <div className="wc-hero2-stage live">
+            <span className="wc-hero2-stage-label">
+              <span className="wc-live-dot" />
+              Rolando agora{liveGames.length > 1 ? ` · +${liveGames.length - 1} jogos` : ""}
+            </span>
+            <div className="wc-hero2-faceoff">
+              <span className="wc-hero2-team">
+                <span className="wc-hero2-flag"><TeamFlag team={liveGames[0].home_team} /></span>
+                <strong>{teamLabel(liveGames[0].home_team)}</strong>
+              </span>
+              <span className="wc-hero2-score">
+                {liveGames[0].home_score ?? 0}<small>x</small>{liveGames[0].away_score ?? 0}
+              </span>
+              <span className="wc-hero2-team">
+                <span className="wc-hero2-flag"><TeamFlag team={liveGames[0].away_team} /></span>
+                <strong>{teamLabel(liveGames[0].away_team)}</strong>
+              </span>
+            </div>
+            {liveGames[0].scorers && (
+              <span className="wc-hero2-live-scorers">
+                <Goal size={13} /> {liveGames[0].scorers}
+              </span>
+            )}
           </div>
         ) : (
           nextGame &&
           countdown && (
-            <div className="wc-countdown">
-              <div className="wc-countdown-match">
-                <span className="wc-countdown-flag"><TeamFlag team={nextGame.home_team} /></span>
-                <strong>
-                  {teamLabel(nextGame.home_team)} x {teamLabel(nextGame.away_team)}
-                </strong>
-                <span className="wc-countdown-flag"><TeamFlag team={nextGame.away_team} /></span>
+            <div className="wc-hero2-stage">
+              <span className="wc-hero2-stage-label">Próximo jogo · {formatEventDate(nextGame.kickoff_at)}</span>
+              <div className="wc-hero2-faceoff">
+                <span className="wc-hero2-team">
+                  <span className="wc-hero2-flag"><TeamFlag team={nextGame.home_team} /></span>
+                  <strong>{teamLabel(nextGame.home_team)}</strong>
+                </span>
+                <span className="wc-hero2-vs">vs</span>
+                <span className="wc-hero2-team">
+                  <span className="wc-hero2-flag"><TeamFlag team={nextGame.away_team} /></span>
+                  <strong>{teamLabel(nextGame.away_team)}</strong>
+                </span>
               </div>
-              <div className="wc-countdown-clock" aria-label="Contagem regressiva para o próximo jogo">
+              <div className="wc-hero2-clock" aria-label="Contagem regressiva para o próximo jogo">
                 {countdown.days > 0 && (
-                  <span className="wc-clock-cell">
-                    <strong>{countdown.days}</strong>
-                    <small>dias</small>
-                  </span>
+                  <>
+                    <span className="wc-hero2-cell">
+                      <strong>{countdown.days}</strong>
+                      <small>dias</small>
+                    </span>
+                    <span className="wc-hero2-colon">:</span>
+                  </>
                 )}
-                <span className="wc-clock-cell">
+                <span className="wc-hero2-cell">
                   <strong>{pad(countdown.hours)}</strong>
                   <small>hrs</small>
                 </span>
-                <span className="wc-clock-sep">:</span>
-                <span className="wc-clock-cell">
+                <span className="wc-hero2-colon">:</span>
+                <span className="wc-hero2-cell">
                   <strong>{pad(countdown.minutes)}</strong>
                   <small>min</small>
                 </span>
-                <span className="wc-clock-sep">:</span>
-                <span className="wc-clock-cell">
+                <span className="wc-hero2-colon">:</span>
+                <span className="wc-hero2-cell">
                   <strong>{pad(countdown.seconds)}</strong>
                   <small>seg</small>
                 </span>
               </div>
               {!nextGame.viewer_prediction ? (
-                <button className="wc-countdown-cta" onClick={() => scrollToGame(nextGame.id)} type="button">
-                  ⚡ Você ainda não palpitou — crava agora
+                <button className="wc-hero2-cta" onClick={() => scrollToGame(nextGame.id)} type="button">
+                  <Zap size={16} />
+                  <span>Cravar meu palpite</span>
                 </button>
               ) : (
-                <span className="wc-countdown-done">Palpite feito — aguardando o início do jogo</span>
+                <span className="wc-hero2-done">
+                  <CheckCircle2 size={14} /> Palpite feito — bola rola em breve
+                </span>
               )}
             </div>
           )
         )}
+
+        <div className="wc-hero2-statbar">
+          <span className="wc-hero2-stat">
+            <Sparkles size={14} />
+            <strong>{summary.points}</strong> pts
+          </span>
+          <i />
+          <span className="wc-hero2-stat">
+            <Medal size={14} />
+            <strong>{summary.rank ? `${summary.rank}º` : "—"}</strong> posição
+          </span>
+          <i />
+          <span className="wc-hero2-stat">
+            <Zap size={14} />
+            <strong>{summary.predicted}</strong> palpites
+          </span>
+          <i />
+          <span className="wc-hero2-stat">
+            <Flame size={14} />
+            <strong>{summary.open}</strong> abertos
+          </span>
+        </div>
       </section>
 
       <section className="wc-ranking-inline glass-panel wc-ranking-mobile-only" id="bolao-ranking">

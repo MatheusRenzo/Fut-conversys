@@ -11384,3 +11384,491 @@ img.team-flag {
 .sidebar-profile-edit:hover {
   text-decoration: underline;
 }
+
+/* ===== Hero premium do bolão ===== */
+
+.wc-hero2 {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 207, 180, 0.22);
+  border-radius: 22px;
+  background:
+    radial-gradient(ellipse 90% 70% at 85% -10%, rgba(0, 207, 180, 0.18), transparent 55%),
+    radial-gradient(ellipse 70% 60% at -10% 110%, rgba(0, 90, 255, 0.22), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 50% 120%, rgba(227, 28, 121, 0.1), transparent 70%),
+    linear-gradient(165deg, rgba(10, 18, 36, 0.96), rgba(4, 9, 20, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 18px 50px rgba(0, 12, 36, 0.5);
+  padding: 22px 22px 18px;
+}
+
+/* feixe de luz que varre o hero lentamente */
+.wc-hero2-aurora {
+  position: absolute;
+  inset: -40% -20%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 26% 42% at 30% 30%, rgba(0, 207, 180, 0.14), transparent 70%),
+    radial-gradient(ellipse 22% 36% at 70% 60%, rgba(0, 120, 255, 0.12), transparent 70%);
+  filter: blur(8px);
+  animation: wc-hero2-aurora 14s ease-in-out infinite alternate;
+}
+
+@keyframes wc-hero2-aurora {
+  0% { transform: translate3d(-4%, -2%, 0) rotate(-2deg); }
+  100% { transform: translate3d(5%, 3%, 0) rotate(2deg); }
+}
+
+/* linhas de gramado bem sutis */
+.wc-hero2-pitch {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    100deg,
+    transparent 0 70px,
+    rgba(255, 255, 255, 0.016) 70px 140px
+  );
+}
+
+.wc-hero2 > *:not(.wc-hero2-aurora):not(.wc-hero2-pitch) {
+  position: relative;
+  z-index: 1;
+}
+
+.wc-hero2-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.wc-hero2-title {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wc-hero2-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  border: 1px solid rgba(255, 215, 94, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 215, 94, 0.08);
+  color: #ffd75e;
+  font-size: 0.66rem;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  padding: 5px 11px;
+  text-transform: uppercase;
+}
+
+.wc-hero2-title h1 {
+  margin: 0;
+  background: linear-gradient(110deg, #ffffff 30%, #9fe8ff 70%, #00cfb4 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-size: clamp(1.9rem, 4.5vw, 3rem);
+  font-weight: 950;
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+}
+
+.wc-hero2-title h1 em {
+  background: linear-gradient(110deg, #ffd75e, #ffb02e);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-style: normal;
+}
+
+.wc-hero2-sub {
+  max-width: 480px;
+  color: rgba(214, 226, 244, 0.78);
+  font-size: 0.87rem;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.wc-hero2-sub strong {
+  color: var(--brand-cyan);
+}
+
+.wc-hero2-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wc-hero2-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 900;
+  padding: 8px 15px;
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.wc-hero2-btn:hover {
+  border-color: rgba(0, 207, 180, 0.55);
+  background: rgba(0, 207, 180, 0.1);
+  transform: translateY(-1px);
+}
+
+.wc-hero2-btn svg {
+  color: var(--brand-cyan);
+}
+
+.wc-hero2-btn b {
+  border-radius: 999px;
+  background: rgba(0, 207, 180, 0.18);
+  color: #bafff2;
+  font-size: 0.7rem;
+  font-weight: 950;
+  padding: 2px 8px;
+}
+
+/* Palco central: próximo jogo / ao vivo */
+
+.wc-hero2-stage {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 18px;
+  background:
+    radial-gradient(ellipse 80% 100% at 50% -30%, rgba(0, 207, 180, 0.09), transparent 60%),
+    rgba(2, 8, 23, 0.55);
+  backdrop-filter: blur(6px);
+  padding: 18px 16px 20px;
+  text-align: center;
+}
+
+.wc-hero2-stage.live {
+  border-color: rgba(227, 28, 121, 0.4);
+  background:
+    radial-gradient(ellipse 80% 100% at 50% -30%, rgba(227, 28, 121, 0.14), transparent 60%),
+    rgba(2, 8, 23, 0.55);
+  animation: wc-hero2-live 2.4s ease-in-out infinite;
+}
+
+@keyframes wc-hero2-live {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(227, 28, 121, 0.0); }
+  50% { box-shadow: 0 0 26px 0 rgba(227, 28, 121, 0.22); }
+}
+
+.wc-hero2-stage-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.wc-hero2-faceoff {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  max-width: 560px;
+}
+
+.wc-hero2-team {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wc-hero2-team strong {
+  max-width: 100%;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 950;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wc-hero2-flag {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 8px 24px rgba(0, 12, 36, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.wc-hero2-flag .team-flag {
+  width: 38px;
+  height: 28px;
+  border-radius: 4px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+}
+
+.wc-hero2-vs {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(0, 207, 180, 0.4);
+  border-radius: 50%;
+  background: rgba(0, 207, 180, 0.1);
+  color: #bafff2;
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wc-hero2-score {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: #fff;
+  font-size: 2.3rem;
+  font-weight: 950;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 28px rgba(227, 28, 121, 0.4);
+}
+
+.wc-hero2-score small {
+  color: var(--muted);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.wc-hero2-live-scorers {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(214, 226, 244, 0.85);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.wc-hero2-live-scorers svg {
+  color: var(--brand-green);
+}
+
+/* Relógio regressivo */
+
+.wc-hero2-clock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wc-hero2-cell {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  min-width: 62px;
+  border: 1px solid rgba(0, 207, 180, 0.22);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(0, 207, 180, 0.08), transparent 60%),
+    rgba(2, 8, 23, 0.7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  padding: 10px 10px 8px;
+}
+
+.wc-hero2-cell strong {
+  color: #d8fff8;
+  font-size: 1.7rem;
+  font-weight: 950;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-shadow: 0 0 18px rgba(0, 207, 180, 0.45);
+}
+
+.wc-hero2-cell small {
+  color: var(--muted);
+  font-size: 0.6rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.wc-hero2-colon {
+  color: rgba(0, 207, 180, 0.7);
+  font-size: 1.5rem;
+  font-weight: 950;
+  animation: wc-blink 1s step-end infinite;
+}
+
+/* CTA com brilho varrendo */
+
+.wc-hero2-cta {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(110deg, #005aff, #00cfb4);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 950;
+  padding: 12px 26px;
+  box-shadow: 0 10px 28px rgba(0, 120, 255, 0.35);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.wc-hero2-cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 34px rgba(0, 160, 200, 0.45);
+}
+
+.wc-hero2-cta::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.35) 50%, transparent 70%);
+  transform: translateX(-110%);
+  animation: wc-hero2-shine 3.4s ease-in-out infinite;
+}
+
+@keyframes wc-hero2-shine {
+  0%, 55% { transform: translateX(-110%); }
+  85%, 100% { transform: translateX(110%); }
+}
+
+.wc-hero2-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(97, 220, 100, 0.35);
+  border-radius: 999px;
+  background: rgba(97, 220, 100, 0.1);
+  color: #c9f7c5;
+  font-size: 0.8rem;
+  font-weight: 900;
+  padding: 8px 16px;
+}
+
+/* Barra de stats única (substitui os 4 cartões) */
+
+.wc-hero2-statbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 9px 18px;
+}
+
+.wc-hero2-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.wc-hero2-stat svg {
+  color: var(--brand-cyan);
+}
+
+.wc-hero2-stat strong {
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 950;
+}
+
+.wc-hero2-statbar i {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+@media (max-width: 640px) {
+  .wc-hero2 {
+    border-radius: 18px;
+    padding: 18px 14px 14px;
+  }
+
+  .wc-hero2-actions {
+    width: 100%;
+  }
+
+  .wc-hero2-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .wc-hero2-flag {
+    width: 54px;
+    height: 54px;
+  }
+
+  .wc-hero2-flag .team-flag {
+    width: 32px;
+    height: 23px;
+  }
+
+  .wc-hero2-team strong {
+    font-size: 0.8rem;
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  .wc-hero2-cell {
+    min-width: 52px;
+    padding: 8px 7px 7px;
+  }
+
+  .wc-hero2-cell strong {
+    font-size: 1.35rem;
+  }
+
+  .wc-hero2-statbar i {
+    display: none;
+  }
+
+  .wc-hero2-statbar {
+    gap: 10px 14px;
+    border-radius: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wc-hero2-aurora,
+  .wc-hero2-cta::after,
+  .wc-hero2-stage.live,
+  .wc-hero2-colon {
+    animation: none;
+  }
+}
