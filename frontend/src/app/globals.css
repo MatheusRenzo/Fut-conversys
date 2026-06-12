@@ -19,6 +19,10 @@
   --green-deep: #234e10;
   --lime: var(--brand-green);
   --blue: var(--brand-blue);
+  --verified-mark-deep: #002f7a;
+  --verified-mark: #003db8;
+  --verified-mark-bright: #005aff;
+  --verified-mark-ring: #020817;
   --amber: var(--brand-green);
   --coral: var(--brand-cyan);
   --danger: #ff8175;
@@ -2962,10 +2966,12 @@ textarea {
 .profile-verified-mark.post-verified-mark {
   right: -6px;
   bottom: -6px;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-width: 2px;
-  box-shadow: 0 6px 14px rgba(0, 90, 255, 0.32);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 6px 14px rgba(0, 45, 122, 0.48);
 }
 
 .post-author-copy,
@@ -5647,16 +5653,27 @@ textarea {
   position: absolute;
   right: 2px;
   bottom: 5px;
-  z-index: 2;
+  z-index: 5;
   width: 27px;
   height: 27px;
-  border: 3px solid var(--surface-strong);
+  border: 3px solid var(--verified-mark-ring);
   border-radius: 999px;
-  background: var(--brand-blue);
+  background: linear-gradient(145deg, var(--verified-mark-deep) 0%, var(--verified-mark) 42%, var(--verified-mark-bright) 100%);
   color: #fff;
   display: grid;
   place-items: center;
-  box-shadow: 0 8px 18px rgba(0, 90, 255, 0.34);
+  opacity: 1;
+  isolation: isolate;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 8px 18px rgba(0, 45, 122, 0.55);
+}
+
+.profile-verified-mark svg {
+  opacity: 1;
+  color: #fff;
+  stroke: #fff;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
 }
 
 .profile-copy {
@@ -6492,7 +6509,18 @@ textarea {
 }
 
 .verified-visibility-toggle > svg {
-  color: var(--brand-cyan);
+  flex: 0 0 auto;
+  color: var(--verified-mark-bright);
+  opacity: 1;
+  filter: drop-shadow(0 1px 2px rgba(0, 45, 122, 0.35));
+}
+
+.verified-visibility-toggle.active > svg {
+  color: #fff;
+  padding: 4px;
+  border-radius: 999px;
+  background: linear-gradient(145deg, var(--verified-mark-deep) 0%, var(--verified-mark-bright) 100%);
+  box-shadow: 0 4px 12px rgba(0, 45, 122, 0.42);
 }
 
 .verified-visibility-toggle > span {
@@ -12152,26 +12180,38 @@ img.team-flag {
   position: absolute;
   right: -3px;
   bottom: -3px;
-  z-index: 2;
+  z-index: 5;
   display: grid;
   place-items: center;
-  width: 17px;
-  height: 17px;
-  border: 2px solid rgba(6, 12, 26, 0.95);
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--verified-mark-ring);
   border-radius: 50%;
-  background: linear-gradient(135deg, #0aa2ff, #00cfb4);
+  background: linear-gradient(145deg, var(--verified-mark-deep) 0%, var(--verified-mark) 42%, var(--verified-mark-bright) 100%);
   color: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  opacity: 1;
+  isolation: isolate;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 2px 10px rgba(0, 45, 122, 0.55);
+}
+
+.avatar-verified-mark svg {
+  opacity: 1;
+  color: #fff;
+  stroke: #fff;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
 }
 
 .avatar-md .avatar-verified-mark {
-  width: 19px;
-  height: 19px;
+  width: 20px;
+  height: 20px;
 }
 
 .avatar-lg .avatar-verified-mark {
   right: 0;
   bottom: 0;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
 }

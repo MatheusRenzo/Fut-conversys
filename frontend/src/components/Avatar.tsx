@@ -29,7 +29,7 @@ export function Avatar({
       )}
       {verified && (
         <span className="avatar-verified-mark" title="Perfil verificado">
-          <BadgeCheck size={size === "lg" ? 15 : size === "md" ? 12 : 10} strokeWidth={2.6} />
+          <BadgeCheck size={size === "lg" ? 16 : size === "md" ? 12 : 10} strokeWidth={size === "lg" ? 2.8 : 2.6} />
         </span>
       )}
     </div>
