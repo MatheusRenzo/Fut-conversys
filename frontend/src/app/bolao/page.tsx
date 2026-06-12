@@ -12,6 +12,7 @@ import {
   Goal,
   Lock,
   Medal,
+  Pencil,
   RefreshCcw,
   Save,
   Settings2,
@@ -628,6 +629,7 @@ export default function BolaoPage() {
   const [selectedEntry, setSelectedEntry] = useState<WorldCupLeaderboardEntry | null>(null);
   // Acordeão dos jogos abertos: null = só o próximo jogo fica expandido; 0 = todos fechados
   const [expandedGameId, setExpandedGameId] = useState<number | null>(null);
+  const [editingGameIds, setEditingGameIds] = useState<Record<number, boolean>>({});
   const [syncStatus, setSyncStatus] = useState<WorldCupSyncStatus | null>(null);
   const [syncStatusError, setSyncStatusError] = useState("");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("open");
@@ -807,6 +809,29 @@ export default function BolaoPage() {
     document.getElementById(`game-${gameId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
+  const openGameForEditing = (game: WorldCupGame) => {
+    setPredictionDrafts((current) => {
+      const next = { ...current };
+      delete next[game.id];
+      return next;
+    });
+    setEditingGameIds((current) => ({ ...current, [game.id]: true }));
+    scrollToGame(game.id);
+  };
+
+  const cancelEditingGame = (game: WorldCupGame) => {
+    setEditingGameIds((current) => {
+      const next = { ...current };
+      delete next[game.id];
+      return next;
+    });
+    setPredictionDrafts((current) => {
+      const next = { ...current };
+      delete next[game.id];
+      return next;
+    });
+  };
+
   const sortedRanking = useMemo(() => {
     const entries = [...(board?.leaderboard ?? [])];
     if (rankingTab === "geral") return entries;
@@ -844,8 +869,9 @@ export default function BolaoPage() {
 
 
   const handlePrediction = async (game: WorldCupGame) => {
-    if (game.viewer_prediction) return;
+    if (isGameLocked(game, currentTime)) return;
     const draft = predictionDraftFor(game);
+    const isUpdate = Boolean(game.viewer_prediction);
     setSavingPrediction(game.id);
     setError("");
     setMessage("");
@@ -856,9 +882,23 @@ export default function BolaoPage() {
         scorer_guess: draft.scorer.trim() || null,
       });
       setBoard((current) => (current ? { ...current, games: replaceGame(current.games, updated) } : current));
+      setEditingGameIds((current) => {
+        const next = { ...current };
+        delete next[game.id];
+        return next;
+      });
+      setPredictionDrafts((current) => {
+        const next = { ...current };
+        delete next[game.id];
+        return next;
+      });
       setSavedFlash(game.id);
       window.setTimeout(() => setSavedFlash((id) => (id === game.id ? null : id)), 2400);
-      setMessage("Palpite cravado. O próximo jogo na fila só muda quando este encerrar ou começar.");
+      setMessage(
+        isUpdate
+          ? "Palpite atualizado. Você pode alterar de novo até 1 hora antes do jogo."
+          : "Palpite cravado. Você pode alterar até 1 hora antes do jogo.",
+      );
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Não foi possível salvar o palpite");
     } finally {
@@ -1077,9 +1117,10 @@ export default function BolaoPage() {
                   <span>Cravar meu palpite</span>
                 </button>
               ) : (
-                <span className="wc-hero2-done">
-                  <CheckCircle2 size={14} /> Palpite feito — bola rola em breve
-                </span>
+                <button className="wc-hero2-cta wc-hero2-cta-edit" onClick={() => openGameForEditing(nextGame)} type="button">
+                  <Pencil size={15} />
+                  <span>Alterar meu palpite</span>
+                </button>
               )}
             </div>
           )
@@ -1453,6 +1494,7 @@ export default function BolaoPage() {
             const lockMinutes = minutesUntilBetClose(game, currentTime);
             const justSaved = savedFlash === game.id;
             const hasBet = Boolean(game.viewer_prediction);
+            const isEditing = Boolean(editingGameIds[game.id]);
             const isNextScheduled = nextGame?.id === game.id;
             const isExpanded = (expandedGameId ?? nextGame?.id ?? -1) === game.id;
 
@@ -1508,7 +1550,11 @@ export default function BolaoPage() {
                   {!isExpanded && (
                     <div className={lockMinutes < 120 ? "wc-lock-timer urgent compactado" : "wc-lock-timer compactado"}>
                       <span>{urgencyLabel(lockMinutes)}</span>
-                      {!hasBet && <span className="wc-summary-cta">Toca pra palpitar</span>}
+                      {!hasBet ? (
+                        <span className="wc-summary-cta">Toca pra palpitar</span>
+                      ) : (
+                        <span className="wc-summary-cta">Toca pra ver ou alterar</span>
+                      )}
                     </div>
                   )}
                 </button>
@@ -1519,7 +1565,7 @@ export default function BolaoPage() {
                   <span>{urgencyLabel(lockMinutes)}</span>
                 </div>
 
-                {hasBet && game.viewer_prediction ? (
+                {hasBet && game.viewer_prediction && !isEditing ? (
                   <>
                     <div className="wc-matchup readonly">
                       <div className="wc-team">
@@ -1544,8 +1590,12 @@ export default function BolaoPage() {
                     )}
                     <div className="wc-bet-locked-note">
                       <CheckCircle2 size={16} />
-                      <span>Palpite cravado. Este jogo só sai da fila quando começar ou finalizar.</span>
+                      <span>Palpite cravado. Você pode alterar até 1 hora antes do jogo.</span>
                     </div>
+                    <button className="wc-bet-button secondary" onClick={() => openGameForEditing(game)} type="button">
+                      <Pencil size={16} />
+                      <span>Alterar palpite</span>
+                    </button>
                   </>
                 ) : (
                   <>
@@ -1590,24 +1640,39 @@ export default function BolaoPage() {
                         value={draft.scorer}
                       />
                     </div>
-                    <button
-                      className={justSaved ? "wc-bet-button saved" : "wc-bet-button"}
-                      disabled={savingPrediction === game.id}
-                      onClick={() => handlePrediction(game)}
-                      type="button"
-                    >
-                      {justSaved ? (
-                        <>
-                          <Trophy size={16} />
-                          <span>Palpite cravado!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Zap size={16} />
-                          <span>{savingPrediction === game.id ? "Cravando..." : "Cravar palpite"}</span>
-                        </>
+                    <div className="wc-bet-edit-actions">
+                      <button
+                        className={justSaved ? "wc-bet-button saved" : "wc-bet-button"}
+                        disabled={savingPrediction === game.id}
+                        onClick={() => handlePrediction(game)}
+                        type="button"
+                      >
+                        {justSaved ? (
+                          <>
+                            <Trophy size={16} />
+                            <span>{hasBet ? "Palpite atualizado!" : "Palpite cravado!"}</span>
+                          </>
+                        ) : (
+                          <>
+                            {hasBet ? <Save size={16} /> : <Zap size={16} />}
+                            <span>
+                              {savingPrediction === game.id
+                                ? hasBet
+                                  ? "Salvando..."
+                                  : "Cravando..."
+                                : hasBet
+                                  ? "Salvar alteração"
+                                  : "Cravar palpite"}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                      {hasBet && (
+                        <button className="wc-bet-edit-cancel" onClick={() => cancelEditingGame(game)} type="button">
+                          Cancelar
+                        </button>
                       )}
-                    </button>
+                    </div>
                   </>
                 )}
 
@@ -1679,6 +1744,7 @@ export default function BolaoPage() {
                   const prediction = game.viewer_prediction!;
                   const scored = prediction.status === "scored";
                   const showScore = (game.status === "finished" || game.status === "live") && game.home_score !== null;
+                  const canEdit = isUpcomingGame(game, currentTime);
 
                   return (
                     <article className={["wc-bet-slip", scored && prediction.points > 0 ? "won" : ""].filter(Boolean).join(" ")} key={game.id}>
@@ -1726,6 +1792,19 @@ export default function BolaoPage() {
                           <Goal size={13} />
                           <span>{game.scorers}</span>
                         </div>
+                      )}
+                      {canEdit && (
+                        <button
+                          className="wc-bet-button secondary compact"
+                          onClick={() => {
+                            setMyBetsModalOpen(false);
+                            openGameForEditing(game);
+                          }}
+                          type="button"
+                        >
+                          <Pencil size={15} />
+                          <span>Alterar palpite</span>
+                        </button>
                       )}
                     </article>
                   );

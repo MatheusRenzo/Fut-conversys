@@ -2822,11 +2822,9 @@ def submit_world_cup_prediction(
         .filter_by(user_id=user.id, game_id=game_id)
         .first()
     )
-    if prediction:
-        raise HTTPException(status_code=400, detail="Palpite já registrado e não pode ser alterado")
-
-    prediction = models.WorldCupPrediction(user_id=user.id, game_id=game_id, created_at=datetime.utcnow())
-    db.add(prediction)
+    if not prediction:
+        prediction = models.WorldCupPrediction(user_id=user.id, game_id=game_id, created_at=datetime.utcnow())
+        db.add(prediction)
 
     scorer_guess = re.sub(r"\s+", " ", request.scorer_guess or "").strip()[:80]
     prediction.home_score = clamp_prediction_score(request.home_score)

@@ -9122,6 +9122,46 @@ img.team-flag {
   background: linear-gradient(135deg, rgba(53, 168, 86, 0.6), rgba(97, 220, 100, 0.35));
 }
 
+.wc-bet-button.secondary {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.wc-bet-button.secondary:hover:not(:disabled) {
+  border-color: rgba(0, 207, 180, 0.42);
+  background: rgba(0, 207, 180, 0.1);
+  box-shadow: 0 6px 18px rgba(0, 207, 180, 0.12);
+}
+
+.wc-bet-button.compact {
+  min-height: 40px;
+  font-size: 0.82rem;
+  padding: 8px 12px;
+}
+
+.wc-bet-edit-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.wc-bet-edit-cancel {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 850;
+  min-height: 36px;
+  padding: 6px 8px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.wc-bet-edit-cancel:hover {
+  color: #fff;
+}
+
 .wc-my-bet {
   display: flex;
   align-items: center;
@@ -11745,6 +11785,22 @@ img.team-flag {
 .wc-hero2-cta:hover {
   transform: translateY(-2px);
   box-shadow: 0 14px 34px rgba(0, 160, 200, 0.45);
+}
+
+.wc-hero2-cta-edit {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+
+.wc-hero2-cta-edit:hover {
+  border-color: rgba(0, 207, 180, 0.42);
+  background: rgba(0, 207, 180, 0.12);
+  box-shadow: 0 10px 26px rgba(0, 207, 180, 0.18);
+}
+
+.wc-hero2-cta-edit::after {
+  display: none;
 }
 
 .wc-hero2-cta::after {
