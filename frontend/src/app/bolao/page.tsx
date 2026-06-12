@@ -288,7 +288,7 @@ function BolaoRankingPanel({
                 </small>
                 {entry.champion_team && (
                   <span className="bolao-pick-chip" title={`Palpite de campeã: ${teamLabel(entry.champion_team)}`}>
-                    👑 <TeamFlag team={entry.champion_team} />
+                    <TeamFlag team={entry.champion_team} />
                   </span>
                 )}
               </button>
@@ -313,7 +313,7 @@ function BolaoRankingPanel({
                 {entry.user.name}
                 {entry.champion_team && (
                   <span className="bolao-pick-chip" title={`Palpite de campeã: ${teamLabel(entry.champion_team)}`}>
-                    👑 <TeamFlag team={entry.champion_team} />
+                    <TeamFlag team={entry.champion_team} />
                   </span>
                 )}
               </span>

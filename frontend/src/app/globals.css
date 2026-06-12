@@ -11270,20 +11270,22 @@ img.team-flag {
 .bolao-pick-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  border: 1px solid rgba(255, 215, 94, 0.35);
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 215, 94, 0.45);
   border-radius: 999px;
   background: rgba(255, 215, 94, 0.1);
-  padding: 2px 7px;
-  font-size: 0.72rem;
+  padding: 2px 5px;
   line-height: 1;
+  white-space: nowrap;
   vertical-align: middle;
 }
 
 .bolao-pick-chip .team-flag {
-  width: 16px;
+  width: 17px;
   height: 12px;
   border-radius: 2px;
+  display: block;
 }
 
 .bolao-rank-name {

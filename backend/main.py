@@ -8,6 +8,7 @@ import re
 import secrets
 import threading
 import time as time_module
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -71,6 +72,8 @@ OPENFOOTBALL_SQUAD_ALIASES = {
     # Nomes oficiais FIFA usados pela football-data.org
     "Korea Republic": "South Korea",
     "Czechia": "Czech Republic",
+    "Bosnia-Herzegovina": "Bosnia & Herzegovina",
+    "Cape Verde Islands": "Cape Verde",
     "Côte d'Ivoire": "Ivory Coast",
     "Cote d'Ivoire": "Ivory Coast",
     "Türkiye": "Turkey",
@@ -1190,8 +1193,12 @@ def world_cup_stage_from_section(section: str) -> tuple[str, str | None]:
 
 
 def normalize_scorer_name(value: str | None) -> str:
-    cleaned = re.sub(r"\s+", " ", value or "").strip().lower()
-    cleaned = cleaned.replace(".", "")
+    # Remove acentos para casar nomes entre fontes diferentes
+    # (Wikipedia escreve "Jiménez", outras fontes às vezes "Jimenez")
+    decomposed = unicodedata.normalize("NFKD", value or "")
+    cleaned = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    cleaned = cleaned.replace(".", "").replace("-", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
     return cleaned
 
 
@@ -1199,15 +1206,34 @@ def scorer_guess_matches(actual_names: list[str], guess: str | None) -> bool:
     normalized_guess = normalize_scorer_name(guess)
     if not normalized_guess or not actual_names:
         return False
+    guess_tokens = normalized_guess.split(" ")
     for name in actual_names:
+        if not name:
+            continue
         if normalized_guess == name:
             return True
         if normalized_guess in name or name in normalized_guess:
             return True
-        guess_parts = [part for part in normalized_guess.split(" ") if len(part) > 2]
-        name_parts = [part for part in name.split(" ") if len(part) > 2]
-        if guess_parts and any(part in name_parts for part in guess_parts):
-            return True
+        name_tokens = name.split(" ")
+        overlap = {token for token in guess_tokens if len(token) > 2} & {
+            token for token in name_tokens if len(token) > 2
+        }
+        # Só conta sobrenome em comum — prenome igual sozinho não basta
+        # (palpite "Gabriel Martinelli" não pode pontuar com gol de "Gabriel Jesus")
+        surname_overlap = {token for token in overlap if token != guess_tokens[0] or token != name_tokens[0]}
+        if not surname_overlap:
+            continue
+        # Sobrenome igual mas prenomes começando diferente = jogadores distintos
+        # (palpite "Thiago Silva" não pontua com gol de "Bernardo Silva")
+        if (
+            len(guess_tokens) > 1
+            and len(name_tokens) > 1
+            and guess_tokens[0] not in surname_overlap
+            and name_tokens[0] not in surname_overlap
+            and guess_tokens[0][0] != name_tokens[0][0]
+        ):
+            continue
+        return True
     return False
 
 
