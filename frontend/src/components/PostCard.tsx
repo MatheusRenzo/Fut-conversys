@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
-  BadgeCheck,
   Beer,
   Bookmark,
   Camera,
@@ -204,7 +203,6 @@ export function PostCard({
       : `${totalReactions} reações`;
   const commentSummaryText = post.comments_count === 1 ? "1 comentário" : `${post.comments_count} comentários`;
   const showEngagementLine = totalReactions > 0 || post.comments_count > 0;
-  const authorVerified = post.author.verified_enabled && post.author.show_verified_badge !== false;
 
   const showReactionBurst = (reactionType: ReactionType) => {
     setBurstReaction(reactionType);
@@ -322,11 +320,6 @@ export function PostCard({
           <Link className="post-avatar-link" href={`/profile/${post.author.id}`}>
             <span className="post-avatar-wrap">
               <Avatar user={post.author} />
-              {authorVerified && (
-                <span aria-label="Perfil verificado" className="profile-verified-mark post-verified-mark" title="Perfil verificado">
-                  <BadgeCheck size={13} />
-                </span>
-              )}
             </span>
           </Link>
           <div className="post-author-copy">

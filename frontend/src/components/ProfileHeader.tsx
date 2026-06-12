@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import type { UserProfile } from "@/types";
-import { BadgeCheck, CalendarDays, Flame, Goal, Handshake, ShieldCheck, Trophy } from "lucide-react";
+import { CalendarDays, Flame, Goal, Handshake, ShieldCheck, Trophy } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { LineupPreview } from "./LineupPreview";
 import { PlayerRadarChart } from "./PlayerRadarChart";
@@ -32,11 +32,6 @@ export function ProfileHeader({ profile, action }: { profile: UserProfile; actio
         <div className="profile-info">
           <div className="profile-avatar-wrap">
             <Avatar user={profile} size="lg" />
-            {profile.verified_enabled && profile.show_verified_badge !== false && (
-              <span aria-label="Perfil verificado" className="profile-verified-mark" title="Perfil verificado">
-                <BadgeCheck size={17} />
-              </span>
-            )}
           </div>
           <div className="profile-copy">
             <div className="profile-title-row">

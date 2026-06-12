@@ -11872,3 +11872,250 @@ img.team-flag {
     animation: none;
   }
 }
+
+/* ===== Premiação no hero (ouro/prata/bronze) ===== */
+
+.wc-hero2-prizes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.wc-hero2-prize {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid var(--wc-prize-border, rgba(255, 255, 255, 0.12));
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse 90% 120% at 50% -40%, var(--wc-prize-glow, transparent), transparent 65%),
+    rgba(2, 8, 23, 0.55);
+  backdrop-filter: blur(6px);
+  padding: 10px 12px;
+}
+
+.wc-hero2-prize i {
+  font-size: 1.5rem;
+  font-style: normal;
+  line-height: 1;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
+}
+
+.wc-hero2-prize > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.wc-hero2-prize small {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wc-hero2-prize strong {
+  color: var(--wc-prize-color, #fff);
+  font-size: 1.02rem;
+  font-weight: 950;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wc-hero2-prize.gold {
+  --wc-prize-border: rgba(255, 215, 94, 0.45);
+  --wc-prize-glow: rgba(255, 215, 94, 0.18);
+  --wc-prize-color: #ffd75e;
+  animation: bolao-podium-glow 3s ease-in-out infinite;
+}
+
+/* brilho varrendo o prêmio principal */
+.wc-hero2-prize.gold::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(115deg, transparent 35%, rgba(255, 235, 170, 0.16) 50%, transparent 65%);
+  transform: translateX(-110%);
+  animation: wc-hero2-shine 4.6s ease-in-out infinite;
+}
+
+.wc-hero2-prize.silver {
+  --wc-prize-border: rgba(214, 220, 231, 0.35);
+  --wc-prize-glow: rgba(214, 220, 231, 0.12);
+  --wc-prize-color: #e7edf7;
+}
+
+.wc-hero2-prize.bronze {
+  --wc-prize-border: rgba(222, 158, 92, 0.4);
+  --wc-prize-glow: rgba(222, 158, 92, 0.14);
+  --wc-prize-color: #f0b97e;
+}
+
+@media (max-width: 640px) {
+  .wc-hero2-prizes {
+    gap: 7px;
+  }
+
+  .wc-hero2-prize {
+    flex-direction: column;
+    gap: 4px;
+    border-radius: 14px;
+    padding: 9px 6px;
+    text-align: center;
+  }
+
+  .wc-hero2-prize i {
+    font-size: 1.25rem;
+  }
+
+  .wc-hero2-prize strong {
+    font-size: 0.88rem;
+  }
+
+  .wc-hero2-prize small {
+    font-size: 0.56rem;
+  }
+}
+
+/* ===== Design system do bolão — superfícies e ações unificadas =====
+   Linguagem única (a mesma do palco do hero): vidro escuro com glow
+   sutil no topo, borda discreta, raio 18px, ação primária em gradiente. */
+
+.wc-page .glass-panel {
+  border-color: rgba(255, 255, 255, 0.09);
+  border-radius: 18px;
+  background:
+    radial-gradient(ellipse 90% 90% at 50% -30%, rgba(0, 207, 180, 0.06), transparent 60%),
+    linear-gradient(165deg, rgba(10, 18, 36, 0.92), rgba(4, 9, 20, 0.95));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 14px 40px rgba(0, 12, 36, 0.45);
+}
+
+.wc-page .wc-champion-arena {
+  border-color: rgba(255, 215, 94, 0.2);
+  background:
+    radial-gradient(ellipse 80% 80% at 88% -20%, rgba(255, 215, 94, 0.09), transparent 55%),
+    linear-gradient(165deg, rgba(10, 18, 36, 0.92), rgba(4, 9, 20, 0.95));
+}
+
+.wc-page .wc-urgency-bar {
+  border-color: rgba(0, 207, 180, 0.22);
+  border-radius: 18px;
+  background:
+    radial-gradient(ellipse 70% 120% at 0% 0%, rgba(0, 90, 255, 0.14), transparent 60%),
+    linear-gradient(165deg, rgba(10, 18, 36, 0.92), rgba(4, 9, 20, 0.95));
+}
+
+.wc-page .wc-game-card.is-next {
+  border-color: rgba(0, 207, 180, 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 0 0 1px rgba(0, 207, 180, 0.14),
+    0 14px 40px rgba(0, 60, 120, 0.35);
+}
+
+/* Ação primária: o mesmo gradiente do CTA do hero em toda a página */
+
+.wc-page .wc-bet-button,
+.wc-page .wc-sticky-bet-button,
+.wc-page .btn-primary {
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(110deg, #005aff, #00cfb4);
+  box-shadow: 0 8px 22px rgba(0, 110, 230, 0.32);
+  color: #fff;
+  font-weight: 950;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+
+.wc-page .wc-bet-button:hover,
+.wc-page .wc-sticky-bet-button:hover,
+.wc-page .btn-primary:hover {
+  border-color: transparent;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(0, 140, 220, 0.42);
+  filter: brightness(1.06);
+}
+
+.wc-page .wc-bet-button.saved {
+  background: linear-gradient(110deg, #1f9d44, #61dc64);
+  box-shadow: 0 8px 22px rgba(60, 180, 90, 0.35);
+}
+
+/* Ação secundária: pílula de vidro com acento ciano */
+
+.wc-page .wc-urgency-action,
+.wc-page .btn-secondary {
+  border: 1px solid rgba(0, 207, 180, 0.35);
+  border-radius: 999px;
+  background: rgba(0, 207, 180, 0.08);
+  color: #bafff2;
+  font-weight: 900;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.wc-page .wc-urgency-action:hover,
+.wc-page .btn-secondary:hover {
+  border-color: rgba(0, 207, 180, 0.6);
+  background: rgba(0, 207, 180, 0.14);
+}
+
+.wc-page .wc-stage-select {
+  border-radius: 999px;
+}
+
+/* Sticky de palpite acompanha a mesma superfície */
+
+.wc-page .wc-sticky-bet {
+  border-color: rgba(0, 207, 180, 0.3);
+  background:
+    radial-gradient(ellipse 80% 140% at 50% -40%, rgba(0, 207, 180, 0.12), transparent 60%),
+    linear-gradient(165deg, rgba(8, 14, 30, 0.97), rgba(4, 9, 20, 0.98));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wc-hero2-prize.gold,
+  .wc-hero2-prize.gold::after {
+    animation: none;
+  }
+}
+
+/* Selo de verificado sobre a foto (todas as listas e rankings) */
+
+.avatar {
+  position: relative;
+}
+
+.avatar-verified-mark {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: 2px solid rgba(6, 12, 26, 0.95);
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0aa2ff, #00cfb4);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.avatar-md .avatar-verified-mark {
+  width: 19px;
+  height: 19px;
+}
+
+.avatar-lg .avatar-verified-mark {
+  right: 0;
+  bottom: 0;
+  width: 24px;
+  height: 24px;
+}

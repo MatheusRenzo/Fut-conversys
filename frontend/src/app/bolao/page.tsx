@@ -5,11 +5,9 @@ import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
-  CalendarPlus,
   CheckCircle2,
   ChevronRight,
   Crown,
-  DownloadCloud,
   Flame,
   Goal,
   Lock,
@@ -55,28 +53,10 @@ type ResultDraft = {
   scorers: string;
 };
 
-type GameDraft = {
-  home_team: string;
-  away_team: string;
-  kickoff_at: string;
-  group_label: string;
-  stage: string;
-  venue: string;
-  match_number: string;
-};
 
 type RankingTab = "geral" | "exatos" | "resultados" | "artilheiro";
 type QuickFilter = "today" | "open" | "live" | "finished" | "all";
 
-const emptyGameDraft = (): GameDraft => ({
-  home_team: "",
-  away_team: "",
-  kickoff_at: "",
-  group_label: "",
-  stage: "group-stage",
-  venue: "",
-  match_number: "",
-});
 
 const stageLabels: Record<string, string> = {
   "group-stage": "Fase de grupos",
@@ -640,9 +620,6 @@ export default function BolaoPage() {
   const [rankingModalOpen, setRankingModalOpen] = useState(false);
   const [myBetsModalOpen, setMyBetsModalOpen] = useState(false);
   const [championQuery, setChampionQuery] = useState("");
-  const [syncing, setSyncing] = useState(false);
-  const [syncingSquads, setSyncingSquads] = useState(false);
-  const [creatingGame, setCreatingGame] = useState(false);
   const [championDraft, setChampionDraft] = useState("");
   const [savingChampion, setSavingChampion] = useState(false);
   const [championAnnounceDraft, setChampionAnnounceDraft] = useState("");
@@ -655,7 +632,6 @@ export default function BolaoPage() {
   const [syncStatusError, setSyncStatusError] = useState("");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("open");
   const [stageFilter, setStageFilter] = useState("all");
-  const [gameDraft, setGameDraft] = useState<GameDraft>(emptyGameDraft);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -866,10 +842,6 @@ export default function BolaoPage() {
     }));
   };
 
-  const updateGameDraft = <K extends keyof GameDraft>(field: K, value: GameDraft[K]) => {
-    setGameDraft((current) => ({ ...current, [field]: value }));
-    setError("");
-  };
 
   const handlePrediction = async (game: WorldCupGame) => {
     if (game.viewer_prediction) return;
@@ -962,78 +934,8 @@ export default function BolaoPage() {
     }
   };
 
-  const handleCreateGame = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setCreatingGame(true);
-    setError("");
-    setMessage("");
-    try {
-      const created = await api.createWorldCupGame({
-        home_team: gameDraft.home_team.trim(),
-        away_team: gameDraft.away_team.trim(),
-        kickoff_at: new Date(gameDraft.kickoff_at).toISOString(),
-        group_label: gameDraft.group_label.trim() || null,
-        stage: gameDraft.stage,
-        venue: gameDraft.venue.trim() || null,
-        match_number: gameDraft.match_number ? Number(gameDraft.match_number) : null,
-        source: "manual",
-      });
-      setBoard((current) =>
-        current
-          ? {
-              ...current,
-              games: sortGames([...current.games, created]),
-            }
-          : current,
-      );
-      setGameDraft(emptyGameDraft());
-      setMessage("Jogo cadastrado no bolão.");
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Não foi possível cadastrar o jogo");
-    } finally {
-      setCreatingGame(false);
-    }
-  };
 
-  const handleSyncOpenfootball = async () => {
-    setSyncing(true);
-    setError("");
-    setMessage("");
-    try {
-      const response = await api.syncWorldCupOpenfootball();
-      setBoard((current) =>
-        current
-          ? {
-              ...current,
-              games: sortGames(response.games),
-              leaderboard: response.leaderboard ?? current.leaderboard,
-            }
-          : current,
-      );
-      setMessage(
-        `${response.imported} jogos importados e ${response.updated} atualizados. Resultados e artilheiros vêm do openfootball a cada sync.`,
-      );
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Não foi possível importar os jogos");
-    } finally {
-      setSyncing(false);
-    }
-  };
 
-  const handleSyncSquads = async () => {
-    setSyncingSquads(true);
-    setError("");
-    setMessage("");
-    try {
-      const response = await api.syncWorldCupSquads();
-      setSquads(response.players);
-      setMessage(`Elencos atualizados: ${response.imported} jogadores novos, ${response.updated} atualizados.`);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Não foi possível importar os elencos");
-    } finally {
-      setSyncingSquads(false);
-    }
-  };
 
   if (loading) {
     return <div className="empty-state">Carregando bolão...</div>;
@@ -1077,6 +979,30 @@ export default function BolaoPage() {
               </button>
             )}
           </div>
+        </div>
+
+        <div className="wc-hero2-prizes" aria-label="Premiação do bolão">
+          <span className="wc-hero2-prize gold">
+            <i>🥇</i>
+            <span>
+              <small>Campeão</small>
+              <strong>R$ 1.000</strong>
+            </span>
+          </span>
+          <span className="wc-hero2-prize silver">
+            <i>🥈</i>
+            <span>
+              <small>2º lugar</small>
+              <strong>R$ 500</strong>
+            </span>
+          </span>
+          <span className="wc-hero2-prize bronze">
+            <i>🥉</i>
+            <span>
+              <small>3º lugar</small>
+              <strong>R$ 200</strong>
+            </span>
+          </span>
         </div>
 
         {liveGames.length > 0 ? (
@@ -2074,17 +2000,6 @@ export default function BolaoPage() {
               !syncStatusError && <p className="bolao-sync-info">Carregando status das fontes...</p>
             )}
 
-            <div className="wc-admin-sync-row">
-              <button className="btn-secondary" disabled={syncing} onClick={handleSyncOpenfootball} type="button">
-                <DownloadCloud size={16} />
-                <span>{syncing ? "Importando..." : "Sincronizar jogos"}</span>
-              </button>
-              <button className="btn-secondary" disabled={syncingSquads} onClick={handleSyncSquads} type="button">
-                <Users size={16} />
-                <span>{syncingSquads ? "Importando..." : "Sincronizar elencos"}</span>
-              </button>
-            </div>
-
             <form className="wc-champion-form" onSubmit={handleAnnounceChampion}>
               <input
                 className="input-field"
@@ -2099,92 +2014,6 @@ export default function BolaoPage() {
               </button>
             </form>
 
-            <form className="bolao-admin-form" onSubmit={handleCreateGame}>
-              <span className="eyebrow">
-                <CalendarPlus size={13} /> Cadastrar jogo manual
-              </span>
-              <div className="modal-grid">
-                <div className="modal-field">
-                  <label htmlFor="game-home">Seleção mandante</label>
-                  <input
-                    className="input-field"
-                    id="game-home"
-                    onChange={(event) => updateGameDraft("home_team", event.target.value)}
-                    required
-                    value={gameDraft.home_team}
-                  />
-                </div>
-                <div className="modal-field">
-                  <label htmlFor="game-away">Seleção visitante</label>
-                  <input
-                    className="input-field"
-                    id="game-away"
-                    onChange={(event) => updateGameDraft("away_team", event.target.value)}
-                    required
-                    value={gameDraft.away_team}
-                  />
-                </div>
-              </div>
-              <div className="modal-grid">
-                <div className="modal-field">
-                  <label htmlFor="game-kickoff">Data e hora</label>
-                  <input
-                    className="input-field"
-                    id="game-kickoff"
-                    onChange={(event) => updateGameDraft("kickoff_at", event.target.value)}
-                    required
-                    type="datetime-local"
-                    value={gameDraft.kickoff_at}
-                  />
-                </div>
-                <div className="modal-field">
-                  <label htmlFor="game-group">Grupo</label>
-                  <input
-                    className="input-field"
-                    id="game-group"
-                    onChange={(event) => updateGameDraft("group_label", event.target.value)}
-                    placeholder="A"
-                    value={gameDraft.group_label}
-                  />
-                </div>
-              </div>
-              <div className="modal-grid">
-                <div className="modal-field">
-                  <label htmlFor="game-stage">Fase</label>
-                  <select className="input-field" id="game-stage" onChange={(event) => updateGameDraft("stage", event.target.value)} value={gameDraft.stage}>
-                    {Object.entries(stageLabels).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="modal-field">
-                  <label htmlFor="game-number">Número do jogo</label>
-                  <input
-                    className="input-field"
-                    id="game-number"
-                    min={1}
-                    onChange={(event) => updateGameDraft("match_number", event.target.value)}
-                    type="number"
-                    value={gameDraft.match_number}
-                  />
-                </div>
-              </div>
-              <div className="modal-field">
-                <label htmlFor="game-venue">Estádio ou cidade</label>
-                <input
-                  className="input-field"
-                  id="game-venue"
-                  onChange={(event) => updateGameDraft("venue", event.target.value)}
-                  value={gameDraft.venue}
-                />
-              </div>
-              <button className="btn-primary" disabled={creatingGame}>
-                <Save size={16} />
-                <span>{creatingGame ? "Cadastrando..." : "Cadastrar jogo"}</span>
-              </button>
-            </form>
           </div>
         </div>
       )}
