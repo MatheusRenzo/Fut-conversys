@@ -14,7 +14,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -221,6 +221,50 @@ def validate_image_url(value: str | None) -> str | None:
             raise HTTPException(status_code=400, detail="Imagem muito grande — envie uma foto menor")
         return stripped
     return validate_url(stripped)
+
+
+# Avatares/banners ficam no banco como data URI base64 (até ~200KB cada).
+# Embutir isso em cada user_summary deixava o JSON do bolão com centenas de MB,
+# então o JSON carrega só uma URL versionada e o navegador cacheia a imagem.
+USER_MEDIA_FIELDS = {"avatar": "avatar_url", "banner": "banner_url"}
+_user_media_versions: dict[tuple[int, str, int], str] = {}
+DATA_URL_PATTERN = re.compile(r"^data:([^;,]+)?(;base64)?,(.*)$", re.DOTALL)
+OWN_MEDIA_URL_PATTERN = re.compile(r"^/api/(?:backend/)?api/users/\d+/(?:avatar|banner)(?:\?.*)?$")
+
+
+def user_media_public_url(user_id: int, kind: str, value: str | None) -> str | None:
+    if not value or not value.startswith("data:"):
+        return value
+    key = (user_id, kind, len(value))
+    version = _user_media_versions.get(key)
+    if version is None:
+        version = hashlib.md5(value.encode("utf-8")).hexdigest()[:12]
+        _user_media_versions[key] = version
+    return f"/api/backend/api/users/{user_id}/{kind}?v={version}"
+
+
+def serve_user_media(db: Session, user_id: int, kind: str, if_none_match: str | None) -> Response:
+    field = USER_MEDIA_FIELDS[kind]
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    value = getattr(user, field, None) if user else None
+    if not value:
+        raise HTTPException(status_code=404, detail="Imagem não encontrada")
+    if not value.startswith("data:"):
+        return RedirectResponse(value)
+    match = DATA_URL_PATTERN.match(value)
+    if not match:
+        raise HTTPException(status_code=404, detail="Imagem inválida")
+    mime = match.group(1) or "image/png"
+    payload = match.group(3)
+    try:
+        raw = base64.b64decode(payload) if match.group(2) else urllib.parse.unquote_to_bytes(payload)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=404, detail="Imagem inválida") from exc
+    etag = '"' + hashlib.md5(value.encode("utf-8")).hexdigest() + '"'
+    headers = {"Cache-Control": "public, max-age=604800, immutable", "ETag": etag}
+    if if_none_match == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(content=raw, media_type=mime, headers=headers)
 
 
 def normalize_email(email: str) -> str:
@@ -866,8 +910,8 @@ def user_summary(user: models.User) -> dict[str, Any]:
         "position": user.position,
         "favorite_team": user.favorite_team,
         "favorite_player": user.favorite_player,
-        "avatar_url": user.avatar_url,
-        "banner_url": user.banner_url,
+        "avatar_url": user_media_public_url(user.id, "avatar", user.avatar_url),
+        "banner_url": user_media_public_url(user.id, "banner", user.banner_url),
         "banner_position_x": clamp_banner_position(user.banner_position_x),
         "banner_position_y": clamp_banner_position(user.banner_position_y),
         "profile_frame": user.profile_frame if has_verified_features(user) else "none",
@@ -2314,6 +2358,9 @@ def update_my_profile(
         if field == "avatar_config" and value is not None:
             value = json.dumps({**default_avatar_config(user), **value})
         if field in {"avatar_url", "banner_url"}:
+            # URL da própria API ecoada de volta = imagem não mudou; mantém o base64 do banco
+            if isinstance(value, str) and OWN_MEDIA_URL_PATTERN.match(value.strip()):
+                continue
             value = validate_image_url(value)
         setattr(user, field, value)
 
@@ -2325,6 +2372,24 @@ def update_my_profile(
         **user_summary(user),
         "stats": player_stats(user),
     }
+
+
+@app.get("/api/users/{user_id}/avatar")
+def user_avatar_media(
+    user_id: int,
+    db: Session = Depends(get_db),
+    if_none_match: str | None = Header(default=None),
+):
+    return serve_user_media(db, user_id, "avatar", if_none_match)
+
+
+@app.get("/api/users/{user_id}/banner")
+def user_banner_media(
+    user_id: int,
+    db: Session = Depends(get_db),
+    if_none_match: str | None = Header(default=None),
+):
+    return serve_user_media(db, user_id, "banner", if_none_match)
 
 
 @app.get("/api/admin/users")
