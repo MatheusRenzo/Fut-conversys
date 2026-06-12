@@ -53,6 +53,13 @@ WIKIPEDIA_SQUADS_URL = os.getenv(
     "WORLD_CUP_SQUADS_URL",
     "https://en.wikipedia.org/w/api.php?action=parse&page=2026_FIFA_World_Cup_squads&prop=wikitext&format=json&formatversion=2",
 )
+# Fonte secundária de resultados para conferência cruzada (football-data.org)
+# Sem a chave, o bolão segue funcionando só com o openfootball
+FOOTBALL_DATA_API_KEY = os.getenv("FOOTBALL_DATA_API_KEY", "").strip()
+FOOTBALL_DATA_MATCHES_URL = os.getenv(
+    "FOOTBALL_DATA_MATCHES_URL",
+    "https://api.football-data.org/v4/competitions/WC/matches",
+)
 # Wikipedia usa nomes diferentes do openfootball para algumas seleções
 WIKIPEDIA_TEAM_ALIASES = {
     "United States": "USA",
@@ -61,6 +68,16 @@ WIKIPEDIA_TEAM_ALIASES = {
 OPENFOOTBALL_SQUAD_ALIASES = {
     "United States": "USA",
     "Bosnia and Herzegovina": "Bosnia & Herzegovina",
+    # Nomes oficiais FIFA usados pela football-data.org
+    "Korea Republic": "South Korea",
+    "Czechia": "Czech Republic",
+    "Côte d'Ivoire": "Ivory Coast",
+    "Cote d'Ivoire": "Ivory Coast",
+    "Türkiye": "Turkey",
+    "Turkiye": "Turkey",
+    "Cabo Verde": "Cape Verde",
+    "Congo DR": "DR Congo",
+    "IR Iran": "Iran",
 }
 PLACEHOLDER_TEAM_PATTERN = re.compile(
     r"^(?:[12][A-L]|W\d+|L\d+|3[A-L](?:/[A-L])+(?:/[A-L])*)$"
@@ -100,6 +117,13 @@ def is_placeholder_world_cup_team(team: str) -> bool:
 
 def is_bettable_world_cup_game(game: models.WorldCupGame) -> bool:
     return not is_placeholder_world_cup_team(game.home_team) and not is_placeholder_world_cup_team(game.away_team)
+
+
+def world_cup_game_lock_passed(game: models.WorldCupGame) -> bool:
+    # Mesma regra do fechamento de palpites: 1h antes do início (ou jogo já começou)
+    if (game.status or "scheduled") != "scheduled":
+        return True
+    return bool(game.kickoff_at and game.kickoff_at - WORLD_CUP_BET_CUTOFF <= datetime.utcnow())
 
 
 def squad_team_key(team: str) -> str:
@@ -465,6 +489,7 @@ def start_world_cup_auto_sync() -> None:
                 session.close()
         except Exception as exc:
             print(f"[world-cup-sync] bootstrap failed: {exc}", flush=True)
+            record_world_cup_sync_failure(str(exc))
 
     threading.Thread(target=bootstrap_sync, daemon=True, name="world-cup-sync-bootstrap").start()
     thread = threading.Thread(target=world_cup_sync_loop, daemon=True, name="world-cup-sync")
@@ -911,6 +936,14 @@ def clamp_prediction_score(value: int) -> int:
     return max(0, min(30, int(value)))
 
 
+def iso_utc(value: datetime | None) -> str | None:
+    # Datas são gravadas em UTC naive; o offset explícito evita que o navegador
+    # interprete o horário como local (bug do horário UTC exibido como Brasília)
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc).isoformat()
+
+
 def game_outcome(home_score: int, away_score: int) -> str:
     if home_score > away_score:
         return "home"
@@ -920,7 +953,8 @@ def game_outcome(home_score: int, away_score: int) -> str:
 
 
 WORLD_CUP_POINTS_EXACT = 3
-WORLD_CUP_POINTS_OUTCOME = 1
+# Acertar só o vencedor não vale ponto: ou crava o placar (3), ou o artilheiro (+1), ou nada
+WORLD_CUP_POINTS_OUTCOME = 0
 WORLD_CUP_POINTS_SCORER = 1
 WORLD_CUP_POINTS_CHAMPION = 10
 
@@ -935,8 +969,6 @@ def world_cup_prediction_points(
         return 0
     if prediction_home == game_home and prediction_away == game_away:
         return WORLD_CUP_POINTS_EXACT
-    if game_outcome(prediction_home, prediction_away) == game_outcome(game_home, game_away):
-        return WORLD_CUP_POINTS_OUTCOME
     return 0
 
 
@@ -975,8 +1007,8 @@ def world_cup_prediction_response(prediction: models.WorldCupPrediction) -> dict
         "scorer_hit": bool(prediction.scorer_hit),
         "points": prediction.points or 0,
         "status": prediction.status or "pending",
-        "created_at": prediction.created_at.isoformat() if prediction.created_at else None,
-        "updated_at": prediction.updated_at.isoformat() if prediction.updated_at else None,
+        "created_at": iso_utc(prediction.created_at),
+        "updated_at": iso_utc(prediction.updated_at),
         "user": user_summary(prediction.user),
     }
 
@@ -985,6 +1017,12 @@ def world_cup_game_response(game: models.WorldCupGame, user: models.User | None 
     viewer_prediction = None
     if user:
         viewer_prediction = next((prediction for prediction in game.predictions if prediction.user_id == user.id), None)
+
+    lock_passed = world_cup_game_lock_passed(game)
+    sorted_predictions = sorted(
+        game.predictions,
+        key=lambda prediction: (-(prediction.points or 0), prediction.created_at or datetime.min),
+    )
 
     return {
         "id": game.id,
@@ -995,7 +1033,7 @@ def world_cup_game_response(game: models.WorldCupGame, user: models.User | None 
         "group_label": game.group_label,
         "stage": game.stage or "group-stage",
         "venue": game.venue,
-        "kickoff_at": game.kickoff_at.isoformat(),
+        "kickoff_at": iso_utc(game.kickoff_at),
         "status": game.status or "scheduled",
         "home_score": game.home_score,
         "away_score": game.away_score,
@@ -1004,7 +1042,13 @@ def world_cup_game_response(game: models.WorldCupGame, user: models.User | None 
         "predictions_count": len(game.predictions),
         "is_placeholder": not is_bettable_world_cup_game(game),
         "bettable": is_bettable_world_cup_game(game),
+        "lock_passed": lock_passed,
         "viewer_prediction": world_cup_prediction_response(viewer_prediction) if viewer_prediction else None,
+        # Quem já palpitou fica visível sempre; o palpite em si só depois do fechamento
+        "bettors": [user_summary(prediction.user) for prediction in sorted_predictions],
+        "predictions": [world_cup_prediction_response(prediction) for prediction in sorted_predictions]
+        if lock_passed
+        else [],
     }
 
 
@@ -1062,11 +1106,13 @@ def world_cup_leaderboard_response(db: Session) -> list[dict[str, Any]]:
         .options(joinedload(models.WorldCupChampionPick.user))
         .all()
     )
+    # O palpite de campeã só fica visível para os outros depois que fecha
+    champion_visible = world_cup_champion_locked(db)
     for pick in champion_picks:
         if pick.user_id not in rows:
             rows[pick.user_id] = empty_row(pick.user)
         row = rows[pick.user_id]
-        row["champion_team"] = pick.team
+        row["champion_team"] = pick.team if champion_visible else None
         row["champion_points"] = pick.points or 0
         row["points"] += pick.points or 0
 
@@ -1288,10 +1334,30 @@ def parse_openfootball_world_cup(text_data: str, year: int = WORLD_CUP_YEAR) -> 
     group_label = None
     current_date: tuple[int, int] | None = None
     match_counter = 1
+    # Anotações de gols podem ocupar várias linhas, ex:
+    #   (Hwang In-Beom 67' Oh Hyeon-Gyu 80';
+    #     Ladislav Krejcí 59')
+    pending_scorer_lines: list[str] = []
 
     for raw_line in text_data.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or line.startswith("="):
+            continue
+
+        if pending_scorer_lines:
+            if line.startswith("▪") or re.match(r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s", line):
+                pending_scorer_lines = []
+            else:
+                pending_scorer_lines.append(line)
+                if ")" in line:
+                    scorers = parse_openfootball_scorers_line(" ".join(pending_scorer_lines))
+                    pending_scorer_lines = []
+                    if scorers and games:
+                        games[-1]["scorers"] = scorers
+                continue
+
+        if line.startswith("(") and ")" not in line:
+            pending_scorer_lines = [line]
             continue
 
         if line.startswith("▪"):
@@ -1404,7 +1470,23 @@ def apply_world_cup_squads_sync(db: Session) -> tuple[int, int]:
             player.position = item["position"]
             player.club = item["club"]
 
-    set_app_setting(db, "world_cup_last_squad_sync", datetime.utcnow().isoformat())
+    set_app_setting(db, "world_cup_last_squad_sync", datetime.now(timezone.utc).isoformat())
+    set_app_setting(
+        db,
+        "world_cup_squad_sync_status",
+        json.dumps(
+            {
+                "at": datetime.now(timezone.utc).isoformat(),
+                "ok": True,
+                "error": None,
+                "imported": imported,
+                "updated": updated,
+                "teams": len(squads),
+                "players": sum(len(players) for players in squads.values()),
+            },
+            ensure_ascii=False,
+        ),
+    )
     db.commit()
     return imported, updated
 
@@ -1458,6 +1540,108 @@ def refresh_world_cup_live_statuses(db: Session) -> bool:
     return changed
 
 
+def fetch_football_data_results() -> list[dict[str, Any]]:
+    # Fonte secundária: resultados oficiais da football-data.org (precisa de chave gratuita)
+    request = urllib.request.Request(
+        FOOTBALL_DATA_MATCHES_URL,
+        headers={"X-Auth-Token": FOOTBALL_DATA_API_KEY, "User-Agent": "ConversysFut/1.0"},
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    results: list[dict[str, Any]] = []
+    for match in payload.get("matches", []):
+        home = normalize_world_cup_team(((match.get("homeTeam") or {}).get("name")) or "")
+        away = normalize_world_cup_team(((match.get("awayTeam") or {}).get("name")) or "")
+        if not home or not away:
+            continue
+        full_time = ((match.get("score") or {}).get("fullTime")) or {}
+        utc_date = match.get("utcDate")
+        kickoff = None
+        if utc_date:
+            try:
+                kickoff = datetime.fromisoformat(utc_date.replace("Z", "+00:00")).astimezone(timezone.utc).replace(tzinfo=None)
+            except ValueError:
+                kickoff = None
+        results.append(
+            {
+                "home_team": home,
+                "away_team": away,
+                "kickoff_at": kickoff,
+                "status": match.get("status"),
+                "home_score": full_time.get("home"),
+                "away_score": full_time.get("away"),
+            }
+        )
+    return results
+
+
+def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
+    """Confere os placares do openfootball contra a football-data.org.
+
+    Preenche resultados que a fonte primária ainda não publicou e registra
+    divergências para o admin revisar. Nunca derruba o sync principal."""
+    status: dict[str, Any] = {
+        "configured": bool(FOOTBALL_DATA_API_KEY),
+        "ok": False,
+        "matched": 0,
+        "filled": 0,
+        "conflicts": [],
+        "error": None,
+    }
+    if not FOOTBALL_DATA_API_KEY:
+        return status
+    try:
+        results = fetch_football_data_results()
+    except Exception as exc:
+        status["error"] = str(exc)
+        return status
+    status["ok"] = True
+
+    by_teams: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in results:
+        key = (normalize_scorer_name(item["home_team"]), normalize_scorer_name(item["away_team"]))
+        by_teams.setdefault(key, []).append(item)
+
+    for game in db.query(models.WorldCupGame).all():
+        key = (
+            normalize_scorer_name(normalize_world_cup_team(game.home_team)),
+            normalize_scorer_name(normalize_world_cup_team(game.away_team)),
+        )
+        candidates = by_teams.get(key) or []
+        # Mesmo confronto pode se repetir no mata-mata: casa pelo dia do jogo
+        item = next(
+            (
+                candidate
+                for candidate in candidates
+                if not candidate["kickoff_at"]
+                or not game.kickoff_at
+                or abs(candidate["kickoff_at"] - game.kickoff_at) <= timedelta(days=2)
+            ),
+            None,
+        )
+        if not item:
+            continue
+        status["matched"] += 1
+        finished_remote = item["status"] in ("FINISHED", "AWARDED") and item["home_score"] is not None and item["away_score"] is not None
+        if not finished_remote:
+            continue
+        if game.home_score is None or game.away_score is None:
+            game.home_score = int(item["home_score"])
+            game.away_score = int(item["away_score"])
+            game.status = "finished"
+            status["filled"] += 1
+        elif int(item["home_score"]) != game.home_score or int(item["away_score"]) != game.away_score:
+            status["conflicts"].append(
+                {
+                    "match_number": game.match_number,
+                    "game": f"{game.home_team} x {game.away_team}",
+                    "openfootball": f"{game.home_score}-{game.away_score}",
+                    "football_data": f"{item['home_score']}-{item['away_score']}",
+                }
+            )
+    return status
+
+
 def apply_world_cup_sync(db: Session) -> tuple[int, int]:
     imported = 0
     updated = 0
@@ -1495,13 +1679,58 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
             game.scorers = scorers
 
     db.flush()
+    secondary = cross_check_world_cup_results(db)
     refresh_world_cup_live_statuses(db)
     finished_games = db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "finished").all()
     for game in finished_games:
         score_world_cup_game(game)
-    set_app_setting(db, "world_cup_last_sync", datetime.utcnow().isoformat())
+    set_app_setting(db, "world_cup_last_sync", datetime.now(timezone.utc).isoformat())
+    set_app_setting(
+        db,
+        "world_cup_sync_status",
+        json.dumps(
+            {
+                "at": datetime.now(timezone.utc).isoformat(),
+                "ok": True,
+                "error": None,
+                "imported": imported,
+                "updated": updated,
+                "finished_games": len(finished_games),
+                "missing_scorers": [
+                    f"{game.home_team} x {game.away_team}" for game in finished_games if not game.scorers
+                ],
+                "secondary": secondary,
+            },
+            ensure_ascii=False,
+        ),
+    )
     db.commit()
     return imported, updated
+
+
+def record_world_cup_sync_failure(error: str) -> None:
+    # Mantém o último erro visível para o admin mesmo quando o sync quebra
+    try:
+        session = SessionLocal()
+        try:
+            previous_raw = get_app_setting(session, "world_cup_sync_status")
+            previous = json.loads(previous_raw) if previous_raw else {}
+        except (json.JSONDecodeError, TypeError):
+            previous = {}
+        try:
+            previous.update(
+                {
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    "ok": False,
+                    "error": error[:500],
+                }
+            )
+            set_app_setting(session, "world_cup_sync_status", json.dumps(previous, ensure_ascii=False))
+            session.commit()
+        finally:
+            session.close()
+    except Exception:
+        pass
 
 
 def world_cup_squads_due(db: Session) -> bool:
@@ -1512,6 +1741,8 @@ def world_cup_squads_due(db: Session) -> bool:
         last = datetime.fromisoformat(last_sync)
     except ValueError:
         return True
+    if last.tzinfo:
+        last = last.astimezone(timezone.utc).replace(tzinfo=None)
     return datetime.utcnow() - last >= timedelta(hours=24)
 
 
@@ -1531,6 +1762,7 @@ def world_cup_sync_loop() -> None:
                 session.close()
         except Exception as exc:
             print(f"[world-cup-sync] schedule/results failed: {exc}", flush=True)
+            record_world_cup_sync_failure(str(exc))
         try:
             session = SessionLocal()
             try:
@@ -1546,17 +1778,39 @@ def world_cup_sync_loop() -> None:
             print(f"[world-cup-sync] squads failed: {exc}", flush=True)
 
 
-def world_cup_first_kickoff(db: Session) -> datetime | None:
-    game = db.query(models.WorldCupGame).order_by(models.WorldCupGame.kickoff_at.asc()).first()
-    return game.kickoff_at if game else None
+def world_cup_champion_lock_at(db: Session) -> datetime | None:
+    # Palpite de campeão fica aberto até 1h antes da estreia do Brasil;
+    # se o Brasil não estiver na tabela, vale até o fim da fase de grupos
+    brazil_game = (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.kickoff_at.isnot(None))
+        .filter(
+            or_(
+                models.WorldCupGame.home_team.in_(("Brazil", "Brasil")),
+                models.WorldCupGame.away_team.in_(("Brazil", "Brasil")),
+            )
+        )
+        .order_by(models.WorldCupGame.kickoff_at.asc())
+        .first()
+    )
+    if brazil_game:
+        return brazil_game.kickoff_at - WORLD_CUP_BET_CUTOFF
+    last_group_game = (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.kickoff_at.isnot(None))
+        .filter(models.WorldCupGame.stage == "group-stage")
+        .order_by(models.WorldCupGame.kickoff_at.desc())
+        .first()
+    )
+    return last_group_game.kickoff_at if last_group_game else None
 
 
 def world_cup_champion_locked(db: Session) -> bool:
     champion = get_app_setting(db, "world_cup_champion")
     if champion:
         return True
-    first_kickoff = world_cup_first_kickoff(db)
-    return bool(first_kickoff and first_kickoff <= datetime.utcnow())
+    lock_at = world_cup_champion_lock_at(db)
+    return bool(lock_at and lock_at <= datetime.utcnow())
 
 
 def world_cup_champion_pick_response(pick: models.WorldCupChampionPick) -> dict[str, Any]:
@@ -1581,6 +1835,7 @@ def world_cup_champion_response(db: Session, user: models.User | None = None) ->
     return {
         "team": champion_team,
         "locked": locked,
+        "lock_at": iso_utc(world_cup_champion_lock_at(db)),
         "points_award": WORLD_CUP_POINTS_CHAMPION,
         "picks_count": len(picks),
         "viewer_pick": world_cup_champion_pick_response(viewer_pick) if viewer_pick else None,
@@ -2283,6 +2538,47 @@ def sync_world_cup_squads(
     }
 
 
+@app.get("/api/world-cup/sync/status")
+def world_cup_sync_status(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Apenas o admin pode ver o status de sincronização")
+
+    def read_status(key: str) -> dict[str, Any] | None:
+        raw = get_app_setting(db, key)
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+
+    finished_query = db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "finished")
+    return {
+        "last_sync": get_app_setting(db, "world_cup_last_sync"),
+        "last_squad_sync": get_app_setting(db, "world_cup_last_squad_sync"),
+        "games_sync": read_status("world_cup_sync_status"),
+        "squad_sync": read_status("world_cup_squad_sync_status"),
+        "sync_interval_seconds": max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600"))),
+        "sources": {
+            "openfootball_url": OPENFOOTBALL_2026_CUP_URL,
+            "football_data_configured": bool(FOOTBALL_DATA_API_KEY),
+            "squads_source": "Wikipedia (elencos oficiais)",
+        },
+        "totals": {
+            "games": db.query(models.WorldCupGame).count(),
+            "finished_games": finished_query.count(),
+            "finished_without_scorers": finished_query.filter(
+                or_(models.WorldCupGame.scorers.is_(None), models.WorldCupGame.scorers == "")
+            ).count(),
+            "players": db.query(models.WorldCupPlayer).count(),
+            "teams_with_squads": db.query(models.WorldCupPlayer.team).distinct().count(),
+        },
+    }
+
+
 @app.post("/api/world-cup/games/{game_id}/prediction")
 def submit_world_cup_prediction(
     game_id: int,
@@ -2295,7 +2591,7 @@ def submit_world_cup_prediction(
         raise HTTPException(status_code=404, detail="Jogo do bolão não encontrado")
     if not is_bettable_world_cup_game(game):
         raise HTTPException(status_code=400, detail="Este jogo ainda não tem seleções definidas para palpite")
-    if (game.status or "scheduled") != "scheduled" or game.kickoff_at - WORLD_CUP_BET_CUTOFF <= datetime.utcnow():
+    if world_cup_game_lock_passed(game):
         raise HTTPException(status_code=400, detail="Palpites fecham 1 hora antes do jogo e este já está fechado")
 
     prediction = (

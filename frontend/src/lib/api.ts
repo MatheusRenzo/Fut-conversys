@@ -12,6 +12,7 @@ import type {
   WorldCupGame,
   WorldCupLeaderboardEntry,
   WorldCupSquads,
+  WorldCupSyncStatus,
 } from "@/types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -205,6 +206,7 @@ export const api = {
     apiFetch<{ imported: number; updated: number; players: WorldCupSquads }>("/api/world-cup/sync/squads", {
       method: "POST",
     }),
+  worldCupSyncStatus: () => apiFetch<WorldCupSyncStatus>("/api/world-cup/sync/status"),
   submitWorldCupChampionPick: (team: string) =>
     apiFetch<WorldCupChampion>("/api/world-cup/champion-pick", {
       method: "POST",

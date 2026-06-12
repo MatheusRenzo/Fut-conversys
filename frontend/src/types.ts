@@ -238,7 +238,11 @@ export type WorldCupGame = {
   predictions_count: number;
   is_placeholder?: boolean;
   bettable?: boolean;
+  lock_passed?: boolean;
   viewer_prediction?: WorldCupPrediction | null;
+  // Quem já palpitou (sempre visível); palpites completos só após o fechamento
+  bettors?: UserProfile[];
+  predictions?: WorldCupPrediction[];
 };
 
 export type WorldCupLeaderboardEntry = {
@@ -265,6 +269,7 @@ export type WorldCupChampionPick = {
 export type WorldCupChampion = {
   team?: string | null;
   locked: boolean;
+  lock_at?: string | null;
   points_award: number;
   picks_count: number;
   viewer_pick?: WorldCupChampionPick | null;
@@ -298,6 +303,50 @@ export type WorldCupBoard = {
     scorer_bonus: number;
     champion: number;
     locked_after_kickoff: boolean;
+  };
+};
+
+export type WorldCupSyncStatus = {
+  last_sync?: string | null;
+  last_squad_sync?: string | null;
+  games_sync?: {
+    at?: string;
+    ok?: boolean;
+    error?: string | null;
+    imported?: number;
+    updated?: number;
+    finished_games?: number;
+    missing_scorers?: string[];
+    secondary?: {
+      configured: boolean;
+      ok: boolean;
+      matched: number;
+      filled: number;
+      conflicts: Array<{ match_number?: number | null; game: string; openfootball: string; football_data: string }>;
+      error?: string | null;
+    };
+  } | null;
+  squad_sync?: {
+    at?: string;
+    ok?: boolean;
+    error?: string | null;
+    imported?: number;
+    updated?: number;
+    teams?: number;
+    players?: number;
+  } | null;
+  sync_interval_seconds: number;
+  sources: {
+    openfootball_url: string;
+    football_data_configured: boolean;
+    squads_source: string;
+  };
+  totals: {
+    games: number;
+    finished_games: number;
+    finished_without_scorers: number;
+    players: number;
+    teams_with_squads: number;
   };
 };
 

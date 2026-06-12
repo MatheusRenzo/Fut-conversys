@@ -4,17 +4,21 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   CalendarPlus,
   CheckCircle2,
+  ChevronRight,
   Crown,
   DownloadCloud,
   Flame,
   Goal,
+  Lock,
   Medal,
   RefreshCcw,
   Save,
   Settings2,
   Sparkles,
+  Target,
   Ticket,
   Trophy,
   Users,
@@ -26,7 +30,7 @@ import { Avatar } from "@/components/Avatar";
 import { TeamFlag } from "@/components/TeamFlag";
 import { api } from "@/lib/api";
 import { squadTeamKey } from "@/lib/teams";
-import { formatEventDate } from "@/lib/format";
+import { formatEventDate, formatShortDate } from "@/lib/format";
 import type {
   Event as AppEvent,
   Leaderboard,
@@ -34,7 +38,9 @@ import type {
   WorldCupBoard,
   WorldCupGame,
   WorldCupLeaderboardEntry,
+  WorldCupPrediction,
   WorldCupSquads,
+  WorldCupSyncStatus,
 } from "@/types";
 
 type PredictionDraft = {
@@ -100,7 +106,6 @@ const quickFilters: Array<{ key: QuickFilter; label: string }> = [
 const rankingTabs: Array<{ key: RankingTab; label: string }> = [
   { key: "geral", label: "Geral" },
   { key: "exatos", label: "Exatos" },
-  { key: "resultados", label: "Vencedor" },
   { key: "artilheiro", label: "Artilheiro" },
 ];
 
@@ -195,6 +200,7 @@ type BolaoRankingPanelProps = {
   limit?: number;
   compact?: boolean;
   onShowAll?: () => void;
+  onSelectEntry?: (entry: WorldCupLeaderboardEntry) => void;
 };
 
 function BolaoRankingPanel({
@@ -206,17 +212,45 @@ function BolaoRankingPanel({
   limit,
   compact = false,
   onShowAll,
+  onSelectEntry,
 }: BolaoRankingPanelProps) {
   const entries = limit ? sortedRanking.slice(0, limit) : sortedRanking;
+  const podium = entries.slice(0, 3);
+  const listEntries = entries.slice(podium.length);
 
   return (
     <>
       {!compact && (
-        <div className="bolao-rules">
-          <span>Placar exato: {board?.rules.exact_score ?? 3} pts</span>
-          <span>Vencedor certo: {board?.rules.correct_outcome ?? 1} pt</span>
-          <span>Artilheiro certo: +{board?.rules.scorer_bonus ?? 1} pt</span>
-          <span>Campeã da Copa: {board?.rules.champion ?? 10} pts</span>
+        <div className="bolao-rules-guide">
+          <span className="eyebrow">Como funciona a pontuação</span>
+          <ul>
+            <li>
+              <Target size={16} />
+              <div>
+                <strong>Placar exato — {board?.rules.exact_score ?? 3} pts</strong>
+                <span>Cravou o placar certinho. Palpitou 2x1 e o jogo terminou 2x1.</span>
+              </div>
+            </li>
+            <li>
+              <Goal size={16} />
+              <div>
+                <strong>Artilheiro — {board?.rules.scorer_bonus ?? 1} pt</strong>
+                <span>O jogador que você escolheu marcou gol no jogo. Vale sozinho ou somado ao placar exato.</span>
+              </div>
+            </li>
+            <li>
+              <Crown size={16} />
+              <div>
+                <strong>Campeã da Copa — {board?.rules.champion ?? 10} pts</strong>
+                <span>Palpite único de quem levanta a taça. Aberto até 1 hora antes da estreia do Brasil.</span>
+              </div>
+            </li>
+          </ul>
+          <p className="bolao-rules-note">
+            Num jogo dá pra somar até <strong>{maxPoints(board?.rules)} pts</strong> (placar exato + artilheiro). Acertar
+            só o vencedor não pontua. Palpites fecham 1 hora antes da bola rolar e a pontuação entra automaticamente
+            quando o jogo termina.
+          </p>
         </div>
       )}
 
@@ -233,23 +267,53 @@ function BolaoRankingPanel({
         ))}
       </div>
 
+      {podium.length > 0 && (
+        <div className={compact ? "bolao-podium compact" : "bolao-podium"}>
+          {[podium[1], podium[0], podium[2]].map((entry, column) =>
+            entry ? (
+              <button
+                className={["bolao-podium-step", column === 1 ? "first" : column === 0 ? "second" : "third"].join(" ")}
+                key={entry.user.id}
+                onClick={() => onSelectEntry?.(entry)}
+                type="button"
+              >
+                <span className="bolao-podium-medal">{column === 1 ? "🥇" : column === 0 ? "🥈" : "🥉"}</span>
+                <Avatar user={entry.user} size={column === 1 ? "md" : "sm"} />
+                <span className="bolao-podium-name">{entry.user.name.split(" ")[0]}</span>
+                <strong>
+                  {rankingValue(entry, rankingTab)} {rankingUnit(rankingTab)}
+                </strong>
+                <small>
+                  {entry.exact_scores} exatos · {entry.scorer_hits} ⚽
+                </small>
+              </button>
+            ) : (
+              <span className="bolao-podium-step empty" key={`empty-${column}`} />
+            ),
+          )}
+        </div>
+      )}
+
+      {sortedRanking.length > 0 && (
+        <p className="bolao-ranking-hint">Toca em alguém pra ver os palpites jogo a jogo.</p>
+      )}
+
       <div className="bolao-ranking-list">
-        {entries.map((entry, index) => (
-          <div className="bolao-rank-row" key={entry.user.id}>
-            <strong>{rankingTab === "geral" ? entry.rank : index + 1}</strong>
+        {listEntries.map((entry, index) => (
+          <button className="bolao-rank-row clickable" key={entry.user.id} onClick={() => onSelectEntry?.(entry)} type="button">
+            <strong>{rankingTab === "geral" ? entry.rank : index + podium.length + 1}</strong>
             <Avatar user={entry.user} size="sm" />
-            <span>{entry.user.name}</span>
-            <small>
-              {rankingTab === "geral"
-                ? `${entry.exact_scores} exatos`
-                : rankingTab === "artilheiro"
-                  ? `${entry.scorer_hits} acertos`
-                  : `${entry.predictions} palpites`}
-            </small>
+            <span className="bolao-rank-main">
+              {entry.user.name}
+              <small>
+                {entry.exact_scores} exatos · {entry.scorer_hits} artilheiros · {entry.predictions} palpites
+              </small>
+            </span>
             <b>
               {rankingValue(entry, rankingTab)} {rankingUnit(rankingTab)}
             </b>
-          </div>
+            <ChevronRight className="bolao-rank-chevron" size={15} />
+          </button>
         ))}
         {sortedRanking.length === 0 && <p>Ninguém pontuou ainda. O ranking nasce no primeiro jogo encerrado.</p>}
       </div>
@@ -290,6 +354,136 @@ function BolaoRankingPanel({
         </div>
       )}
     </>
+  );
+}
+
+function BolaoPersonModal({
+  entry,
+  board,
+  onClose,
+}: {
+  entry: WorldCupLeaderboardEntry;
+  board: WorldCupBoard | null;
+  onClose: () => void;
+}) {
+  const games = board?.games ?? [];
+  const revealed = games
+    .map((game) => ({
+      game,
+      prediction: (game.predictions ?? []).find((prediction) => prediction.user.id === entry.user.id) ?? null,
+    }))
+    .filter((item): item is { game: WorldCupGame; prediction: WorldCupPrediction } => item.prediction !== null)
+    .sort((a, b) => new Date(b.game.kickoff_at).getTime() - new Date(a.game.kickoff_at).getTime());
+  const hidden = games.filter(
+    (game) =>
+      !game.lock_passed &&
+      (game.bettors ?? []).some((bettor) => bettor.id === entry.user.id) &&
+      !(game.predictions ?? []).some((prediction) => prediction.user.id === entry.user.id),
+  );
+
+  return (
+    <div className="event-modal-backdrop" onClick={onClose}>
+      <div className="event-modal glass-panel wc-modal wc-person-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div className="wc-person-head">
+            <Avatar user={entry.user} />
+            <div>
+              <span className="eyebrow">{entry.rank}º no bolão</span>
+              <h2>{entry.user.name}</h2>
+              <p className="wc-person-stats">
+                <strong>{entry.points} pts</strong> · {entry.exact_scores} placares exatos · {entry.scorer_hits}{" "}
+                artilheiros · {entry.predictions} palpites
+              </p>
+            </div>
+          </div>
+          <button className="modal-close" onClick={onClose} type="button">
+            <X size={18} />
+          </button>
+        </div>
+
+        {entry.champion_team && (
+          <div className="wc-person-champion">
+            <Crown size={15} />
+            <span>
+              Campeã: <TeamFlag team={entry.champion_team} /> <strong>{entry.champion_team}</strong>
+              {entry.champion_points > 0 ? ` (+${entry.champion_points} pts)` : ""}
+            </span>
+          </div>
+        )}
+
+        <div className="wc-person-section">
+          <span className="eyebrow">Palpites revelados</span>
+          {revealed.length > 0 ? (
+            <div className="wc-person-bets">
+              {revealed.map(({ game, prediction }) => {
+                const finished = game.status === "finished" && game.home_score !== null && game.away_score !== null;
+                const exact =
+                  finished && prediction.home_score === game.home_score && prediction.away_score === game.away_score;
+                return (
+                  <div className={exact ? "wc-person-bet exact" : "wc-person-bet"} key={game.id}>
+                    <div className="wc-person-bet-match">
+                      <span>
+                        <TeamFlag team={game.home_team} /> {game.home_team} x {game.away_team}{" "}
+                        <TeamFlag team={game.away_team} />
+                      </span>
+                      <small>
+                        {finished
+                          ? `Placar real ${game.home_score} x ${game.away_score}`
+                          : statusLabels[game.status]}
+                        {" · "}
+                        {formatShortDate(game.kickoff_at)}
+                      </small>
+                    </div>
+                    <div className="wc-person-bet-pick">
+                      <strong>
+                        {prediction.home_score}x{prediction.away_score}
+                      </strong>
+                      {prediction.scorer_guess && (
+                        <span className={prediction.scorer_hit ? "wc-person-scorer hit" : "wc-person-scorer"}>
+                          ⚽ {prediction.scorer_guess}
+                          {prediction.scorer_hit ? " ✓" : finished ? " ✗" : ""}
+                        </span>
+                      )}
+                      {exact && (
+                        <span className="wc-person-exact-badge">
+                          <Target size={12} /> placar exato
+                        </span>
+                      )}
+                      {prediction.status === "scored" ? (
+                        <b className={prediction.points > 0 ? "wc-points-badge won" : "wc-points-badge"}>
+                          {prediction.points > 0 ? `+${prediction.points}` : "0"} pts
+                        </b>
+                      ) : (
+                        <b className="wc-points-badge pending">Aguardando</b>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="rail-empty-copy">
+              Nenhum palpite revelado ainda — os palpites aparecem quando o jogo fecha (1h antes da bola rolar).
+            </p>
+          )}
+        </div>
+
+        {hidden.length > 0 && (
+          <div className="wc-person-section">
+            <span className="eyebrow">Já palpitou (ainda em segredo)</span>
+            <div className="wc-person-hidden">
+              {hidden.map((game) => (
+                <span className="wc-person-hidden-chip" key={game.id}>
+                  <Lock size={12} /> <TeamFlag team={game.home_team} /> x <TeamFlag team={game.away_team} />{" "}
+                  {formatShortDate(game.kickoff_at)}
+                </span>
+              ))}
+            </div>
+            <p className="wc-person-hidden-note">Palpites ficam ocultos até 1 hora antes de cada jogo.</p>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -430,6 +624,9 @@ export default function BolaoPage() {
   const [championAnnounceDraft, setChampionAnnounceDraft] = useState("");
   const [announcingChampion, setAnnouncingChampion] = useState(false);
   const [rankingTab, setRankingTab] = useState<RankingTab>("geral");
+  const [selectedEntry, setSelectedEntry] = useState<WorldCupLeaderboardEntry | null>(null);
+  const [syncStatus, setSyncStatus] = useState<WorldCupSyncStatus | null>(null);
+  const [syncStatusError, setSyncStatusError] = useState("");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("open");
   const [stageFilter, setStageFilter] = useState("all");
   const [gameDraft, setGameDraft] = useState<GameDraft>(emptyGameDraft);
@@ -474,6 +671,26 @@ export default function BolaoPage() {
 
     load();
   }, [router]);
+
+  const isAdminProfile = Boolean(profile?.is_admin);
+
+  useEffect(() => {
+    if (!adminModalOpen || !isAdminProfile) return;
+    let active = true;
+    api
+      .worldCupSyncStatus()
+      .then((status) => {
+        if (!active) return;
+        setSyncStatus(status);
+        setSyncStatusError("");
+      })
+      .catch((nextError) => {
+        if (active) setSyncStatusError(nextError instanceof Error ? nextError.message : "Não foi possível carregar o status");
+      });
+    return () => {
+      active = false;
+    };
+  }, [adminModalOpen, isAdminProfile]);
 
   useEffect(() => {
     const clock = window.setInterval(() => setCurrentTime(Date.now()), 1000);
@@ -908,7 +1125,8 @@ export default function BolaoPage() {
           board={board}
           highlights={highlights}
           compact
-          limit={3}
+          limit={8}
+          onSelectEntry={setSelectedEntry}
           onShowAll={() => setRankingModalOpen(true)}
           onTabChange={setRankingTab}
           rankingTab={rankingTab}
@@ -947,6 +1165,9 @@ export default function BolaoPage() {
             <h2>Quem leva a taça?</h2>
             <p className="wc-champion-copy">
               Vale <strong>{champion?.points_award ?? 10} pts</strong>. Escolhe uma vez — depois não dá pra trocar.
+              {!champion?.locked && champion?.lock_at && (
+                <> Fecha {formatEventDate(champion.lock_at)} (1h antes da estreia do Brasil).</>
+              )}
             </p>
           </div>
           <span className="wc-champion-trophy" aria-hidden="true">
@@ -1065,6 +1286,27 @@ export default function BolaoPage() {
                   </div>
                 ) : (
                   <div className="wc-result-scorers muted">Artilheiros ainda não publicados na fonte.</div>
+                )}
+                {(game.predictions ?? []).length > 0 && (
+                  <div className="wc-result-preds">
+                    <span className="wc-result-preds-label">Palpites da galera</span>
+                    {(game.predictions ?? []).map((prediction) => (
+                      <div
+                        className={prediction.points > 0 ? "wc-result-pred scored" : "wc-result-pred"}
+                        key={prediction.id}
+                      >
+                        <Avatar user={prediction.user} size="sm" />
+                        <span>{prediction.user.name.split(" ")[0]}</span>
+                        <small>
+                          {prediction.home_score}x{prediction.away_score}
+                          {prediction.scorer_guess ? ` · ⚽ ${prediction.scorer_guess}${prediction.scorer_hit ? " ✓" : ""}` : ""}
+                        </small>
+                        <b className={prediction.points > 0 ? "wc-points-badge won" : "wc-points-badge"}>
+                          {prediction.points > 0 ? `+${prediction.points}` : "0"}
+                        </b>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </article>
             ))}
@@ -1243,9 +1485,24 @@ export default function BolaoPage() {
 
                 <div className="wc-game-foot">
                   <span>{game.venue || "Local a confirmar"}</span>
-                  <span>
-                    <Users size={12} /> {game.predictions_count}
-                  </span>
+                  {(game.bettors ?? []).length > 0 ? (
+                    <span
+                      className="wc-bettor-stack"
+                      title={`Já palpitaram: ${(game.bettors ?? []).map((bettor) => bettor.name).join(", ")}`}
+                    >
+                      <span className="wc-bettor-avatars">
+                        {(game.bettors ?? []).slice(0, 5).map((bettor) => (
+                          <Avatar key={bettor.id} user={bettor} size="sm" />
+                        ))}
+                      </span>
+                      {game.predictions_count > 5 && <small>+{game.predictions_count - 5}</small>}
+                      <small className="wc-bettor-label">já palpitaram</small>
+                    </span>
+                  ) : (
+                    <span>
+                      <Users size={12} /> Ninguém palpitou ainda
+                    </span>
+                  )}
                 </div>
               </article>
             );
@@ -1349,6 +1606,8 @@ export default function BolaoPage() {
         </div>
       )}
 
+      {selectedEntry && <BolaoPersonModal board={board} entry={selectedEntry} onClose={() => setSelectedEntry(null)} />}
+
       {rankingModalOpen && (
         <div className="event-modal-backdrop" onClick={() => setRankingModalOpen(false)}>
           <div className="event-modal glass-panel wc-modal" onClick={(event) => event.stopPropagation()}>
@@ -1365,6 +1624,7 @@ export default function BolaoPage() {
             <BolaoRankingPanel
               board={board}
               highlights={highlights}
+              onSelectEntry={setSelectedEntry}
               onTabChange={setRankingTab}
               rankingTab={rankingTab}
               sortedRanking={sortedRanking}
@@ -1447,11 +1707,117 @@ export default function BolaoPage() {
               </button>
             </div>
 
-            {board?.last_sync && (
-              <p className="bolao-sync-info">
-                <RefreshCcw size={13} /> Sync automático a cada 10 min via openfootball · placares, artilheiros e pontos ·
-                último: {formatEventDate(board.last_sync)}
-              </p>
+            {syncStatusError && <p className="bolao-feedback error">{syncStatusError}</p>}
+            {syncStatus ? (
+              <div className="wc-sync-status">
+                <div className={syncStatus.games_sync?.ok === false ? "wc-sync-card error" : "wc-sync-card ok"}>
+                  <span className="wc-sync-card-head">
+                    <RefreshCcw size={14} />
+                    <strong>Jogos & resultados — openfootball</strong>
+                    <b className={syncStatus.games_sync?.ok === false ? "wc-sync-pill error" : "wc-sync-pill ok"}>
+                      {syncStatus.games_sync ? (syncStatus.games_sync.ok ? "Rodou certinho" : "Falhou") : "Nunca rodou"}
+                    </b>
+                  </span>
+                  <small>
+                    Última atualização: {syncStatus.games_sync?.at ? formatEventDate(syncStatus.games_sync.at) : "—"} ·
+                    automático a cada {Math.round(syncStatus.sync_interval_seconds / 60)} min
+                  </small>
+                  <small>
+                    {syncStatus.totals.games} jogos na tabela · {syncStatus.totals.finished_games} encerrados ·{" "}
+                    {syncStatus.games_sync?.updated ?? 0} atualizados no último sync
+                  </small>
+                  {syncStatus.games_sync?.error && (
+                    <small className="wc-sync-warn">
+                      <AlertTriangle size={12} /> {syncStatus.games_sync.error}
+                    </small>
+                  )}
+                  {(syncStatus.games_sync?.missing_scorers?.length ?? 0) > 0 && (
+                    <small className="wc-sync-warn">
+                      <AlertTriangle size={12} /> Encerrados sem artilheiro:{" "}
+                      {(syncStatus.games_sync?.missing_scorers ?? []).join(", ")}
+                    </small>
+                  )}
+                </div>
+
+                <div
+                  className={
+                    !syncStatus.sources.football_data_configured
+                      ? "wc-sync-card muted"
+                      : syncStatus.games_sync?.secondary?.ok
+                        ? "wc-sync-card ok"
+                        : "wc-sync-card error"
+                  }
+                >
+                  <span className="wc-sync-card-head">
+                    <CheckCircle2 size={14} />
+                    <strong>Conferência — football-data.org</strong>
+                    <b
+                      className={
+                        !syncStatus.sources.football_data_configured
+                          ? "wc-sync-pill muted"
+                          : syncStatus.games_sync?.secondary?.ok
+                            ? "wc-sync-pill ok"
+                            : "wc-sync-pill error"
+                      }
+                    >
+                      {!syncStatus.sources.football_data_configured
+                        ? "Não configurada"
+                        : syncStatus.games_sync?.secondary?.ok
+                          ? "Conferindo"
+                          : "Falhou"}
+                    </b>
+                  </span>
+                  {syncStatus.sources.football_data_configured ? (
+                    <>
+                      <small>
+                        {syncStatus.games_sync?.secondary?.matched ?? 0} jogos casados ·{" "}
+                        {syncStatus.games_sync?.secondary?.filled ?? 0} resultados preenchidos por ela
+                      </small>
+                      {syncStatus.games_sync?.secondary?.error && (
+                        <small className="wc-sync-warn">
+                          <AlertTriangle size={12} /> {syncStatus.games_sync.secondary.error}
+                        </small>
+                      )}
+                      {(syncStatus.games_sync?.secondary?.conflicts?.length ?? 0) > 0 ? (
+                        <small className="wc-sync-warn">
+                          <AlertTriangle size={12} /> Placares divergentes:{" "}
+                          {(syncStatus.games_sync?.secondary?.conflicts ?? [])
+                            .map((conflict) => `${conflict.game} (of ${conflict.openfootball} x fd ${conflict.football_data})`)
+                            .join(" · ")}
+                        </small>
+                      ) : (
+                        <small>Nenhuma divergência entre as duas fontes.</small>
+                      )}
+                    </>
+                  ) : (
+                    <small>
+                      Defina FOOTBALL_DATA_API_KEY no .env (chave grátis em football-data.org) pra conferir os placares
+                      em duas fontes.
+                    </small>
+                  )}
+                </div>
+
+                <div className={syncStatus.squad_sync?.ok === false ? "wc-sync-card error" : "wc-sync-card ok"}>
+                  <span className="wc-sync-card-head">
+                    <Users size={14} />
+                    <strong>Elencos — Wikipedia</strong>
+                    <b className={syncStatus.squad_sync?.ok === false ? "wc-sync-pill error" : "wc-sync-pill ok"}>
+                      {syncStatus.totals.players > 0 ? "Jogadores puxados" : "Sem jogadores"}
+                    </b>
+                  </span>
+                  <small>
+                    {syncStatus.totals.players} jogadores de {syncStatus.totals.teams_with_squads} seleções · última:{" "}
+                    {syncStatus.last_squad_sync ? formatEventDate(syncStatus.last_squad_sync) : "—"}
+                  </small>
+                  {syncStatus.squad_sync?.error && (
+                    <small className="wc-sync-warn">
+                      <AlertTriangle size={12} /> {syncStatus.squad_sync.error}
+                    </small>
+                  )}
+                </div>
+              </div>
+            ) : (
+              !syncStatusError && <p className="bolao-sync-info">Carregando status das fontes...</p>
             )}
 
             <div className="wc-admin-sync-row">

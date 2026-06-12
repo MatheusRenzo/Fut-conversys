@@ -44,6 +44,7 @@ services:
       MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
       MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-https://fut.conversys.global:9443/api/auth/callback/microsoft}
+      FOOTBALL_DATA_API_KEY: ${FOOTBALL_DATA_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
