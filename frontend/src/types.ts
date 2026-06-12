@@ -325,6 +325,15 @@ export type WorldCupSyncStatus = {
       conflicts: Array<{ match_number?: number | null; game: string; openfootball: string; football_data: string }>;
       error?: string | null;
     };
+    live_source?: {
+      configured: boolean;
+      ok: boolean;
+      live_games: number;
+      scorers_updated: number;
+      calls_today: number;
+      skipped?: string | null;
+      error?: string | null;
+    };
   } | null;
   squad_sync?: {
     at?: string;

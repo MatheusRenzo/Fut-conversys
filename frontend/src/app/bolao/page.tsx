@@ -1960,6 +1960,54 @@ export default function BolaoPage() {
                   )}
                 </div>
 
+                <div
+                  className={
+                    !syncStatus.games_sync?.live_source?.configured
+                      ? "wc-sync-card muted"
+                      : syncStatus.games_sync.live_source.error
+                        ? "wc-sync-card error"
+                        : "wc-sync-card ok"
+                  }
+                >
+                  <span className="wc-sync-card-head">
+                    <Zap size={14} />
+                    <strong>Gols ao vivo — API-Football</strong>
+                    <b
+                      className={
+                        !syncStatus.games_sync?.live_source?.configured
+                          ? "wc-sync-pill muted"
+                          : syncStatus.games_sync.live_source.error
+                            ? "wc-sync-pill error"
+                            : "wc-sync-pill ok"
+                      }
+                    >
+                      {!syncStatus.games_sync?.live_source?.configured
+                        ? "Não configurada"
+                        : syncStatus.games_sync.live_source.error
+                          ? "Erro"
+                          : "Ativa"}
+                    </b>
+                  </span>
+                  {!syncStatus.games_sync?.live_source?.configured ? (
+                    <small>Defina API_FOOTBALL_KEY no .env pra capturar placar parcial e artilheiros em tempo real.</small>
+                  ) : (
+                    <>
+                      <small>
+                        {syncStatus.games_sync.live_source.skipped
+                          ? syncStatus.games_sync.live_source.skipped
+                          : `${syncStatus.games_sync.live_source.live_games} jogo(s) ao vivo · artilheiros atualizados em ${syncStatus.games_sync.live_source.scorers_updated}`}
+                        {" · "}
+                        {syncStatus.games_sync.live_source.calls_today} chamadas hoje (limite 90)
+                      </small>
+                      {syncStatus.games_sync.live_source.error && (
+                        <small className="wc-sync-warn">
+                          <AlertTriangle size={12} /> {syncStatus.games_sync.live_source.error}
+                        </small>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 <div className={syncStatus.squad_sync?.ok === false ? "wc-sync-card error" : "wc-sync-card ok"}>
                   <span className="wc-sync-card-head">
                     <Users size={14} />
