@@ -400,6 +400,28 @@ export default function MePage() {
     <AppShell user={profile} nextEvent={events[0] ?? null} leaderboard={leaderboard}>
       <ProfileHeader profile={previewProfile} />
 
+      {!isEditing && (
+        <section className="content-card glass-panel profile-edit-cta">
+          <div>
+            <strong>Deixa o perfil com a tua cara</strong>
+            <span>Troca foto, capa de fundo, borda do avatar e efeitos. Verificados desbloqueiam bordas e efeitos especiais.</span>
+          </div>
+          <button
+            className="btn-primary profile-edit-cta-button"
+            onClick={() => {
+              startEditing();
+              window.setTimeout(() => {
+                document.querySelector(".profile-edit-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }, 60);
+            }}
+            type="button"
+          >
+            <Pencil size={16} />
+            <span>Editar perfil</span>
+          </button>
+        </section>
+      )}
+
       {isAdmin && (
         <section className="content-card glass-panel goal-approval-panel">
           <div className="approval-panel-head">

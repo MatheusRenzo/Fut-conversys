@@ -13,6 +13,7 @@ import {
   Home,
   LoaderCircle,
   LogOut,
+  Pencil,
   Search,
   Target,
   Trophy,
@@ -323,6 +324,13 @@ export function AppShell({
           </div>
         )}
 
+        {user && (
+          <Link className="sidebar-edit-profile" href="/me">
+            <Pencil size={15} />
+            <span>Editar perfil</span>
+          </Link>
+        )}
+
         <button className="btn-secondary" onClick={logout}>
           <LogOut size={16} />
           <span>Sair</span>
@@ -394,11 +402,11 @@ export function AppShell({
               <p className="rail-card-desc">Palpite de quem marca gol no jogo da Copa.</p>
               <div className="mini-list">
                 {bolaoScorerRanking.map((entry, index) => (
-                  <Link href={`/profile/${entry.user.id}`} className="mini-player" key={entry.user.id}>
-                    <strong className="rail-rank-badge">{index + 1}º</strong>
+                  <Link href={`/profile/${entry.user.id}`} className="mini-player rail-scorer-row" key={entry.user.id}>
+                    <strong className="rail-scorer-medal">{index < 3 ? ["🥇", "🥈", "🥉"][index] : `${index + 1}º`}</strong>
                     <Avatar user={entry.user} size="sm" />
                     <span>{entry.user.name}</span>
-                    <strong>{entry.scorer_hits} acertos</strong>
+                    <strong className="rail-scorer-count">{entry.scorer_hits} ⚽</strong>
                   </Link>
                 ))}
               </div>

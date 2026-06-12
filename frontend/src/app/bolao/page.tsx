@@ -625,6 +625,8 @@ export default function BolaoPage() {
   const [announcingChampion, setAnnouncingChampion] = useState(false);
   const [rankingTab, setRankingTab] = useState<RankingTab>("geral");
   const [selectedEntry, setSelectedEntry] = useState<WorldCupLeaderboardEntry | null>(null);
+  // Acordeão dos jogos abertos: null = só o próximo jogo fica expandido; 0 = todos fechados
+  const [expandedGameId, setExpandedGameId] = useState<number | null>(null);
   const [syncStatus, setSyncStatus] = useState<WorldCupSyncStatus | null>(null);
   const [syncStatusError, setSyncStatusError] = useState("");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("open");
@@ -796,6 +798,7 @@ export default function BolaoPage() {
   );
 
   const scrollToGame = (gameId: number) => {
+    setExpandedGameId(gameId);
     document.getElementById(`game-${gameId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
@@ -1359,6 +1362,7 @@ export default function BolaoPage() {
             const justSaved = savedFlash === game.id;
             const hasBet = Boolean(game.viewer_prediction);
             const isNextScheduled = nextGame?.id === game.id;
+            const isExpanded = (expandedGameId ?? nextGame?.id ?? -1) === game.id;
 
             return (
               <article
@@ -1367,26 +1371,58 @@ export default function BolaoPage() {
                   justSaved ? "just-saved" : "",
                   hasBet ? "has-bet" : "needs-bet",
                   isNextScheduled ? "is-next" : "",
+                  isExpanded ? "expanded" : "collapsed",
                 ]
                   .filter(Boolean)
                   .join(" ")}
                 id={`game-${game.id}`}
                 key={game.id}
               >
-                <div className="wc-game-top">
-                  <span className="wc-game-stage">
-                    {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
-                  </span>
-                  {isNextScheduled && <span className="wc-next-badge">Próximo jogo</span>}
-                  <span className="wc-game-date">{formatEventDate(game.kickoff_at)}</span>
-                  <div className="wc-game-top-actions">
-                    <span className={hasBet ? "wc-game-status finished" : "wc-game-status scheduled"}>
-                      {hasBet ? "Palpite feito" : "Aberto"}
+                <button
+                  aria-expanded={isExpanded}
+                  className="wc-game-summary"
+                  onClick={() => setExpandedGameId(isExpanded ? 0 : game.id)}
+                  type="button"
+                >
+                  <div className="wc-game-top">
+                    <span className="wc-game-stage">
+                      {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
                     </span>
-                    {!hasBet && <span className="wc-points-teaser">Até +{maxPoints(board?.rules)} pts</span>}
+                    {isNextScheduled && <span className="wc-next-badge">Próximo jogo</span>}
+                    <span className="wc-game-date">{formatEventDate(game.kickoff_at)}</span>
+                    <div className="wc-game-top-actions">
+                      <span className={hasBet ? "wc-game-status finished" : "wc-game-status scheduled"}>
+                        {hasBet ? "Palpite feito" : "Aberto"}
+                      </span>
+                      {!hasBet && <span className="wc-points-teaser">Até +{maxPoints(board?.rules)} pts</span>}
+                    </div>
                   </div>
-                </div>
+                  {!isExpanded && (
+                    <div className="wc-game-summary-row">
+                      <span className="wc-game-summary-team">
+                        <TeamFlag team={game.home_team} /> {game.home_team}
+                      </span>
+                      <strong className="wc-game-summary-score">
+                        {hasBet && game.viewer_prediction
+                          ? `${game.viewer_prediction.home_score} x ${game.viewer_prediction.away_score}`
+                          : "x"}
+                      </strong>
+                      <span className="wc-game-summary-team away">
+                        {game.away_team} <TeamFlag team={game.away_team} />
+                      </span>
+                      <ChevronRight className="wc-game-summary-chevron" size={17} />
+                    </div>
+                  )}
+                  {!isExpanded && (
+                    <div className={lockMinutes < 120 ? "wc-lock-timer urgent compactado" : "wc-lock-timer compactado"}>
+                      <span>{urgencyLabel(lockMinutes)}</span>
+                      {!hasBet && <span className="wc-summary-cta">Toca pra palpitar</span>}
+                    </div>
+                  )}
+                </button>
 
+                {isExpanded && (
+                  <>
                 <div className={lockMinutes < 120 ? "wc-lock-timer urgent" : "wc-lock-timer"}>
                   <span>{urgencyLabel(lockMinutes)}</span>
                 </div>
@@ -1504,6 +1540,8 @@ export default function BolaoPage() {
                     </span>
                   )}
                 </div>
+                  </>
+                )}
               </article>
             );
           })}
