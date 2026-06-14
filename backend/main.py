@@ -108,6 +108,10 @@ API_FOOTBALL_MINUTE_LIMIT = max(1, int(os.getenv("API_FOOTBALL_MINUTE_LIMIT", "9
 # Limite POR CICLO da TheSportsDB (grátis, 30/min). Cada jogo conferido custa até
 # ~4 chamadas (busca dia ±1 + timeline), então 6 jogos/ciclo = ~24 < 30. Seguro.
 THESPORTSDB_CYCLE_LIMIT = max(1, int(os.getenv("THESPORTSDB_CYCLE_LIMIT", "6")))
+# Rede de segurança: depois disso desde o início, nenhum jogo (mesmo prorrogação +
+# pênaltis ≈ 3h) ainda está rolando. Se nenhuma fonte confirmou o fim, encerra
+# sozinho com o melhor placar — assim nenhum jogo fica "ao vivo" por horas.
+WORLD_CUP_FORCE_FINISH_AFTER = timedelta(hours=int(os.getenv("WORLD_CUP_FORCE_FINISH_HOURS", "4")))
 # Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há
 WORLD_CUP_LIVE_INTERVAL = max(45, int(os.getenv("WORLD_CUP_LIVE_INTERVAL_SECONDS", "75")))
 WORLD_CUP_IDLE_INTERVAL = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600")))
@@ -521,6 +525,8 @@ def ensure_schema() -> None:
             "scorers_final": "BOOLEAN DEFAULT FALSE",
             "api_mid_checked": "BOOLEAN DEFAULT FALSE",
             "scorers_confirmed": "BOOLEAN DEFAULT FALSE",
+            "scorers_confirmations": "INTEGER DEFAULT 0",
+            "end_source": "VARCHAR",
             "created_at": "TIMESTAMP",
         },
         "world_cup_predictions": {
@@ -1837,6 +1843,7 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
             game.home_score = official_h
             game.away_score = official_a
             game.status = "finished"
+            game.end_source = "football-data"  # confirmação oficial de FIM
             # placar mudou → goleadores precisam ser refinalizados pela fonte definitiva
             if scores_differ:
                 game.scorers_final = False
@@ -1882,6 +1889,53 @@ def merge_scorers(existing: str | None, new_names: list[str]) -> tuple[str, bool
             ordered[match_idx] = name  # mantém a versão mais completa
     merged = ", ".join(ordered)[:500]
     return merged, merged != (existing or "")
+
+
+def world_cup_game_squad(db: Session, game: models.WorldCupGame) -> list[str]:
+    """Nomes salvos dos jogadores dos DOIS times do jogo. Já conhecemos todos os
+    elencos, então isso é a fonte de verdade pra validar/normalizar goleadores."""
+    wanted = {
+        normalize_scorer_name(normalize_world_cup_team(game.home_team)),
+        normalize_scorer_name(normalize_world_cup_team(game.away_team)),
+    }
+    if not any(wanted):
+        return []
+    names: list[str] = []
+    for player in db.query(models.WorldCupPlayer).all():
+        if normalize_scorer_name(normalize_world_cup_team(player.team)) in wanted and player.name:
+            names.append(player.name)
+    return names
+
+
+def snap_scorers_to_squad(names: list[str], squad: list[str]) -> tuple[list[str], list[str]]:
+    """Encaixa cada goleador no nome EXATO do elenco salvo. Como o usuário aposta
+    pelo dropdown do elenco, casar com o nome oficial deixa a pontuação à prova de
+    bala (resolve 'J. Lukić' → 'Jovo Lukić'). Devolve (nomes_oficiais, sem_match).
+
+    'sem_match' são gols cujo autor não está em nenhum dos dois elencos — sinal de
+    revisão (nome novo/raro ou ruído da API); o nome original é mantido."""
+    if not squad:
+        return names, []
+    official: list[str] = []
+    unmatched: list[str] = []
+    for raw in names:
+        match = next((s for s in squad if same_scorer(s, raw)), None)
+        chosen = match or raw
+        if match is None:
+            unmatched.append(raw)
+        if not any(same_scorer(chosen, k) for k in official):
+            official.append(chosen)
+    return official, unmatched
+
+
+def scorer_sets_agree(source_names: list[str], official: list[str]) -> bool:
+    """True se uma fonte concorda com o conjunto final: cada goleador oficial
+    aparece na fonte e vice-versa (tolerando abreviação). Vazia nunca concorda."""
+    if not source_names or not official:
+        return False
+    every_official_in_source = all(any(same_scorer(o, s) for s in source_names) for o in official)
+    every_source_in_official = all(any(same_scorer(s, o) for o in official) for s in source_names)
+    return every_official_in_source and every_source_in_official
 
 
 def extract_api_football_scorers(fixture: dict[str, Any]) -> list[str]:
@@ -2216,45 +2270,60 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             game.home_score = int(goals["home"])
             game.away_score = int(goals["away"])
         game.status = "finished"
+        game.end_source = "api-football"  # 1ª confirmação oficial de FIM
+        squad = world_cup_game_squad(db, game)
+        # Fonte 1 (paga, definitiva): goleadores do fixture oficial
         api_names = extract_api_football_scorers(fixture)
-        merged, changed = merge_scorers(game.scorers, api_names)
-        if changed:
-            game.scorers = merged
-            status["scorers_updated"] += 1
-        status["finalized"] += 1
-        # 2ª fonte grátis (TheSportsDB) — não gasta cota da paga, mas tem 30/min:
-        # respeita o teto por ciclo pra nunca estourar.
+        # Fonte 2 (grátis, 30/min → teto por ciclo): TheSportsDB
         tsd_names = []
         if status["tsd_calls"] < THESPORTSDB_CYCLE_LIMIT:
             status["tsd_calls"] += 1
             tsd_names = fetch_thesportsdb_scorers(game) or []
-        of_names = game_scorer_names(game)
-        # A IA SEMPRE entra: recebe as 3 fontes e devolve o conjunto definitivo
-        # (cacheado por assinatura — só chama de novo quando as fontes mudam).
+        # Fonte 3 (backup): o que o openfootball/feed já tinha
+        of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+        # A IA SEMPRE entra: recebe as 3 fontes + o ELENCO real e devolve o conjunto
+        # definitivo (cacheado por assinatura — só re-chama quando as fontes mudam).
         reconciled = ai_reconcile_scorers(
-            db, game, {"API-Football": api_names, "TheSportsDB": tsd_names, "openfootball": of_names}, status
+            db, game,
+            {"API-Football": api_names, "TheSportsDB": tsd_names, "openfootball": of_names},
+            status, squad=squad,
         )
-        if reconciled:
-            game.scorers = merge_scorers(None, reconciled)[0]
+        base = reconciled if reconciled else merge_scorers(game.scorers, api_names + tsd_names)[0].split(", ")
+        base = [n for n in (s.strip() for s in base) if n]
+        # Encaixa no nome EXATO do elenco salvo (à prova de bala pro casamento com o
+        # palpite, que vem do dropdown do elenco). 'unmatched' = revisar.
+        official, unmatched = snap_scorers_to_squad(base, squad)
+        new_scorers = ", ".join(official)[:500]
+        if new_scorers != (game.scorers or ""):
+            game.scorers = new_scorers
+            status["scorers_updated"] += 1
+        status["finalized"] += 1
+        # CONTAGEM DE CONFIRMAÇÕES: só fontes INDEPENDENTES de verdade (a paga e a
+        # grátis). openfootball não conta aqui pra não inflar (pode espelhar o que a
+        # própria API já gravou). 2 = paga e grátis bateram.
+        confirms = sum(1 for src in (api_names, tsd_names) if scorer_sets_agree(src, official))
+        game.scorers_confirmations = confirms
+        # 2+ fontes concordando, OU dado completo já reconciliado pela IA → confirmado
+        if confirms >= 2 or (reconciled and world_cup_scorers_complete(game)):
             game.scorers_confirmed = True
             status["confirmed"] += 1
-            status["scorers_updated"] += 1
-        else:
-            # Sem IA: une tudo e confirma se as duas fontes principais batem
-            for extra in (tsd_names,):
-                merged_x, ch = merge_scorers(game.scorers, extra)
-                if ch:
-                    game.scorers = merged_x
-            divergent = [t for t in tsd_names if not any(same_scorer(t, a) for a in api_names)]
-            if api_names and tsd_names and not divergent:
-                game.scorers_confirmed = True
-                status["confirmed"] += 1
-            elif divergent:
-                status["conflicts"].append(
-                    {"game": f"{game.home_team} x {game.away_team}", "api": api_names, "tsd": tsd_names}
-                )
+        if unmatched:
+            status["conflicts"].append(
+                {"game": f"{game.home_team} x {game.away_team}", "fora_do_elenco": unmatched,
+                 "api": api_names, "tsd": tsd_names}
+            )
         if world_cup_scorers_complete(game):
             game.scorers_final = True
+
+    # ── REDE DE SEGURANÇA DE FIM: jogo "ao vivo" há tempo demais e nenhuma fonte
+    # confirmou o fim → encerra sozinho (nenhum jogo fica aberto por horas). Mantém
+    # o melhor placar e segue tentando confirmar goleadores nos próximos ciclos. ──
+    for game in stuck_live:
+        if game.status == "live" and game.kickoff_at and game.kickoff_at <= now - WORLD_CUP_FORCE_FINISH_AFTER:
+            game.status = "finished"
+            if not game.end_source:
+                game.end_source = "auto:tempo"
+            status["finalized"] += 1
 
     # ── AO VIVO: live=all na cadência do orçamento (usa a cota do jogo ao máximo) ──
     # 1 chamada cobre TODOS os jogos rolando. Espaçada pela cota/dia ÷ jogos.
@@ -2307,10 +2376,16 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 if goals.get("home") is not None and goals.get("away") is not None:
                     game.home_score = int(goals["home"])
                     game.away_score = int(goals["away"])
-                merged, changed = merge_scorers(game.scorers, extract_api_football_scorers(item))
-                if changed:
-                    game.scorers = merged
-                    status["scorers_updated"] += 1
+                live_scorers = extract_api_football_scorers(item)
+                if live_scorers:
+                    # já normaliza o nome ao vivo pro nome oficial do elenco
+                    squad = world_cup_game_squad(db, game)
+                    union = merge_scorers(game.scorers, live_scorers)[0].split(", ")
+                    official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in union) if n], squad)
+                    new_s = ", ".join(official)[:500]
+                    if new_s != (game.scorers or ""):
+                        game.scorers = new_s
+                        status["scorers_updated"] += 1
                 status["mid_checks"] += 1
 
     # ── Confirmação GRÁTIS (TheSportsDB) pra encerrados ainda não confirmados ──
@@ -2331,24 +2406,25 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         tsd_names = fetch_thesportsdb_scorers(game)
         if tsd_names is None:
             continue
-        have_before = game_scorer_names(game)
-        merged, changed = merge_scorers(game.scorers, tsd_names)
-        if changed:
-            game.scorers = merged
+        squad = world_cup_game_squad(db, game)
+        of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+        # IA com elenco: monta o conjunto definitivo a partir da 2ª fonte + backup
+        reconciled = ai_reconcile_scorers(
+            db, game, {"TheSportsDB": tsd_names, "openfootball": of_names}, status, squad=squad
+        )
+        base = reconciled if reconciled else merge_scorers(game.scorers, tsd_names)[0].split(", ")
+        base = [n for n in (s.strip() for s in base) if n]
+        official, _ = snap_scorers_to_squad(base, squad)
+        new_scorers = ", ".join(official)[:500]
+        if new_scorers != (game.scorers or ""):
+            game.scorers = new_scorers
             status["scorers_updated"] += 1
-        have = game_scorer_names(game)
-        divergent = [t for t in tsd_names if not any(same_scorer(t, a) for a in have_before)]
-        if tsd_names and not divergent and world_cup_scorers_complete(game):
+        # aqui não há fonte paga; TheSportsDB é a única confirmação independente
+        confirms = 1 if scorer_sets_agree(tsd_names, official) else 0
+        game.scorers_confirmations = max(game.scorers_confirmations or 0, confirms)
+        if confirms >= 1 and world_cup_scorers_complete(game):
             game.scorers_confirmed = True
             status["confirmed"] += 1
-        elif divergent or not world_cup_scorers_complete(game):
-            reconciled = ai_reconcile_scorers(
-                db, game, {"TheSportsDB": tsd_names, "openfootball": have_before}, status
-            )
-            if reconciled:
-                game.scorers = merge_scorers(None, reconciled)[0]
-                game.scorers_confirmed = True
-                status["confirmed"] += 1
         if world_cup_scorers_complete(game):
             game.scorers_final = True
 
@@ -2638,20 +2714,30 @@ def openai_chat(system: str, user: str, max_tokens: int = 140, db: Session | Non
     return (choices[0].get("message") or {}).get("content", "").strip() or None
 
 
-def ai_reconcile_scorers(db: Session, game: models.WorldCupGame, sources: dict[str, list[str]], status: dict[str, Any]) -> list[str] | None:
+def ai_reconcile_scorers(
+    db: Session,
+    game: models.WorldCupGame,
+    sources: dict[str, list[str]],
+    status: dict[str, Any],
+    squad: list[str] | None = None,
+) -> list[str] | None:
     """IA reconcilia os goleadores das VÁRIAS fontes num conjunto definitivo.
 
     As APIs trazem nomes/quantidades diferentes; o GPT decide a lista correta
-    (1 nome por gol, nomes completos, sem gol contra). Só roda quando as fontes
-    DIVERGEM ou o dado está incompleto — e cacheado por assinatura, pra gastar
-    pouquíssimo. Devolve a lista reconciliada ou None."""
+    (1 nome por gol, nomes completos, sem gol contra). Recebe também o ELENCO real
+    dos dois times — já conhecemos todos os jogadores — então mapeia cada gol pro
+    nome oficial e nunca inventa. Cacheado por assinatura (gasta pouquíssimo).
+    Devolve a lista reconciliada ou None."""
     if not OPENAI_API_KEY:
         return None
     total = (game.home_score or 0) + (game.away_score or 0)
     if total == 0:
         return []
-    # assinatura das fontes — se não mudou, não chama de novo
-    sig = json.dumps({k: sorted(v) for k, v in sources.items()}, ensure_ascii=False)
+    # assinatura inclui o elenco — se nada mudou, não chama de novo
+    sig = json.dumps(
+        {"src": {k: sorted(v) for k, v in sources.items()}, "squad": sorted(squad or [])},
+        ensure_ascii=False,
+    )
     cache_key = f"ai_scorers_{game.id}"
     cached_raw = get_app_setting(db, cache_key)
     if cached_raw:
@@ -2662,16 +2748,24 @@ def ai_reconcile_scorers(db: Session, game: models.WorldCupGame, sources: dict[s
         except json.JSONDecodeError:
             pass
     fontes_txt = "; ".join(f"{name}: {', '.join(lst) if lst else '(vazio)'}" for name, lst in sources.items())
+    # O elenco pode ser grande; manda um recorte enxuto pra não estourar tokens.
+    squad_txt = ", ".join((squad or [])[:60])
     text = openai_chat(
         system=(
             "Você reconcilia dados de futebol de fontes diferentes. Recebe listas de goleadores "
-            "de várias APIs (que podem divergir, abreviar nomes ou estar incompletas) e o total de gols. "
-            "Devolva APENAS um array JSON com os nomes mais prováveis e completos dos goleadores, "
-            "1 entrada por gol de jogador (ignore gols contra). Prefira nomes completos e a maioria das fontes. "
-            "Não invente nomes que não apareçam em nenhuma fonte. Responda só o JSON, ex: [\"Nome A\",\"Nome B\"]."
+            "de várias APIs (que podem divergir, abreviar nomes ou estar incompletas), o total de gols "
+            "e o ELENCO oficial dos dois times. "
+            "Devolva APENAS um array JSON com os nomes dos goleadores, 1 entrada por gol de jogador "
+            "(ignore gols contra). REGRA: todo nome devolvido DEVE ser de um jogador do elenco fornecido — "
+            "use exatamente a grafia do elenco (resolva abreviações/acentos pra esse nome oficial). "
+            "Se uma fonte citar alguém fora do elenco, escolha o jogador do elenco mais provável. "
+            "Não invente. Responda só o JSON, ex: [\"Nome Oficial A\",\"Nome Oficial B\"]."
         ),
-        user=f"Jogo {game.home_team} {game.home_score}x{game.away_score} {game.away_team} ({total} gols). Fontes — {fontes_txt}.",
-        max_tokens=200,
+        user=(
+            f"Jogo {game.home_team} {game.home_score}x{game.away_score} {game.away_team} ({total} gols). "
+            f"Fontes — {fontes_txt}. Elenco (use estes nomes): {squad_txt or '(indisponível)'}."
+        ),
+        max_tokens=220,
         db=db,
         temperature=0.1,
     )
@@ -3668,6 +3762,9 @@ def world_cup_sync_status(
                 "scorers_count": len(game_scorer_names(g)),
                 "scorers_complete": world_cup_scorers_complete(g),
                 "scorers_final": bool(g.scorers_final),
+                "scorers_confirmed": bool(g.scorers_confirmed),
+                "scorers_confirmations": g.scorers_confirmations or 0,
+                "end_source": g.end_source,
                 "has_fixture_id": g.api_fixture_id is not None,
                 "predictions": len(g.predictions),
             }

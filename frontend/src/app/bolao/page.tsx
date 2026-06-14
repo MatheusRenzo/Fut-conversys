@@ -2288,12 +2288,26 @@ export default function BolaoPage() {
                               )}
                               {gh.scorers_count}/{gh.goals} ⚽
                             </span>
+                            {gh.status === "finished" && (gh.goals ?? 0) > 0 && (
+                              <span
+                                className={`wc-health-conf ${(gh.scorers_confirmations ?? 0) >= 2 ? "ok" : (gh.scorers_confirmations ?? 0) === 1 ? "mid" : "low"}`}
+                                title={`${gh.scorers_confirmations ?? 0} fonte(s) independentes confirmaram os goleadores`}
+                              >
+                                {gh.scorers_confirmed ? "✓✓" : "✓"} {gh.scorers_confirmations ?? 0} fonte(s)
+                              </span>
+                            )}
+                            {gh.status === "finished" && gh.end_source && (
+                              <span className="wc-health-end" title="Quem confirmou o fim do jogo">
+                                fim: {gh.end_source}
+                              </span>
+                            )}
                           </div>
                         );
                       })}
                     </div>
                     <small className="muted">
-                      ⚠ = faltam goleadores (o sistema continua tentando sozinho a cada ciclo)
+                      ⚠ = faltam goleadores (o sistema continua tentando sozinho a cada ciclo) · ✓✓ = 2+ fontes
+                      bateram · &quot;fim&quot; = quem confirmou o encerramento (nenhum jogo fica aberto por horas)
                     </small>
                   </div>
                 )}
