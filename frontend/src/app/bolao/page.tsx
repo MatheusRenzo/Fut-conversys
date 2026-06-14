@@ -319,6 +319,9 @@ function BolaoRankingPanel({
                     </span>
                   )}
                 </span>
+                {rankingTab === "geral" && (entry.round_gain ?? 0) > 0 ? (
+                  <span className="bolao-gain">+{entry.round_gain} na rodada 🔥</span>
+                ) : null}
                 {rankingTab === "geral" && rankDelta?.[entry.user.id] ? (
                   <span className={`bolao-podium2-move ${rankDelta[entry.user.id] > 0 ? "up" : "down"}`}>
                     {rankDelta[entry.user.id] > 0 ? `▲ subiu ${rankDelta[entry.user.id]}` : `▼ caiu ${-rankDelta[entry.user.id]}`}
@@ -357,6 +360,9 @@ function BolaoRankingPanel({
               </span>
               <small>
                 {entry.exact_scores} exatos · {entry.scorer_hits} artilheiros · {entry.predictions} palpites
+                {rankingTab === "geral" && (entry.round_gain ?? 0) > 0 && (
+                  <span className="bolao-gain mini"> · +{entry.round_gain} na rodada 🔥</span>
+                )}
               </small>
             </span>
             <b>

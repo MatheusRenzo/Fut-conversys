@@ -1280,12 +1280,18 @@ def world_cup_leaderboard_response(db: Session) -> list[dict[str, Any]]:
     # em wc_rank_movement pelo sync, que roda a cada ciclo). Sobrevive a reload e pega
     # a subida real ao longo da rodada — não só do "último jogo".
     raw_mv = get_app_setting(db, "wc_rank_movement")
+    raw_gain = get_app_setting(db, "wc_rank_gain")
     try:
         moves = json.loads(raw_mv) if raw_mv else {}
     except json.JSONDecodeError:
         moves = {}
+    try:
+        gains = json.loads(raw_gain) if raw_gain else {}
+    except json.JSONDecodeError:
+        gains = {}
     for row in leaderboard:
         row["movement"] = int(moves.get(str(row["user"]["id"]), 0) or 0)
+        row["round_gain"] = int(gains.get(str(row["user"]["id"]), 0) or 0)
 
     return leaderboard[:30]
 
@@ -1296,6 +1302,7 @@ def update_rank_movement(db: Session) -> None:
     delta vs a posição atual. Chamado pelo sync (que faz commit)."""
     lb = world_cup_leaderboard_response(db)
     current = {str(row["user"]["id"]): row["rank"] for row in lb}
+    current_pts = {str(row["user"]["id"]): row["points"] for row in lb}
     finished = db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "finished").count()
     raw = get_app_setting(db, "wc_rank_state")
     try:
@@ -1303,9 +1310,9 @@ def update_rank_movement(db: Session) -> None:
     except json.JSONDecodeError:
         state = None
     if not state:
-        # 1ª vez: reconstrói a posição de ANTES da última rodada (tira os pontos do
-        # último jogo encerrado) pra TODO MUNDO — assim o movimento real da última
-        # rodada já aparece, em vez de zerar todos.
+        # 1ª vez: reconstrói a posição/pontos de ANTES da última rodada (tira os
+        # pontos do último jogo encerrado) pra TODO MUNDO — assim o movimento e o
+        # ganho real da última rodada já aparecem, em vez de zerar todos.
         last_game = (
             db.query(models.WorldCupGame)
             .filter(models.WorldCupGame.status == "finished")
@@ -1325,17 +1332,23 @@ def update_rank_movement(db: Session) -> None:
             reverse=True,
         )
         prev = {str(e["user"]["id"]): i for i, e in enumerate(before, start=1)}
-        state = {"prev": prev, "curr": current, "games": finished}
+        prev_pts = {str(e["user"]["id"]): e["points"] - last_pts.get(e["user"]["id"], 0) for e in lb}
+        state = {"prev": prev, "prev_pts": prev_pts, "curr": current, "curr_pts": current_pts, "games": finished}
     elif state.get("games", 0) < finished:
-        # novo jogo encerrou → a posição "de antes" passa a ser a curr anterior
+        # novo jogo encerrou → a posição/pontos "de antes" passam a ser os curr anteriores
         prev = state.get("curr", current)
-        state = {"prev": prev, "curr": current, "games": finished}
+        prev_pts = state.get("curr_pts", current_pts)
+        state = {"prev": prev, "prev_pts": prev_pts, "curr": current, "curr_pts": current_pts, "games": finished}
     else:
         prev = state.get("prev", current)
-        state = {"prev": prev, "curr": current, "games": finished}
+        prev_pts = state.get("prev_pts", current_pts)
+        state = {"prev": prev, "prev_pts": prev_pts, "curr": current, "curr_pts": current_pts, "games": finished}
     movement = {uid: int(prev.get(uid, rank)) - int(rank) for uid, rank in current.items()}
+    # ganho de pontos na rodada (pega o seu +3 mesmo sem virar de posição)
+    gain = {uid: int(pts) - int(prev_pts.get(uid, pts)) for uid, pts in current_pts.items()}
     set_app_setting(db, "wc_rank_state", json.dumps(state, ensure_ascii=False))
     set_app_setting(db, "wc_rank_movement", json.dumps(movement, ensure_ascii=False))
+    set_app_setting(db, "wc_rank_gain", json.dumps(gain, ensure_ascii=False))
 
 
 def world_cup_stage_from_section(section: str) -> tuple[str, str | None]:

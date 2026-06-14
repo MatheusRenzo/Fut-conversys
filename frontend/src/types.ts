@@ -257,6 +257,7 @@ export type WorldCupLeaderboardEntry = {
   champion_team?: string | null;
   champion_points: number;
   movement?: number;
+  round_gain?: number;
 };
 
 export type WorldCupChampionPick = {
