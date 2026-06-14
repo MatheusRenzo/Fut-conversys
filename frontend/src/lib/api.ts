@@ -208,7 +208,7 @@ export const api = {
     }),
   worldCupSyncStatus: () => apiFetch<WorldCupSyncStatus>("/api/world-cup/sync/status"),
   worldCupInsight: () =>
-    apiFetch<{ available: boolean; total_votes: number; top: Array<{ team: string; votes: number }>; text?: string | null }>(
+    apiFetch<{ available: boolean; game_id?: number | null; matchup?: string | null; text?: string | null }>(
       "/api/world-cup/insight",
     ),
   submitWorldCupChampionPick: (team: string) =>

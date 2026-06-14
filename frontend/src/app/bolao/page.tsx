@@ -187,9 +187,10 @@ type BolaoRankingPanelProps = {
 };
 
 function MoveBadge({ delta }: { delta?: number }) {
-  if (!delta) return <span className="bolao-move flat" aria-hidden="true" />;
-  if (delta > 0) return <span className="bolao-move up" title={`Subiu ${delta}`}>▲{delta}</span>;
-  return <span className="bolao-move down" title={`Caiu ${-delta}`}>▼{-delta}</span>;
+  if (delta === undefined) return <span className="bolao-move stagnant" title="Sem mudança" aria-hidden="true">—</span>;
+  if (delta > 0) return <span className="bolao-move up" title={`Subiu ${delta} posição(ões)`}>▲ {delta}</span>;
+  if (delta < 0) return <span className="bolao-move down" title={`Caiu ${-delta} posição(ões)`}>▼ {-delta}</span>;
+  return <span className="bolao-move stagnant" title="Manteve a posição" aria-hidden="true">—</span>;
 }
 
 function BolaoRankingPanel({
@@ -306,8 +307,11 @@ function BolaoRankingPanel({
       )}
 
       <div className="bolao-ranking-list">
-        {listEntries.map((entry, index) => (
-          <button className="bolao-rank-row clickable" key={entry.user.id} onClick={() => onSelectEntry?.(entry)} type="button">
+        {listEntries.map((entry, index) => {
+          const delta = rankingTab === "geral" ? rankDelta?.[entry.user.id] : undefined;
+          const moveClass = delta && delta > 0 ? " moved-up" : delta && delta < 0 ? " moved-down" : "";
+          return (
+          <button className={`bolao-rank-row clickable${moveClass}`} key={entry.user.id} onClick={() => onSelectEntry?.(entry)} type="button">
             <span className="bolao-rank-pos">
               <strong>{rankingTab === "geral" ? entry.rank : index + podium.length + 1}º</strong>
               {rankingTab === "geral" && <MoveBadge delta={rankDelta?.[entry.user.id]} />}
@@ -331,7 +335,8 @@ function BolaoRankingPanel({
             </b>
             <ChevronRight className="bolao-rank-chevron" size={15} />
           </button>
-        ))}
+          );
+        })}
         {sortedRanking.length === 0 && <p>Ninguém pontuou ainda. O ranking nasce no primeiro jogo encerrado.</p>}
       </div>
 
@@ -1218,6 +1223,13 @@ export default function BolaoPage() {
         </div>
       </section>
 
+      {aiInsight && (
+        <section className="wc-ai-insight wc-ai-insight-banner">
+          <span className="wc-ai-insight-tag"><Sparkles size={13} /> Resenha da IA · próximo jogo</span>
+          <p>{aiInsight}</p>
+        </section>
+      )}
+
       <section className="wc-ranking-inline glass-panel wc-ranking-mobile-only" id="bolao-ranking">
         <div className="wc-section-head wc-ranking-inline-head">
           <div>
@@ -1279,13 +1291,6 @@ export default function BolaoPage() {
             🏆
           </span>
         </div>
-
-        {aiInsight && (
-          <div className="wc-ai-insight">
-            <span className="wc-ai-insight-tag"><Sparkles size={13} /> Resenha da IA</span>
-            <p>{aiInsight}</p>
-          </div>
-        )}
 
         {champion?.team ? (
           <div className="wc-champion-result">
@@ -1380,15 +1385,15 @@ export default function BolaoPage() {
         )}
       </section>
 
-      {recentResults.length > 0 && quickFilter !== "finished" && (
+      {recentResults.length > 0 && (quickFilter === "open" || quickFilter === "live") && (
         <section className="wc-results-panel glass-panel">
           <div className="wc-section-head">
             <div>
-              <span className="eyebrow">Resultados oficiais</span>
-              <h2>Placares e artilheiros</h2>
+              <span className="eyebrow">Já rolou</span>
+              <h2>Resultados, gols e palpites</h2>
               <p className="wc-section-copy">
-                Atualizado automaticamente pela fonte openfootball. Quando o jogo finaliza, a pontuação do bolão recalcula
-                sozinha.
+                Placar, quem fez o gol e o que a galera cravou — tudo junto. Atualiza sozinho e a pontuação entra na hora.
+                Veja todos em <strong>Encerrados</strong>.
               </p>
             </div>
           </div>

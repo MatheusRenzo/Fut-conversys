@@ -2285,57 +2285,94 @@ def openai_chat(system: str, user: str, max_tokens: int = 140) -> str | None:
     return (choices[0].get("message") or {}).get("content", "").strip() or None
 
 
-def world_cup_ai_insight(db: Session) -> dict[str, Any]:
-    """Insight curto e divertido gerado por IA sobre a votação de campeã.
+def world_cup_next_open_game(db: Session) -> models.WorldCupGame | None:
+    """Próximo jogo ainda aberto pra palpite (não passou o cutoff de 1h)."""
+    now = datetime.utcnow()
+    games = (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.status == "scheduled")
+        .filter(models.WorldCupGame.kickoff_at.isnot(None))
+        .filter(models.WorldCupGame.kickoff_at - WORLD_CUP_BET_CUTOFF > now)
+        .order_by(models.WorldCupGame.kickoff_at.asc())
+        .all()
+    )
+    for game in games:
+        if is_bettable_world_cup_game(game):
+            return game
+    return None
 
-    Determinístico no que importa (contagem de votos), a IA só escreve o texto.
+
+def world_cup_ai_insight(db: Session) -> dict[str, Any]:
+    """Insight da IA sobre o PRÓXIMO jogo aberto, com base nos palpites
+    agregados da galera (anônimo — não revela palpite individual).
+
+    Determinístico no que importa (contagens); a IA só escreve o texto.
     Cacheado por assinatura dos dados + 30 min para gastar pouquíssimo."""
-    picks = db.query(models.WorldCupChampionPick).all()
-    counts: dict[str, int] = {}
-    for pick in picks:
-        team = (pick.team or "").strip()
-        if team:
-            counts[team] = counts.get(team, 0) + 1
-    total = sum(counts.values())
-    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    base = {
-        "available": False,
-        "total_votes": total,
-        "top": [{"team": t, "votes": v} for t, v in ranked[:5]],
-        "text": None,
-    }
-    # Só vale a pena quando há massa de dados
-    if total < 5 or not OPENAI_API_KEY:
+    base: dict[str, Any] = {"available": False, "game_id": None, "matchup": None, "text": None}
+    game = world_cup_next_open_game(db)
+    if not game or not OPENAI_API_KEY:
         return base
 
-    signature = json.dumps(ranked, ensure_ascii=False)
+    preds = list(game.predictions)
+    total = len(preds)
+    base["game_id"] = game.id
+    base["matchup"] = f"{game.home_team} x {game.away_team}"
+    if total < 4:  # precisa de massa pra ser interessante (e não vazar palpite)
+        return base
+
+    home_w = sum(1 for p in preds if (p.home_score or 0) > (p.away_score or 0))
+    away_w = sum(1 for p in preds if (p.away_score or 0) > (p.home_score or 0))
+    draws = sum(1 for p in preds if (p.home_score or 0) == (p.away_score or 0))
+    score_counts: dict[str, int] = {}
+    for p in preds:
+        key = f"{p.home_score or 0}x{p.away_score or 0}"
+        score_counts[key] = score_counts.get(key, 0) + 1
+    top_score = max(score_counts.items(), key=lambda kv: kv[1])
+    scorer_counts: dict[str, int] = {}
+    for p in preds:
+        guess = (p.scorer_guess or "").strip()
+        if guess:
+            scorer_counts[guess] = scorer_counts.get(guess, 0) + 1
+    top_scorer = max(scorer_counts.items(), key=lambda kv: kv[1]) if scorer_counts else None
+
+    signature = json.dumps(
+        {"g": game.id, "n": total, "h": home_w, "a": away_w, "d": draws, "s": top_score, "sc": top_scorer},
+        ensure_ascii=False,
+    )
     cached_raw = get_app_setting(db, "world_cup_ai_insight")
     if cached_raw:
         try:
             cached = json.loads(cached_raw)
-            same = cached.get("signature") == signature
             fresh = False
             if cached.get("at"):
                 ts = datetime.fromisoformat(cached["at"])
                 if ts.tzinfo:
                     ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
                 fresh = datetime.utcnow() - ts < timedelta(minutes=30)
-            if same and fresh and cached.get("text"):
+            if cached.get("signature") == signature and fresh and cached.get("text"):
                 base["available"] = True
                 base["text"] = cached["text"]
                 return base
         except (json.JSONDecodeError, ValueError):
             pass
 
-    resumo = ", ".join(f"{t} {v} voto(s)" for t, v in ranked[:6])
+    home, away = game.home_team, game.away_team
+    partes = [
+        f"{home} x {away}",
+        f"{total} palpites cravados",
+        f"{home_w} apostam no {home}, {away_w} no {away}, {draws} no empate",
+        f"placar mais cravado: {top_score[0]} ({top_score[1]}x)",
+    ]
+    if top_scorer:
+        partes.append(f"artilheiro favorito: {top_scorer[0]} ({top_scorer[1]} palpites)")
     text = openai_chat(
         system=(
-            "Você é um narrador esportivo brasileiro animado de um bolão de Copa entre amigos de trabalho. "
-            "Escreva 1 a 2 frases curtas, empolgantes e leves (pt-BR), com no máximo 240 caracteres, "
-            "comentando a tendência dos palpites de campeã. Pode brincar, mas sem ofender ninguém. "
-            "Não invente números além dos fornecidos. Não use hashtags."
+            "Você é um narrador esportivo brasileiro animado de um bolão de Copa entre amigos. "
+            "Escreva 1 a 2 frases curtas e empolgantes (pt-BR, máx 240 caracteres) resumindo a "
+            "tendência dos palpites pro próximo jogo, ajudando quem não entende muito a sentir o clima. "
+            "Não revele nomes de quem palpitou. Não invente números além dos fornecidos. Sem hashtags."
         ),
-        user=f"Votos de campeã do bolão ({total} no total): {resumo}.",
+        user="Tendência dos palpites: " + "; ".join(partes) + ".",
     )
     if not text:
         return base
