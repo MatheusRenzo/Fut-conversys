@@ -293,7 +293,6 @@ function BolaoRankingPanel({
                     {rankDelta[entry.user.id] > 0 ? `▲ subiu ${rankDelta[entry.user.id]}` : `▼ caiu ${-rankDelta[entry.user.id]}`}
                   </span>
                 ) : null}
-                <span className="bolao-podium2-base">{place}º</span>
               </button>
             );
           })}

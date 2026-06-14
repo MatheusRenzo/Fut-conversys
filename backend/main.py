@@ -893,13 +893,15 @@ def player_traits(user: models.User) -> dict[str, int]:
         total = base + sum(weight * (max(0, count) ** 0.5) for count, weight in contribs)
         return int(min(99, max(40, round(total))))
 
+    # Todo mundo começa no PISO (40 = novato) e sobe só com atividade real.
+    # Cada curtida soma pouco (retorno decrescente); gol/presença pesam mais.
     posts = len(user.posts)
-    churrasco = grow(46, (barbecue, 9), (reaction_totals["churras"], 7), (matches, 5), (reaction_totals["bebedeira"], 3))
-    bebedeira = grow(45, (reaction_totals["bebedeira"], 8), (reaction_totals["churras"], 4), (comments_received, 3), (matches, 3))
-    golaco = grow(44, (post_goals, 15), (reaction_totals["golaco"], 6))  # gol vale muito mais que like
-    resenha = grow(46, (posts, 5), (comments_received, 5), (comments_made, 3), (reaction_totals["resenha"], 6))
-    midia = grow(45, (media_posts, 9), (reaction_totals["midia"], 6), (media_comments, 4))
-    torcida = grow(47, (reaction_totals["torcida"], 6), (reactions_received, 2), (matches, 5))
+    churrasco = grow(40, (barbecue, 7), (reaction_totals["churras"], 4), (matches, 4), (reaction_totals["bebedeira"], 2))
+    bebedeira = grow(40, (reaction_totals["bebedeira"], 5), (reaction_totals["churras"], 3), (comments_received, 2), (matches, 2))
+    golaco = grow(40, (post_goals, 12), (reaction_totals["golaco"], 4))  # gol vale muito mais que like
+    resenha = grow(40, (posts, 4), (comments_received, 4), (comments_made, 2), (reaction_totals["resenha"], 4))
+    midia = grow(40, (media_posts, 7), (reaction_totals["midia"], 4), (media_comments, 3))
+    torcida = grow(40, (reaction_totals["torcida"], 4), (reactions_received, 2), (matches, 4))
     # Overall pondera mais o futebol de verdade (gol, garra, presença) que o social
     overall = round((golaco * 1.3 + torcida * 1.15 + churrasco * 1.1 + resenha + midia + bebedeira * 0.95) / 6.5)
     return {

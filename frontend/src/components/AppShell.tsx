@@ -361,7 +361,6 @@ export function AppShell({
                         <span className="bolao-podium2-name">{entry.user.name.split(" ")[0]}</span>
                         <span className="bolao-podium2-pts">{entry.points}<i>pts</i></span>
                         <span className="bolao-podium2-sub">{entry.exact_scores} exatos · {entry.scorer_hits} ⚽</span>
-                        <span className="bolao-podium2-base">{place}º</span>
                       </Link>
                     );
                   })}
