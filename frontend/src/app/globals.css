@@ -12607,3 +12607,71 @@ img.team-flag {
 .wc-health-score { color: #fff; font-variant-numeric: tabular-nums; font-weight: 950; font-size: 0.82rem; }
 .wc-health-scorers { display: inline-flex; align-items: center; gap: 4px; color: var(--brand-green); font-size: 0.72rem; font-weight: 850; white-space: nowrap; }
 .wc-health-row.warn .wc-health-scorers { color: #ffb02e; }
+
+/* ============================================================
+   Design system v2 — unifica feed/perfil/eventos com o bolão
+   (vidro escuro, glow sutil, raio 16-18px, gradiente azul→ciano)
+   ============================================================ */
+
+/* Ação primária: o mesmo gradiente do bolão em todo o site */
+.btn-primary {
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(110deg, #005aff, #00cfb4);
+  box-shadow: 0 10px 26px rgba(0, 110, 230, 0.32);
+  font-weight: 950;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+.btn-primary:hover { transform: translateY(-1px); filter: brightness(1.06); box-shadow: 0 14px 30px rgba(0, 140, 220, 0.42); }
+
+/* Cards principais com a superfície do bolão */
+.post-card.social-post,
+.event-card,
+.profile-hero,
+.content-card,
+.player-radar-card {
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background:
+    radial-gradient(ellipse 90% 80% at 50% -20%, rgba(0, 207, 180, 0.05), transparent 60%),
+    linear-gradient(165deg, rgba(10, 18, 36, 0.92), rgba(4, 9, 20, 0.95));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 14px 40px rgba(0, 12, 36, 0.45);
+}
+
+/* Cabeçalho do feed com a mesma linguagem do hero do bolão */
+.feed-intro .eyebrow,
+.feed-intro span.eyebrow { color: #ffd75e; }
+.feed-intro h1 {
+  background: linear-gradient(110deg, #ffffff 35%, #9fe8ff 75%, #00cfb4 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+}
+
+/* Bandeja de reações — vidro escuro + raio maior */
+.reaction-tray {
+  border-radius: 18px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background:
+    radial-gradient(ellipse 80% 120% at 0% 0%, rgba(0, 90, 255, 0.16), transparent 60%),
+    linear-gradient(165deg, rgba(12, 20, 38, 0.98), rgba(5, 10, 22, 0.99));
+  backdrop-filter: blur(14px);
+}
+.reaction-tray::after {
+  background: rgba(8, 14, 30, 0.99);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.reaction-option {
+  min-height: 86px;
+  border-radius: 14px;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+.reaction-option:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--reaction-color) 55%, transparent);
+  background: color-mix(in srgb, var(--reaction-color) 12%, rgba(255,255,255,0.04));
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--reaction-color) 28%, transparent);
+}

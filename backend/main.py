@@ -886,13 +886,22 @@ def player_traits(user: models.User) -> dict[str, int]:
     barbecue = user.barbecue_score or 0
     matches = len([rsvp for rsvp in user.rsvps if rsvp.status == "going"])
 
-    churrasco = min(99, 42 + barbecue * 4 + reaction_totals["churras"] * 8 + reaction_totals["bebedeira"] * 2 + matches)
-    bebedeira = min(99, 38 + barbecue * 3 + reaction_totals["bebedeira"] * 9 + reaction_totals["churras"] * 4 + comments_received * 2)
-    golaco = min(99, 42 + post_goals * 9 + reaction_totals["golaco"] * 8)
-    resenha = min(99, 44 + len(user.posts) * 4 + comments_received * 4 + comments_made + reaction_totals["resenha"] * 7)
-    midia = min(99, 40 + media_posts * 12 + media_comments * 5 + reaction_totals["midia"] * 9 + reactions_received * 2)
-    torcida = min(99, 42 + reaction_totals["torcida"] * 8 + reactions_received * 2 + matches)
-    overall = round((churrasco + bebedeira + golaco + resenha + midia + torcida) / 6)
+    # Retornos decrescentes: cada reação/ação dá um empurrão que vai diminuindo,
+    # então ninguém vira "craque" com 1 like — subir exige atividade de verdade,
+    # e conquistas reais (gol aprovado, presença) pesam mais que reação solta.
+    def grow(base: float, *contribs: tuple[int, float]) -> int:
+        total = base + sum(weight * (max(0, count) ** 0.5) for count, weight in contribs)
+        return int(min(99, max(40, round(total))))
+
+    posts = len(user.posts)
+    churrasco = grow(46, (barbecue, 9), (reaction_totals["churras"], 7), (matches, 5), (reaction_totals["bebedeira"], 3))
+    bebedeira = grow(45, (reaction_totals["bebedeira"], 8), (reaction_totals["churras"], 4), (comments_received, 3), (matches, 3))
+    golaco = grow(44, (post_goals, 15), (reaction_totals["golaco"], 6))  # gol vale muito mais que like
+    resenha = grow(46, (posts, 5), (comments_received, 5), (comments_made, 3), (reaction_totals["resenha"], 6))
+    midia = grow(45, (media_posts, 9), (reaction_totals["midia"], 6), (media_comments, 4))
+    torcida = grow(47, (reaction_totals["torcida"], 6), (reactions_received, 2), (matches, 5))
+    # Overall pondera mais o futebol de verdade (gol, garra, presença) que o social
+    overall = round((golaco * 1.3 + torcida * 1.15 + churrasco * 1.1 + resenha + midia + bebedeira * 0.95) / 6.5)
     return {
         "overall": min(99, max(40, overall)),
         "churrasco": max(40, churrasco),

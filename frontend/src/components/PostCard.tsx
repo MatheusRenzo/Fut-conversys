@@ -4,23 +4,23 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
-  Beer,
   Bookmark,
-  Camera,
   Check,
   CircleCheck,
   CircleX,
+  Clapperboard,
   Clock3,
+  Crown,
+  Flame,
   FileImage,
+  Goal,
   Heart,
   ImagePlus,
-  Megaphone,
   MessageCircle,
   MessagesSquare,
   Reply,
   Send,
   ShieldAlert,
-  Trophy,
   Utensils,
   X,
 } from "lucide-react";
@@ -36,12 +36,12 @@ const reactionOptions: Array<{
   icon: typeof Heart;
   accent: string;
 }> = [
-  { type: "torcida", label: "Torcida", description: "apoio da arquibancada", icon: Megaphone, accent: "#61a229" },
-  { type: "golaco", label: "Golaço", description: "jogada ou gol bonito", icon: Trophy, accent: "#00cfb4" },
-  { type: "resenha", label: "Resenha", description: "comentário que rende", icon: MessagesSquare, accent: "#00cfb4" },
-  { type: "midia", label: "Mídia", description: "foto, vídeo ou GIF", icon: Camera, accent: "#005aff" },
-  { type: "churras", label: "Churras", description: "presença no pós-jogo", icon: Utensils, accent: "#61a229" },
-  { type: "bebedeira", label: "Bebedeira", description: "caos bom da firma", icon: Beer, accent: "#e31c79" },
+  { type: "golaco", label: "Golaço", description: "+ Finalização", icon: Goal, accent: "#00cfb4" },
+  { type: "torcida", label: "Raça", description: "+ Raça", icon: Flame, accent: "#ff6b3d" },
+  { type: "resenha", label: "Resenha", description: "+ Visão", icon: MessagesSquare, accent: "#61a2ff" },
+  { type: "midia", label: "Cinema", description: "+ Estilo", icon: Clapperboard, accent: "#005aff" },
+  { type: "churras", label: "Churras", description: "+ Elenco", icon: Utensils, accent: "#61a229" },
+  { type: "bebedeira", label: "Lenda", description: "+ Moral", icon: Crown, accent: "#ffd75e" },
 ];
 
 function reactionStyle(accent: string) {

@@ -3,12 +3,12 @@
 import type { PlayerStats } from "@/types";
 
 const skills: Array<{ key: keyof PlayerStats; label: string }> = [
-  { key: "churrasco", label: "Churrasco" },
-  { key: "bebedeira", label: "Bebedeira" },
-  { key: "golaco_score", label: "Golaço" },
-  { key: "resenha", label: "Resenha" },
-  { key: "midia", label: "Mídia" },
-  { key: "torcida", label: "Torcida" },
+  { key: "golaco_score", label: "Finalização" },
+  { key: "torcida", label: "Raça" },
+  { key: "resenha", label: "Visão" },
+  { key: "midia", label: "Estilo" },
+  { key: "churrasco", label: "Elenco" },
+  { key: "bebedeira", label: "Moral" },
 ];
 
 function clampScore(value: number | undefined) {
