@@ -347,34 +347,37 @@ export function AppShell({
             <p className="rail-card-desc">Placares certos, vencedor e campeão somam pontos.</p>
             {bolaoRanking.length > 0 ? (
               <>
-                <div className="rail-podium">
-                  {[bolaoRanking[1], bolaoRanking[0], bolaoRanking[2]].map((entry, column) =>
-                    entry ? (
-                      <Link
-                        href={`/profile/${entry.user.id}`}
-                        className={["rail-podium-step", column === 1 ? "first" : column === 0 ? "second" : "third"].join(" ")}
-                        key={entry.user.id}
-                      >
-                        <span className="rail-podium-medal">{entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : "🥉"}</span>
-                        <Avatar user={entry.user} size="sm" />
-                        <span className="rail-podium-name">{entry.user.name.split(" ")[0]}</span>
-                        <strong>{entry.points} pts</strong>
-                        <small>{entry.exact_scores} exatos</small>
+                <div className="bolao-podium2">
+                  {[bolaoRanking[1], bolaoRanking[0], bolaoRanking[2]].map((entry, column) => {
+                    const place = column === 1 ? 1 : column === 0 ? 2 : 3;
+                    if (!entry) return <span className="bolao-podium2-step empty" key={`empty-${column}`} />;
+                    return (
+                      <Link href={`/profile/${entry.user.id}`} className={`bolao-podium2-step place-${place}`} key={entry.user.id}>
+                        {place === 1 && <span className="bolao-podium2-crown" aria-hidden="true">👑</span>}
+                        <span className="bolao-podium2-avatar">
+                          <Avatar user={entry.user} size={place === 1 ? "lg" : "md"} />
+                          <span className={`bolao-podium2-medal m-${place}`}>{place}</span>
+                        </span>
+                        <span className="bolao-podium2-name">{entry.user.name.split(" ")[0]}</span>
+                        <span className="bolao-podium2-pts">{entry.points}<i>pts</i></span>
+                        <span className="bolao-podium2-sub">{entry.exact_scores} exatos · {entry.scorer_hits} ⚽</span>
+                        <span className="bolao-podium2-base">{place}º</span>
                       </Link>
-                    ) : (
-                      <span className="rail-podium-step empty" key={`empty-${column}`} />
-                    ),
-                  )}
+                    );
+                  })}
                 </div>
                 {bolaoRanking.length > 3 && (
-                  <div className="mini-list rail-rank-list">
+                  <div className="bolao-ranking-list">
                     {bolaoRanking.slice(3, 10).map((entry) => (
-                      <Link href={`/profile/${entry.user.id}`} className="mini-player" key={entry.user.id}>
-                        <strong className="rail-rank-badge">{entry.rank}º</strong>
+                      <Link href={`/profile/${entry.user.id}`} className="bolao-rank-row clickable" key={entry.user.id}>
+                        <span className="bolao-rank-pos"><strong>{entry.rank}º</strong></span>
                         <Avatar user={entry.user} size="sm" />
-                        <span>{entry.user.name}</span>
-                        <small>{entry.exact_scores} ex.</small>
-                        <strong>{entry.points} pts</strong>
+                        <span className="bolao-rank-main">
+                          <span className="bolao-rank-name"><span className="bolao-rank-fullname">{entry.user.name}</span></span>
+                          <small>{entry.exact_scores} exatos · {entry.scorer_hits} artilheiros</small>
+                        </span>
+                        <b>{entry.points} <i>pts</i></b>
+                        <ChevronRight className="bolao-rank-chevron" size={15} />
                       </Link>
                     ))}
                   </div>
