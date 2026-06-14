@@ -517,7 +517,18 @@ function BolaoPersonModal({
   );
 }
 
-type ScorerPlayer = { id: number; name: string; team: string; position?: string | null; club?: string | null };
+type ScorerPlayer = { id: number; name: string; team: string; number?: number | null; position?: string | null; club?: string | null };
+
+// Atacantes primeiro (quem mais marca), depois meio, defesa e goleiro
+const POSITION_ORDER: Record<string, number> = { FW: 0, MF: 1, DF: 2, GK: 3 };
+function positionRank(pos?: string | null) {
+  const key = (pos || "").toUpperCase().slice(0, 2);
+  return POSITION_ORDER[key] ?? 1.5;
+}
+function positionLabel(pos?: string | null) {
+  const key = (pos || "").toUpperCase().slice(0, 2);
+  return { FW: "Atacante", MF: "Meia", DF: "Defesa", GK: "Goleiro" }[key] ?? (pos || "");
+}
 
 function ScorerPicker({
   game,
@@ -547,9 +558,11 @@ function ScorerPicker({
 
   const normalizedQuery = query.trim().toLowerCase();
   const matches = (player: ScorerPlayer) => !normalizedQuery || player.name.toLowerCase().includes(normalizedQuery);
+  const byPosition = (a: ScorerPlayer, b: ScorerPlayer) =>
+    positionRank(a.position) - positionRank(b.position) || (a.number ?? 99) - (b.number ?? 99);
   const groups = [
-    { team: game.home_team, players: players.filter((player) => player.team === game.home_team && matches(player)) },
-    { team: game.away_team, players: players.filter((player) => player.team === game.away_team && matches(player)) },
+    { team: game.home_team, players: players.filter((player) => player.team === game.home_team && matches(player)).sort(byPosition) },
+    { team: game.away_team, players: players.filter((player) => player.team === game.away_team && matches(player)).sort(byPosition) },
   ].filter((group) => group.players.length > 0);
 
   const pick = (name: string) => {
@@ -611,10 +624,14 @@ function ScorerPicker({
                       onClick={() => pick(player.name)}
                       type="button"
                     >
-                      <span className="wc-scorer-option-name">{player.name}</span>
-                      <small>
-                        {[player.position, player.club].filter(Boolean).join(" · ")}
-                      </small>
+                      <span className={`wc-scorer-num pos-${(player.position || "").toUpperCase().slice(0, 2) || "NA"}`}>
+                        {player.number ?? "–"}
+                      </span>
+                      <span className="wc-scorer-option-body">
+                        <span className="wc-scorer-option-name">{player.name}</span>
+                        <small>{[positionLabel(player.position), player.club].filter(Boolean).join(" · ")}</small>
+                      </span>
+                      {value === player.name && <CheckCircle2 className="wc-scorer-check" size={16} />}
                     </button>
                   ))}
                 </div>
