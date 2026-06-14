@@ -260,34 +260,44 @@ function BolaoRankingPanel({
       </div>
 
       {podium.length > 0 && (
-        <div className={compact ? "bolao-podium compact" : "bolao-podium"}>
-          {[podium[1], podium[0], podium[2]].map((entry, column) =>
-            entry ? (
+        <div className="bolao-podium2">
+          {[podium[1], podium[0], podium[2]].map((entry, column) => {
+            const place = column === 1 ? 1 : column === 0 ? 2 : 3;
+            if (!entry) return <span className="bolao-podium2-step empty" key={`empty-${column}`} />;
+            return (
               <button
-                className={["bolao-podium-step", column === 1 ? "first" : column === 0 ? "second" : "third"].join(" ")}
+                className={`bolao-podium2-step place-${place}`}
                 key={entry.user.id}
                 onClick={() => onSelectEntry?.(entry)}
                 type="button"
               >
-                <span className="bolao-podium-medal">{column === 1 ? "🥇" : column === 0 ? "🥈" : "🥉"}</span>
-                <Avatar user={entry.user} size={column === 1 ? "md" : "sm"} />
-                <span className="bolao-podium-name">{entry.user.name.split(" ")[0]}</span>
-                <strong>
-                  {rankingValue(entry, rankingTab)} {rankingUnit(rankingTab)}
-                </strong>
-                <small>
+                {place === 1 && <span className="bolao-podium2-crown" aria-hidden="true">👑</span>}
+                <span className="bolao-podium2-avatar">
+                  <Avatar user={entry.user} size={place === 1 ? "lg" : "md"} />
+                  <span className={`bolao-podium2-medal m-${place}`}>{place}</span>
+                </span>
+                <span className="bolao-podium2-name">{entry.user.name.split(" ")[0]}</span>
+                <span className="bolao-podium2-pts">
+                  {rankingValue(entry, rankingTab)}
+                  <i>{rankingUnit(rankingTab)}</i>
+                </span>
+                <span className="bolao-podium2-sub">
                   {entry.exact_scores} exatos · {entry.scorer_hits} ⚽
-                </small>
-                {entry.champion_team && (
-                  <span className="bolao-pick-chip" title={`Palpite de campeã: ${teamLabel(entry.champion_team)}`}>
-                    <TeamFlag team={entry.champion_team} />
+                  {entry.champion_team && (
+                    <span className="bolao-pick-chip" title={`Campeã: ${teamLabel(entry.champion_team)}`}>
+                      <TeamFlag team={entry.champion_team} />
+                    </span>
+                  )}
+                </span>
+                {rankingTab === "geral" && rankDelta?.[entry.user.id] ? (
+                  <span className={`bolao-podium2-move ${rankDelta[entry.user.id] > 0 ? "up" : "down"}`}>
+                    {rankDelta[entry.user.id] > 0 ? `▲ subiu ${rankDelta[entry.user.id]}` : `▼ caiu ${-rankDelta[entry.user.id]}`}
                   </span>
-                )}
+                ) : null}
+                <span className="bolao-podium2-base">{place}º</span>
               </button>
-            ) : (
-              <span className="bolao-podium-step empty" key={`empty-${column}`} />
-            ),
-          )}
+            );
+          })}
         </div>
       )}
 
@@ -641,6 +651,7 @@ export default function BolaoPage() {
   const [expandedGameId, setExpandedGameId] = useState<number | null>(null);
   const [editingGameIds, setEditingGameIds] = useState<Record<number, boolean>>({});
   const [syncStatus, setSyncStatus] = useState<WorldCupSyncStatus | null>(null);
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [syncStatusError, setSyncStatusError] = useState("");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("open");
   const [stageFilter, setStageFilter] = useState("all");
@@ -680,6 +691,11 @@ export default function BolaoPage() {
       api
         .worldCupPlayers()
         .then((response) => setSquads(response.players))
+        .catch(() => null);
+
+      api
+        .worldCupInsight()
+        .then((res) => setAiInsight(res.available ? res.text ?? null : null))
         .catch(() => null);
     }
 
@@ -1263,6 +1279,13 @@ export default function BolaoPage() {
             🏆
           </span>
         </div>
+
+        {aiInsight && (
+          <div className="wc-ai-insight">
+            <span className="wc-ai-insight-tag"><Sparkles size={13} /> Resenha da IA</span>
+            <p>{aiInsight}</p>
+          </div>
+        )}
 
         {champion?.team ? (
           <div className="wc-champion-result">

@@ -72,6 +72,9 @@ FOOTBALL_DATA_MATCHES_URL = os.getenv(
 # temporada 2026 nos endpoints normais, mas o fixtures?live=all entrega os
 # jogos em andamento com eventos de gol — usamos só durante as partidas,
 # com orçamento diário para não estourar as 100 requisições/dia do plano.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_CHAT_URL = os.getenv("OPENAI_CHAT_URL", "https://api.openai.com/v1/chat/completions")
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "").strip()
 API_FOOTBALL_LIVE_URL = os.getenv("API_FOOTBALL_LIVE_URL", "https://v3.football.api-sports.io/fixtures?live=all")
 API_FOOTBALL_FIXTURE_URL = os.getenv("API_FOOTBALL_FIXTURE_URL", "https://v3.football.api-sports.io/fixtures")
@@ -1798,13 +1801,71 @@ def extract_api_football_scorers(fixture: dict[str, Any]) -> list[str]:
         if (event.get("type") or "") != "Goal":
             continue
         detail = (event.get("detail") or "").lower()
-        if "missed" in detail:  # pênalti perdido não é gol
+        # Pênalti perdido não é gol; gol contra não vale como artilheiro
+        # (ninguém aposta num jogador pra fazer gol contra)
+        if "missed" in detail or "own" in detail:
             continue
         player = (((event.get("player") or {}).get("name")) or "").strip()
-        # Gol contra conta como gol do time adversário; mantemos o nome marcado
         if player and player not in names:
             names.append(player)
     return names
+
+
+def discover_api_fixture_ids(db: Session, status: dict[str, Any]) -> None:
+    """Descobre o fixture_id de jogos encerrados que não o têm, via
+    fixtures?date=. Permite finalizar goleadores mesmo de jogos que já tinham
+    acabado quando o sistema subiu (cold-start)."""
+    if not API_FOOTBALL_KEY:
+        return
+    candidates = (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.api_fixture_id.is_(None))
+        .filter(models.WorldCupGame.kickoff_at.isnot(None))
+        .filter(models.WorldCupGame.status.in_(("finished", "live")))
+        .all()
+    )
+    # Só vale gastar chamada com jogo INCOMPLETO (os completos já têm tudo) e
+    # recente (o plano grátis só libera data em ~hoje±1)
+    cutoff = datetime.utcnow() - timedelta(days=2)
+    missing = [
+        g for g in candidates
+        if g.kickoff_at >= cutoff and (g.status == "live" or not world_cup_scorers_complete(g))
+    ]
+    if not missing:
+        return
+    dates = sorted({g.kickoff_at.strftime("%Y-%m-%d") for g in missing})
+    for date in dates[:3]:  # no máx 3 chamadas por ciclo (orçamento)
+        rem = status.get("daily_remaining")
+        if rem is not None and rem <= API_FOOTBALL_DAILY_RESERVE:
+            break
+        payload = api_football_get(f"{API_FOOTBALL_FIXTURE_URL}?date={date}", db, status)
+        if payload is None:
+            status["error"] = None  # data fora da janela do plano: ignora e tenta a próxima
+            continue
+        by_teams: dict[tuple[str, str], int] = {}
+        for item in payload.get("response", []):
+            if ((item.get("league") or {}).get("id")) != API_FOOTBALL_LEAGUE_ID:
+                continue
+            teams = item.get("teams") or {}
+            home = normalize_scorer_name(normalize_world_cup_team(((teams.get("home") or {}).get("name")) or ""))
+            away = normalize_scorer_name(normalize_world_cup_team(((teams.get("away") or {}).get("name")) or ""))
+            fid = ((item.get("fixture") or {}).get("id"))
+            if home and away and fid:
+                by_teams[(home, away)] = int(fid)
+        for game in missing:
+            if game.api_fixture_id or not game.kickoff_at:
+                continue
+            if game.kickoff_at.strftime("%Y-%m-%d") != date:
+                continue
+            fid = by_teams.get(
+                (
+                    normalize_scorer_name(normalize_world_cup_team(game.home_team)),
+                    normalize_scorer_name(normalize_world_cup_team(game.away_team)),
+                )
+            )
+            if fid:
+                game.api_fixture_id = fid
+                game.scorers_final = False  # força refinalização com a fonte definitiva
 
 
 def api_football_get(url: str, db: Session, status: dict[str, Any]) -> dict[str, Any] | None:
@@ -1878,23 +1939,29 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         .filter(models.WorldCupGame.status.in_(("scheduled", "live")))
         .all()
     )
-    # Jogos recém-encerrados ainda sem goleadores definitivos da API
-    pending_final = (
+    # Jogos encerrados sem goleadores definitivos (com ou sem id ainda)
+    incomplete_finished = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.status == "finished")
-        .filter(models.WorldCupGame.api_fixture_id.isnot(None))
         .filter(or_(models.WorldCupGame.scorers_final.is_(False), models.WorldCupGame.scorers_final.is_(None)))
         .all()
     )
-    if not live_window and not pending_final:
+    if not live_window and not incomplete_finished:
         status["ok"] = True
         status["skipped"] = "sem jogos em andamento"
         return status
 
-    remaining = status["daily_remaining"]
-    if remaining is not None and remaining <= API_FOOTBALL_DAILY_RESERVE:
+    remaining_guard = status["daily_remaining"]
+    if remaining_guard is not None and remaining_guard <= API_FOOTBALL_DAILY_RESERVE:
         status["skipped"] = "folga diária de requisições no limite de reserva"
         return status
+
+    # Descobre fixture_id dos encerrados que ainda não têm (cold-start)
+    discover_api_fixture_ids(db, status)
+    db.flush()
+    # Agora (re)coleta os pendentes que têm id
+    pending_final = [g for g in incomplete_finished if g.api_fixture_id]
+    status["ok"] = True
 
     if live_window:
         payload = api_football_get(API_FOOTBALL_LIVE_URL, db, status)
@@ -1934,8 +2001,6 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             if changed:
                 game.scorers = merged
                 status["scorers_updated"] += 1
-    else:
-        status["ok"] = True
 
     # Fixa goleadores definitivos dos jogos encerrados (1 chamada cada, com folga)
     for game in pending_final:
@@ -1961,9 +2026,24 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             game.scorers = merged
             status["scorers_updated"] += 1
         status["finalized"] += 1
-        game.scorers_final = True
+        # Só considera "fechado" quando os goleadores batem com o total de gols —
+        # senão segue tentando no próximo ciclo (auto-heal de dado incompleto)
+        if world_cup_scorers_complete(game):
+            game.scorers_final = True
 
     return status
+
+
+def world_cup_scorers_complete(game: models.WorldCupGame) -> bool:
+    """Os goleadores capturados cobrem todos os gols do jogo?
+
+    Tolera gol contra (que pode não ter goleador nomeado): exige pelo menos
+    (total de gols - 1) nomes, e nunca falha em 0x0."""
+    total = (game.home_score or 0) + (game.away_score or 0)
+    if total == 0:
+        return True
+    names = game_scorer_names(game)
+    return len(names) >= max(1, total - 1)
 
 
 def apply_world_cup_sync(db: Session) -> tuple[int, int]:
@@ -2171,6 +2251,103 @@ def world_cup_sync_loop() -> None:
                 session.close()
         except Exception as exc:
             print(f"[world-cup-sync] squads failed: {exc}", flush=True)
+
+
+def openai_chat(system: str, user: str, max_tokens: int = 140) -> str | None:
+    # Chamada enxuta à OpenAI (modelo leve) via REST; sem dependência extra.
+    if not OPENAI_API_KEY:
+        return None
+    body = json.dumps(
+        {
+            "model": OPENAI_MODEL,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "max_tokens": max_tokens,
+            "temperature": 0.7,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        OPENAI_CHAT_URL,
+        data=body,
+        headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(read_capped(response).decode("utf-8"))
+    except Exception as exc:
+        print(f"[openai] erro: {exc}", flush=True)
+        return None
+    choices = payload.get("choices") or []
+    if not choices:
+        return None
+    return (choices[0].get("message") or {}).get("content", "").strip() or None
+
+
+def world_cup_ai_insight(db: Session) -> dict[str, Any]:
+    """Insight curto e divertido gerado por IA sobre a votação de campeã.
+
+    Determinístico no que importa (contagem de votos), a IA só escreve o texto.
+    Cacheado por assinatura dos dados + 30 min para gastar pouquíssimo."""
+    picks = db.query(models.WorldCupChampionPick).all()
+    counts: dict[str, int] = {}
+    for pick in picks:
+        team = (pick.team or "").strip()
+        if team:
+            counts[team] = counts.get(team, 0) + 1
+    total = sum(counts.values())
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    base = {
+        "available": False,
+        "total_votes": total,
+        "top": [{"team": t, "votes": v} for t, v in ranked[:5]],
+        "text": None,
+    }
+    # Só vale a pena quando há massa de dados
+    if total < 5 or not OPENAI_API_KEY:
+        return base
+
+    signature = json.dumps(ranked, ensure_ascii=False)
+    cached_raw = get_app_setting(db, "world_cup_ai_insight")
+    if cached_raw:
+        try:
+            cached = json.loads(cached_raw)
+            same = cached.get("signature") == signature
+            fresh = False
+            if cached.get("at"):
+                ts = datetime.fromisoformat(cached["at"])
+                if ts.tzinfo:
+                    ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+                fresh = datetime.utcnow() - ts < timedelta(minutes=30)
+            if same and fresh and cached.get("text"):
+                base["available"] = True
+                base["text"] = cached["text"]
+                return base
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    resumo = ", ".join(f"{t} {v} voto(s)" for t, v in ranked[:6])
+    text = openai_chat(
+        system=(
+            "Você é um narrador esportivo brasileiro animado de um bolão de Copa entre amigos de trabalho. "
+            "Escreva 1 a 2 frases curtas, empolgantes e leves (pt-BR), com no máximo 240 caracteres, "
+            "comentando a tendência dos palpites de campeã. Pode brincar, mas sem ofender ninguém. "
+            "Não invente números além dos fornecidos. Não use hashtags."
+        ),
+        user=f"Votos de campeã do bolão ({total} no total): {resumo}.",
+    )
+    if not text:
+        return base
+    set_app_setting(
+        db,
+        "world_cup_ai_insight",
+        json.dumps({"signature": signature, "at": datetime.now(timezone.utc).isoformat(), "text": text}, ensure_ascii=False),
+    )
+    db.commit()
+    base["available"] = True
+    base["text"] = text
+    return base
 
 
 def world_cup_champion_lock_at(db: Session) -> datetime | None:
@@ -2866,6 +3043,14 @@ def list_world_cup_games(
 ):
     games = db.query(models.WorldCupGame).order_by(models.WorldCupGame.kickoff_at.asc()).all()
     return {"games": [world_cup_game_response(game, user) for game in games]}
+
+
+@app.get("/api/world-cup/insight")
+def world_cup_insight(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    return world_cup_ai_insight(db)
 
 
 @app.post("/api/world-cup/games")
