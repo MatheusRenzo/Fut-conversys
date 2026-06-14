@@ -2094,8 +2094,18 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     pending_final += [g for g in stuck_live if g.id not in pending_ids]
     status["ok"] = True
 
-    # live=all (goleadores ao vivo) só de tempos em tempos — o placar já vem da
-    # football-data a cada ciclo, então não precisamos gastar cota com frequência
+    # live=all (goleadores ao vivo) com cadência ADAPTATIVA ao orçamento do dia:
+    # cota sobrando → atualiza rápido (bem ao vivo); cota apertando → espaça pra
+    # nunca estourar as 100/dia. O placar já vem da football-data a cada ciclo.
+    rem_now = status["daily_remaining"]
+    if rem_now is None or rem_now > 60:
+        live_gap = 180  # 3 min — bem ao vivo
+    elif rem_now > 25:
+        live_gap = 360  # 6 min
+    elif rem_now > API_FOOTBALL_DAILY_RESERVE:
+        live_gap = 900  # 15 min — conservando
+    else:
+        live_gap = 10 ** 9  # reserva: não chama live=all (só finaliza no fim)
     last_live_raw = get_app_setting(db, "api_football_last_live_at")
     live_gap_ok = True
     if last_live_raw:
@@ -2103,7 +2113,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             last_live = datetime.fromisoformat(last_live_raw)
             if last_live.tzinfo:
                 last_live = last_live.astimezone(timezone.utc).replace(tzinfo=None)
-            live_gap_ok = (datetime.utcnow() - last_live).total_seconds() >= API_FOOTBALL_LIVE_GAP
+            live_gap_ok = (datetime.utcnow() - last_live).total_seconds() >= live_gap
         except ValueError:
             live_gap_ok = True
 
