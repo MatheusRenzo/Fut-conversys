@@ -2274,7 +2274,10 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             gap_ok = (now - t).total_seconds() >= live_gap
         except ValueError:
             gap_ok = True
-    if live_now_games and gap_ok and api_football_pick_key(db) is not None:
+    # O live só roda se ainda houver cota ACIMA da reserva de fim — assim o
+    # finalize (que roda primeiro, com prioridade) sempre tem call garantida.
+    live_budget_ok = api_football_total_remaining(db) > finalize_reserve
+    if live_now_games and gap_ok and live_budget_ok and api_football_pick_key(db) is not None:
         payload = call(API_FOOTBALL_LIVE_URL)
         if payload:
             # só conta o gap a partir de uma chamada bem-sucedida (se foi
