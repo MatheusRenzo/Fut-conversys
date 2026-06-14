@@ -168,6 +168,11 @@ class WorldCupGame(Base):
     away_score = Column(Integer, nullable=True)
     scorers = Column(Text, nullable=True)
     source = Column(String, nullable=True)
+    # id do confronto na API-Football (descoberto ao vivo) — permite buscar os
+    # goleadores definitivos por id quando o jogo encerra
+    api_fixture_id = Column(Integer, nullable=True)
+    # marca quando os goleadores já foram fixados pela fonte definitiva
+    scorers_final = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     predictions = relationship("WorldCupPrediction", back_populates="game", lazy="select")

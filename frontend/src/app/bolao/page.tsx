@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -183,7 +183,14 @@ type BolaoRankingPanelProps = {
   compact?: boolean;
   onShowAll?: () => void;
   onSelectEntry?: (entry: WorldCupLeaderboardEntry) => void;
+  rankDelta?: Record<number, number>;
 };
+
+function MoveBadge({ delta }: { delta?: number }) {
+  if (!delta) return <span className="bolao-move flat" aria-hidden="true" />;
+  if (delta > 0) return <span className="bolao-move up" title={`Subiu ${delta}`}>▲{delta}</span>;
+  return <span className="bolao-move down" title={`Caiu ${-delta}`}>▼{-delta}</span>;
+}
 
 function BolaoRankingPanel({
   board,
@@ -195,6 +202,7 @@ function BolaoRankingPanel({
   compact = false,
   onShowAll,
   onSelectEntry,
+  rankDelta,
 }: BolaoRankingPanelProps) {
   const entries = limit ? sortedRanking.slice(0, limit) : sortedRanking;
   const podium = entries.slice(0, 3);
@@ -203,41 +211,37 @@ function BolaoRankingPanel({
   return (
     <>
       {!compact && (
-        <div className="bolao-rules-guide">
-          <span className="eyebrow">Como funciona a pontuação</span>
-          <ul>
-            <li>
-              <Target size={16} />
-              <div>
-                <strong>Placar exato — {board?.rules.exact_score ?? 3} pts</strong>
-                <span>Cravou o placar certinho. Palpitou 2x1 e o jogo terminou 2x1.</span>
-              </div>
-            </li>
-            <li>
-              <CheckCircle2 size={16} />
-              <div>
-                <strong>Vencedor certo — {board?.rules.correct_outcome ?? 1} pt</strong>
-                <span>Acertou quem vence (ou o empate), mas errou o placar. Não soma com o placar exato.</span>
-              </div>
-            </li>
-            <li>
-              <Goal size={16} />
-              <div>
-                <strong>Artilheiro — {board?.rules.scorer_bonus ?? 1} pt</strong>
-                <span>O jogador que você escolheu marcou gol no jogo. Vale sozinho ou somado aos pontos acima.</span>
-              </div>
-            </li>
-            <li>
-              <Crown size={16} />
-              <div>
-                <strong>Campeã da Copa — {board?.rules.champion ?? 10} pts</strong>
-                <span>Palpite único de quem levanta a taça. Aberto até 1 hora antes da estreia do Brasil.</span>
-              </div>
-            </li>
-          </ul>
-          <p className="bolao-rules-note">
-            Num jogo dá pra somar até <strong>{maxPoints(board?.rules)} pts</strong> (placar exato + artilheiro).
-            Palpites fecham 1 hora antes da bola rolar e a pontuação entra automaticamente quando o jogo termina.
+        <div className="bolao-rules2">
+          <span className="eyebrow">Como pontuar</span>
+          <div className="bolao-rules2-grid">
+            <div className="bolao-rule-card exact">
+              <span className="bolao-rule-pts">{board?.rules.exact_score ?? 3}<small>pts</small></span>
+              <span className="bolao-rule-ico"><Target size={18} /></span>
+              <strong>Placar exato</strong>
+              <span>Cravou o resultado certinho (2x1 e terminou 2x1).</span>
+            </div>
+            <div className="bolao-rule-card outcome">
+              <span className="bolao-rule-pts">{board?.rules.correct_outcome ?? 1}<small>pt</small></span>
+              <span className="bolao-rule-ico"><CheckCircle2 size={18} /></span>
+              <strong>Vencedor certo</strong>
+              <span>Acertou quem ganha (ou empate), errou o placar.</span>
+            </div>
+            <div className="bolao-rule-card scorer">
+              <span className="bolao-rule-pts">+{board?.rules.scorer_bonus ?? 1}<small>pt</small></span>
+              <span className="bolao-rule-ico"><Goal size={18} /></span>
+              <strong>Artilheiro</strong>
+              <span>Seu jogador marcou. Soma com os pontos acima.</span>
+            </div>
+            <div className="bolao-rule-card champion">
+              <span className="bolao-rule-pts">{board?.rules.champion ?? 10}<small>pts</small></span>
+              <span className="bolao-rule-ico"><Crown size={18} /></span>
+              <strong>Campeã da Copa</strong>
+              <span>Palpite único de quem leva a taça.</span>
+            </div>
+          </div>
+          <p className="bolao-rules2-note">
+            Até <strong>{maxPoints(board?.rules)} pts</strong> por jogo (exato + artilheiro). Palpites fecham 1h antes da
+            bola rolar — a pontuação entra sozinha quando o jogo acaba.
           </p>
         </div>
       )}
@@ -294,11 +298,14 @@ function BolaoRankingPanel({
       <div className="bolao-ranking-list">
         {listEntries.map((entry, index) => (
           <button className="bolao-rank-row clickable" key={entry.user.id} onClick={() => onSelectEntry?.(entry)} type="button">
-            <strong>{rankingTab === "geral" ? entry.rank : index + podium.length + 1}</strong>
+            <span className="bolao-rank-pos">
+              <strong>{rankingTab === "geral" ? entry.rank : index + podium.length + 1}º</strong>
+              {rankingTab === "geral" && <MoveBadge delta={rankDelta?.[entry.user.id]} />}
+            </span>
             <Avatar user={entry.user} size="sm" />
             <span className="bolao-rank-main">
               <span className="bolao-rank-name">
-                {entry.user.name}
+                <span className="bolao-rank-fullname">{entry.user.name}</span>
                 {entry.champion_team && (
                   <span className="bolao-pick-chip" title={`Palpite de campeã: ${teamLabel(entry.champion_team)}`}>
                     <TeamFlag team={entry.champion_team} />
@@ -310,7 +317,7 @@ function BolaoRankingPanel({
               </small>
             </span>
             <b>
-              {rankingValue(entry, rankingTab)} {rankingUnit(rankingTab)}
+              {rankingValue(entry, rankingTab)} <i>{rankingUnit(rankingTab)}</i>
             </b>
             <ChevronRight className="bolao-rank-chevron" size={15} />
           </button>
@@ -387,11 +394,14 @@ function BolaoPersonModal({
   );
 
   return (
-    <div className="event-modal-backdrop" onClick={onClose}>
+    <div className="event-modal-backdrop wc-person-backdrop" onClick={onClose}>
       <div className="event-modal glass-panel wc-modal wc-person-modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-head">
           <div className="wc-person-head">
-            <Avatar user={entry.user} />
+            <span className={`wc-person-rank rank-${entry.rank <= 3 ? entry.rank : "x"}`}>
+              {entry.rank <= 3 ? ["🥇", "🥈", "🥉"][entry.rank - 1] : `${entry.rank}º`}
+            </span>
+            <Avatar user={entry.user} size="lg" />
             <div>
               <span className="eyebrow">{entry.rank}º no bolão</span>
               <h2>{entry.user.name}</h2>
@@ -696,16 +706,34 @@ export default function BolaoPage() {
     };
   }, [adminModalOpen, isAdminProfile]);
 
+  const hasLiveGame = useMemo(
+    () => (board?.games ?? []).some((game) => game.status === "live"),
+    [board?.games],
+  );
+
+  // Quem cravou campeã vs quem não votou — voadores primeiro, ordenados por nome
+  const championVoters = useMemo(() => {
+    const rows = (board?.leaderboard ?? []).map((entry) => ({
+      user: entry.user,
+      team: entry.champion_team ?? null,
+    }));
+    return rows.sort((a, b) => {
+      if (Boolean(a.team) !== Boolean(b.team)) return a.team ? -1 : 1;
+      return a.user.name.localeCompare(b.user.name, "pt-BR");
+    });
+  }, [board?.leaderboard]);
+
   useEffect(() => {
     const clock = window.setInterval(() => setCurrentTime(Date.now()), 1000);
+    // Atualiza o placar bem mais rápido quando tem jogo rolando (sensação ao vivo)
     const poller = window.setInterval(() => {
       refreshBoard();
-    }, 60_000);
+    }, hasLiveGame ? 15_000 : 60_000);
     return () => {
       window.clearInterval(clock);
       window.clearInterval(poller);
     };
-  }, [refreshBoard]);
+  }, [refreshBoard, hasLiveGame]);
 
   const games = useMemo(() => (board?.games ?? []).filter((game) => game.bettable !== false), [board?.games]);
   const isAdmin = Boolean(profile?.is_admin);
@@ -837,6 +865,31 @@ export default function BolaoPage() {
     if (rankingTab === "geral") return entries;
     return entries.sort((a, b) => rankingValue(b, rankingTab) - rankingValue(a, rankingTab));
   }, [board?.leaderboard, rankingTab]);
+
+  // Movimentação: compara a posição atual de cada um com a anterior (delta > 0 subiu)
+  const prevRanksRef = useRef<Record<number, number>>({});
+  const [rankDelta, setRankDelta] = useState<Record<number, number>>({});
+  useEffect(() => {
+    const current: Record<number, number> = {};
+    (board?.leaderboard ?? []).forEach((entry) => {
+      current[entry.user.id] = entry.rank;
+    });
+    const prev = prevRanksRef.current;
+    if (Object.keys(prev).length > 0) {
+      const delta: Record<number, number> = {};
+      for (const [id, rank] of Object.entries(current)) {
+        const before = prev[Number(id)];
+        if (before && before !== rank) delta[Number(id)] = before - rank;
+      }
+      if (Object.keys(delta).length > 0) {
+        setRankDelta(delta);
+        const timer = window.setTimeout(() => setRankDelta({}), 8000);
+        prevRanksRef.current = current;
+        return () => window.clearTimeout(timer);
+      }
+    }
+    prevRanksRef.current = current;
+  }, [board?.leaderboard]);
 
   const gamePlayers = useCallback(
     (game: WorldCupGame) => {
@@ -1164,6 +1217,7 @@ export default function BolaoPage() {
           onSelectEntry={setSelectedEntry}
           onShowAll={() => setRankingModalOpen(true)}
           onTabChange={setRankingTab}
+          rankDelta={rankDelta}
           rankingTab={rankingTab}
           sortedRanking={sortedRanking}
         />
@@ -1273,13 +1327,32 @@ export default function BolaoPage() {
           </>
         )}
 
-        {champion?.locked && !champion.team && champion.picks.length > 0 && (
-          <div className="wc-champion-picks">
-            {champion.picks.map((pick) => (
-              <span className="wc-champion-chip" key={pick.id} title={pick.user.name}>
-                <TeamFlag team={pick.team} /> {pick.user.name.split(" ")[0]}
+        {champion?.locked && championVoters.length > 0 && (
+          <div className="wc-champ-voters">
+            <div className="wc-champ-voters-head">
+              <span className="eyebrow">Quem cravou a campeã</span>
+              <span className="wc-champ-voters-count">
+                {championVoters.filter((v) => v.team).length}/{championVoters.length} votaram
               </span>
-            ))}
+            </div>
+            <div className="wc-champ-voters-grid">
+              {championVoters.map((voter) => (
+                <div
+                  className={voter.team ? "wc-champ-voter voted" : "wc-champ-voter missed"}
+                  key={voter.user.id}
+                  title={voter.team ? `${voter.user.name} → ${teamLabel(voter.team)}` : `${voter.user.name} não votou`}
+                >
+                  <span className="wc-champ-voter-avatar">
+                    <Avatar user={voter.user} size="sm" />
+                    <span className={voter.team ? "wc-champ-voter-flag" : "wc-champ-voter-x"}>
+                      {voter.team ? <TeamFlag team={voter.team} /> : <X size={12} strokeWidth={3.2} />}
+                    </span>
+                  </span>
+                  <strong>{voter.user.name.split(" ")[0]}</strong>
+                  <small>{voter.team ? teamLabel(voter.team) : "não votou"}</small>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </section>
@@ -1837,6 +1910,7 @@ export default function BolaoPage() {
               highlights={highlights}
               onSelectEntry={setSelectedEntry}
               onTabChange={setRankingTab}
+              rankDelta={rankDelta}
               rankingTab={rankingTab}
               sortedRanking={sortedRanking}
             />
@@ -1921,6 +1995,21 @@ export default function BolaoPage() {
             {syncStatusError && <p className="bolao-feedback error">{syncStatusError}</p>}
             {syncStatus ? (
               <div className="wc-sync-status">
+                <div className="wc-sync-overview">
+                  <span className={syncStatus.live_now ? "wc-sync-cadence live" : "wc-sync-cadence"}>
+                    {syncStatus.live_now ? <span className="wc-live-dot" /> : <RefreshCcw size={13} />}
+                    {syncStatus.live_now ? "AO VIVO" : "Ocioso"} · atualiza a cada{" "}
+                    {syncStatus.live_now
+                      ? `${syncStatus.live_interval_seconds ?? 75}s`
+                      : `${Math.round((syncStatus.idle_interval_seconds ?? 600) / 60)} min`}
+                  </span>
+                  {syncStatus.sources.api_football_configured && (
+                    <span className="wc-sync-budget">
+                      <Zap size={12} /> API-Football: {syncStatus.sources.api_football_daily_remaining ?? "?"}/
+                      {syncStatus.sources.api_football_daily_limit ?? 100} req restantes hoje
+                    </span>
+                  )}
+                </div>
                 <div className={syncStatus.games_sync?.ok === false ? "wc-sync-card error" : "wc-sync-card ok"}>
                   <span className="wc-sync-card-head">
                     <RefreshCcw size={14} />
@@ -2074,6 +2163,25 @@ export default function BolaoPage() {
                     </small>
                   )}
                 </div>
+
+                {(syncStatus.runs?.length ?? 0) > 0 && (
+                  <div className="wc-sync-runs">
+                    <span className="wc-sync-runs-title">Últimas execuções</span>
+                    <div className="wc-sync-runs-list">
+                      {(syncStatus.runs ?? []).slice(0, 8).map((run, i) => (
+                        <div className={run.ok === false ? "wc-sync-run err" : "wc-sync-run"} key={i}>
+                          <span className={run.ok === false ? "wc-sync-run-dot err" : "wc-sync-run-dot ok"} />
+                          <span className="wc-sync-run-time">{run.at ? formatEventDate(run.at) : "—"}</span>
+                          <span className="wc-sync-run-meta">
+                            {run.ok === false
+                              ? (run.error ?? "falhou").slice(0, 40)
+                              : `${run.live_games ?? 0} ao vivo · ${run.scorers_updated ?? 0} gols · ${run.finalized ?? 0} fechados · ${run.api_calls ?? 0} req`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               !syncStatusError && <p className="bolao-sync-info">Carregando status das fontes...</p>

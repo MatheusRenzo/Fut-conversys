@@ -19,7 +19,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import inspect, or_, text
+from sqlalchemy import and_, inspect, or_, text
 from sqlalchemy.orm import Session, joinedload, subqueryload
 
 from database import Base, SessionLocal, engine, get_db
@@ -74,8 +74,16 @@ FOOTBALL_DATA_MATCHES_URL = os.getenv(
 # com orçamento diário para não estourar as 100 requisições/dia do plano.
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "").strip()
 API_FOOTBALL_LIVE_URL = os.getenv("API_FOOTBALL_LIVE_URL", "https://v3.football.api-sports.io/fixtures?live=all")
+API_FOOTBALL_FIXTURE_URL = os.getenv("API_FOOTBALL_FIXTURE_URL", "https://v3.football.api-sports.io/fixtures")
 API_FOOTBALL_LEAGUE_ID = int(os.getenv("API_FOOTBALL_LEAGUE_ID", "1"))
-API_FOOTBALL_DAILY_BUDGET = int(os.getenv("API_FOOTBALL_DAILY_BUDGET", "90"))
+API_FOOTBALL_DAILY_BUDGET = int(os.getenv("API_FOOTBALL_DAILY_BUDGET", "100"))
+# Reserva: para de chamar a API quando restam só N requisições do dia
+API_FOOTBALL_DAILY_RESERVE = int(os.getenv("API_FOOTBALL_DAILY_RESERVE", "8"))
+# Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há
+WORLD_CUP_LIVE_INTERVAL = max(45, int(os.getenv("WORLD_CUP_LIVE_INTERVAL_SECONDS", "75")))
+WORLD_CUP_IDLE_INTERVAL = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600")))
+# Schedule (openfootball/football-data) revalida no máximo a cada N segundos
+WORLD_CUP_SCHEDULE_MIN_GAP = max(120, int(os.getenv("WORLD_CUP_SCHEDULE_MIN_GAP", "300")))
 # Wikipedia usa nomes diferentes do openfootball para algumas seleções
 WIKIPEDIA_TEAM_ALIASES = {
     "United States": "USA",
@@ -480,6 +488,8 @@ def ensure_schema() -> None:
             "away_score": "INTEGER",
             "scorers": "TEXT",
             "source": "VARCHAR",
+            "api_fixture_id": "INTEGER",
+            "scorers_final": "BOOLEAN DEFAULT FALSE",
             "created_at": "TIMESTAMP",
         },
         "world_cup_predictions": {
@@ -1746,97 +1756,213 @@ def api_football_budget_key() -> str:
     return "api_football_calls_" + datetime.utcnow().strftime("%Y%m%d")
 
 
-def apply_api_football_live(db: Session) -> dict[str, Any]:
-    """Captura placar parcial e goleadores dos jogos em andamento.
+def same_scorer(a: str, b: str) -> bool:
+    """True se dois nomes são o mesmo jogador, tolerando abreviação
+    ('J. Lukic' == 'Jovo Lukić': mesmo sobrenome e inicial do nome batem)."""
+    an, bn = normalize_scorer_name(a), normalize_scorer_name(b)
+    if not an or not bn:
+        return False
+    if an == bn or an in bn or bn in an:
+        return True
+    at, bt = an.split(" "), bn.split(" ")
+    if at[-1] != bt[-1]:  # sobrenome diferente -> jogadores diferentes
+        return False
+    af, bf = at[0], bt[0]
+    # primeiro nome igual, ou um é a inicial do outro
+    return af == bf or (len(af) == 1 and bf.startswith(af)) or (len(bf) == 1 and af.startswith(bf))
 
-    Só faz a chamada quando existe jogo da Copa dentro da janela de partida,
-    respeitando o orçamento diário do plano gratuito."""
+
+def merge_scorers(existing: str | None, new_names: list[str]) -> tuple[str, bool]:
+    """Une goleadores sem perder nenhum, preferindo o nome mais completo.
+
+    Resolve o bug de um poll sobrescrever o anterior e perder gols: a união só
+    cresce, e quando dois nomes são o mesmo jogador (inclusive abreviado) fica
+    o mais completo (ex.: 'Jovo Lukić' vence 'J. Lukic')."""
+    ordered: list[str] = []
+    for raw in [n for n in re.split(r"[,;\n]", existing or "")] + list(new_names):
+        name = re.sub(r"\s+", " ", raw or "").strip()
+        if not normalize_scorer_name(name):
+            continue
+        match_idx = next((i for i, kept in enumerate(ordered) if same_scorer(kept, name)), None)
+        if match_idx is None:
+            ordered.append(name)
+        elif len(name) > len(ordered[match_idx]):
+            ordered[match_idx] = name  # mantém a versão mais completa
+    merged = ", ".join(ordered)[:500]
+    return merged, merged != (existing or "")
+
+
+def extract_api_football_scorers(fixture: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    for event in fixture.get("events") or []:
+        if (event.get("type") or "") != "Goal":
+            continue
+        detail = (event.get("detail") or "").lower()
+        if "missed" in detail:  # pênalti perdido não é gol
+            continue
+        player = (((event.get("player") or {}).get("name")) or "").strip()
+        # Gol contra conta como gol do time adversário; mantemos o nome marcado
+        if player and player not in names:
+            names.append(player)
+    return names
+
+
+def api_football_get(url: str, db: Session, status: dict[str, Any]) -> dict[str, Any] | None:
+    """GET na API-Football lendo a folga real de requisições dos headers.
+
+    Atualiza o orçamento do dia pelos headers (fonte da verdade) e respeita o
+    limite diário. Devolve o payload ou None (com erro em status)."""
+    request = urllib.request.Request(
+        url, headers={"x-apisports-key": API_FOOTBALL_KEY, "User-Agent": "ConversysFut/1.0"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(read_capped(response).decode("utf-8"))
+            day_remaining = response.headers.get("x-ratelimit-requests-remaining")
+            day_limit = response.headers.get("x-ratelimit-requests-limit")
+    except Exception as exc:
+        status["error"] = str(exc)[:300]
+        return None
+    if day_remaining is not None:
+        try:
+            status["daily_remaining"] = int(day_remaining)
+            status["daily_limit"] = int(day_limit) if day_limit else status.get("daily_limit")
+            set_app_setting(db, "api_football_daily_remaining", day_remaining)
+        except ValueError:
+            pass
+    status["calls_made"] = status.get("calls_made", 0) + 1
+    if payload.get("errors"):
+        status["error"] = json.dumps(payload["errors"], ensure_ascii=False)[:300]
+        return None
+    return payload
+
+
+def apply_api_football_live(db: Session) -> dict[str, Any]:
+    """Sistema definitivo de captura ao vivo via API-Football (plano grátis).
+
+    1) `live=all` (1 chamada) pega todos os jogos da Copa em andamento: placar
+       parcial, goleadores progressivos e o fixture_id de cada um.
+    2) Quando um jogo encerra, busca `fixtures?id=<id>` (1 chamada) para fixar
+       os goleadores definitivos com nome completo — fecha o buraco de gols de
+       última hora que o feed ao vivo perdia.
+    Tudo respeitando o limite diário (lido dos headers) e um intervalo mínimo
+    entre chamadas, com os goleadores sempre UNIDOS (nunca sobrescritos)."""
     status: dict[str, Any] = {
         "configured": bool(API_FOOTBALL_KEY),
         "ok": False,
         "live_games": 0,
         "scorers_updated": 0,
-        "calls_today": 0,
+        "finalized": 0,
+        "calls_made": 0,
+        "daily_remaining": None,
+        "daily_limit": API_FOOTBALL_DAILY_BUDGET,
         "skipped": None,
         "error": None,
     }
     if not API_FOOTBALL_KEY:
         return status
-    calls_today = int(get_app_setting(db, api_football_budget_key()) or 0)
-    status["calls_today"] = calls_today
+
+    cached_remaining = get_app_setting(db, "api_football_daily_remaining")
+    if cached_remaining is not None:
+        try:
+            status["daily_remaining"] = int(cached_remaining)
+        except ValueError:
+            pass
 
     now = datetime.utcnow()
-    candidates = (
+    live_window = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.kickoff_at.isnot(None))
         .filter(models.WorldCupGame.kickoff_at <= now)
-        .filter(models.WorldCupGame.kickoff_at >= now - timedelta(hours=3))
+        .filter(models.WorldCupGame.kickoff_at >= now - timedelta(hours=3, minutes=30))
         .filter(models.WorldCupGame.status.in_(("scheduled", "live")))
         .all()
     )
-    if not candidates:
+    # Jogos recém-encerrados ainda sem goleadores definitivos da API
+    pending_final = (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.status == "finished")
+        .filter(models.WorldCupGame.api_fixture_id.isnot(None))
+        .filter(or_(models.WorldCupGame.scorers_final.is_(False), models.WorldCupGame.scorers_final.is_(None)))
+        .all()
+    )
+    if not live_window and not pending_final:
         status["ok"] = True
         status["skipped"] = "sem jogos em andamento"
         return status
-    if calls_today >= API_FOOTBALL_DAILY_BUDGET:
-        status["skipped"] = "orçamento diário de chamadas atingido"
+
+    remaining = status["daily_remaining"]
+    if remaining is not None and remaining <= API_FOOTBALL_DAILY_RESERVE:
+        status["skipped"] = "folga diária de requisições no limite de reserva"
         return status
 
-    request = urllib.request.Request(
-        API_FOOTBALL_LIVE_URL,
-        headers={"x-apisports-key": API_FOOTBALL_KEY, "User-Agent": "ConversysFut/1.0"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            payload = json.loads(read_capped(response).decode("utf-8"))
-    except Exception as exc:
-        status["error"] = str(exc)[:300]
-        return status
-    set_app_setting(db, api_football_budget_key(), str(calls_today + 1))
-    status["calls_today"] = calls_today + 1
-    if payload.get("errors"):
-        status["error"] = json.dumps(payload["errors"], ensure_ascii=False)[:300]
-        return status
-    status["ok"] = True
+    if live_window:
+        payload = api_football_get(API_FOOTBALL_LIVE_URL, db, status)
+        if payload is None:
+            return status
+        status["ok"] = True
+        by_teams: dict[tuple[str, str], dict[str, Any]] = {}
+        for item in payload.get("response", []):
+            if ((item.get("league") or {}).get("id")) != API_FOOTBALL_LEAGUE_ID:
+                continue
+            teams = item.get("teams") or {}
+            home = normalize_world_cup_team(((teams.get("home") or {}).get("name")) or "")
+            away = normalize_world_cup_team(((teams.get("away") or {}).get("name")) or "")
+            if home and away:
+                by_teams[(normalize_scorer_name(home), normalize_scorer_name(away))] = item
+        status["live_games"] = len(by_teams)
 
-    by_teams: dict[tuple[str, str], dict[str, Any]] = {}
-    for item in payload.get("response", []):
-        if ((item.get("league") or {}).get("id")) != API_FOOTBALL_LEAGUE_ID:
-            continue
-        teams = item.get("teams") or {}
-        home = normalize_world_cup_team(((teams.get("home") or {}).get("name")) or "")
-        away = normalize_world_cup_team(((teams.get("away") or {}).get("name")) or "")
-        if home and away:
-            by_teams[(normalize_scorer_name(home), normalize_scorer_name(away))] = item
-    status["live_games"] = len(by_teams)
+        for game in live_window:
+            item = by_teams.get(
+                (
+                    normalize_scorer_name(normalize_world_cup_team(game.home_team)),
+                    normalize_scorer_name(normalize_world_cup_team(game.away_team)),
+                )
+            )
+            if not item:
+                continue
+            fixture_id = ((item.get("fixture") or {}).get("id"))
+            if fixture_id and not game.api_fixture_id:
+                game.api_fixture_id = int(fixture_id)
+            goals = item.get("goals") or {}
+            if goals.get("home") is not None and goals.get("away") is not None:
+                game.home_score = int(goals["home"])
+                game.away_score = int(goals["away"])
+            if (game.status or "scheduled") == "scheduled":
+                game.status = "live"
+            merged, changed = merge_scorers(game.scorers, extract_api_football_scorers(item))
+            if changed:
+                game.scorers = merged
+                status["scorers_updated"] += 1
+    else:
+        status["ok"] = True
 
-    for game in candidates:
-        key = (
-            normalize_scorer_name(normalize_world_cup_team(game.home_team)),
-            normalize_scorer_name(normalize_world_cup_team(game.away_team)),
+    # Fixa goleadores definitivos dos jogos encerrados (1 chamada cada, com folga)
+    for game in pending_final:
+        rem = status["daily_remaining"]
+        if rem is not None and rem <= API_FOOTBALL_DAILY_RESERVE:
+            status["skipped"] = "folga diária insuficiente para finalizar goleadores"
+            break
+        payload = api_football_get(
+            f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}", db, status
         )
-        item = by_teams.get(key)
-        if not item:
+        if payload is None:
+            break
+        fixtures = payload.get("response") or []
+        if not fixtures:
+            game.scorers_final = True  # não há o que buscar
             continue
-        goals = item.get("goals") or {}
-        if goals.get("home") is not None and goals.get("away") is not None:
-            game.home_score = int(goals["home"])
-            game.away_score = int(goals["away"])
-        if (game.status or "scheduled") == "scheduled":
-            game.status = "live"
-        scorer_names: list[str] = []
-        for event in item.get("events") or []:
-            if (event.get("type") or "") != "Goal":
-                continue
-            detail = (event.get("detail") or "").lower()
-            if "own goal" in detail or "missed" in detail:
-                continue
-            player = (((event.get("player") or {}).get("name")) or "").strip()
-            if player and player not in scorer_names:
-                scorer_names.append(player)
-        if scorer_names:
-            game.scorers = ", ".join(scorer_names)[:500]
+        fixture = fixtures[0]
+        short = (((fixture.get("fixture") or {}).get("status") or {}).get("short")) or ""
+        if short not in ("FT", "AET", "PEN", "AWD", "WO"):
+            continue  # ainda não é definitivo
+        merged, changed = merge_scorers(game.scorers, extract_api_football_scorers(fixture))
+        if changed:
+            game.scorers = merged
             status["scorers_updated"] += 1
+        status["finalized"] += 1
+        game.scorers_final = True
+
     return status
 
 
@@ -1874,7 +2000,11 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
             game.away_score = away_score
             game.status = "finished"
         if scorers:
-            game.scorers = scorers
+            # União: o openfootball traz nomes oficiais, mas não pode apagar
+            # goleadores que o feed ao vivo já tinha capturado
+            merged, changed = merge_scorers(game.scorers, re.split(r"[,;\n]", scorers))
+            if changed:
+                game.scorers = merged
 
     db.flush()
     secondary = cross_check_world_cup_results(db)
@@ -1884,28 +2014,53 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
     for game in finished_games:
         score_world_cup_game(game)
     set_app_setting(db, "world_cup_last_sync", datetime.now(timezone.utc).isoformat())
-    set_app_setting(
-        db,
-        "world_cup_sync_status",
-        json.dumps(
-            {
-                "at": datetime.now(timezone.utc).isoformat(),
-                "ok": True,
-                "error": None,
-                "imported": imported,
-                "updated": updated,
-                "finished_games": len(finished_games),
-                "missing_scorers": [
-                    f"{game.home_team} x {game.away_team}" for game in finished_games if not game.scorers
-                ],
-                "secondary": secondary,
-                "live_source": live_source,
-            },
-            ensure_ascii=False,
-        ),
-    )
+    status_payload = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "ok": True,
+        "error": None,
+        "imported": imported,
+        "updated": updated,
+        "finished_games": len(finished_games),
+        "missing_scorers": [
+            f"{game.home_team} x {game.away_team}" for game in finished_games if not game.scorers
+        ],
+        "secondary": secondary,
+        "live_source": live_source,
+    }
+    set_app_setting(db, "world_cup_sync_status", json.dumps(status_payload, ensure_ascii=False))
+    record_world_cup_sync_run(db, status_payload)
     db.commit()
     return imported, updated
+
+
+def record_world_cup_sync_run(db: Session, payload: dict[str, Any]) -> None:
+    # Mantém um histórico curto (últimas 30 execuções) para o painel admin
+    raw = get_app_setting(db, "world_cup_sync_runs")
+    try:
+        runs = json.loads(raw) if raw else []
+    except (json.JSONDecodeError, TypeError):
+        runs = []
+    live = payload.get("live_source") or {}
+    secondary = payload.get("secondary") or {}
+    runs.insert(
+        0,
+        {
+            "at": payload.get("at"),
+            "ok": payload.get("ok", False),
+            "error": payload.get("error"),
+            "imported": payload.get("imported", 0),
+            "updated": payload.get("updated", 0),
+            "finished": payload.get("finished_games", 0),
+            "live_games": live.get("live_games", 0),
+            "scorers_updated": live.get("scorers_updated", 0),
+            "finalized": live.get("finalized", 0),
+            "api_calls": live.get("calls_made", 0),
+            "api_remaining": live.get("daily_remaining"),
+            "filled": secondary.get("filled", 0),
+            "conflicts": len(secondary.get("conflicts", []) or []),
+        },
+    )
+    set_app_setting(db, "world_cup_sync_runs", json.dumps(runs[:30], ensure_ascii=False))
 
 
 def record_world_cup_sync_failure(error: str) -> None:
@@ -1926,11 +2081,28 @@ def record_world_cup_sync_failure(error: str) -> None:
                 }
             )
             set_app_setting(session, "world_cup_sync_status", json.dumps(previous, ensure_ascii=False))
+            record_world_cup_sync_run(session, {"at": previous["at"], "ok": False, "error": error[:500]})
             session.commit()
         finally:
             session.close()
     except Exception:
         pass
+
+
+def world_cup_has_live_window(db: Session) -> bool:
+    # Há jogo rolando ou prestes a rolar/encerrar? (define a cadência do loop)
+    now = datetime.utcnow()
+    return db.query(models.WorldCupGame).filter(
+        or_(
+            models.WorldCupGame.status == "live",
+            and_(
+                models.WorldCupGame.status == "scheduled",
+                models.WorldCupGame.kickoff_at.isnot(None),
+                models.WorldCupGame.kickoff_at <= now + timedelta(minutes=5),
+                models.WorldCupGame.kickoff_at >= now - timedelta(hours=3, minutes=30),
+            ),
+        )
+    ).first() is not None
 
 
 def world_cup_squads_due(db: Session) -> bool:
@@ -1946,32 +2118,55 @@ def world_cup_squads_due(db: Session) -> bool:
     return datetime.utcnow() - last >= timedelta(hours=24)
 
 
-def world_cup_sync_loop() -> None:
-    interval = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600")))
-    while True:
-        time_module.sleep(interval)
+def run_world_cup_sync_with_retries(attempts: int = 3) -> None:
+    """Executa um ciclo de sync com retry/backoff para resistir a falhas
+    transitórias de rede (a fonte pode oscilar; o palpite não pode quebrar)."""
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
         try:
             session = SessionLocal()
             try:
                 imported, updated = apply_world_cup_sync(session)
-                print(
-                    f"[world-cup-sync] schedule/results imported={imported} updated={updated}",
-                    flush=True,
-                )
+                print(f"[world-cup-sync] ok imported={imported} updated={updated} (tentativa {attempt})", flush=True)
+                return
             finally:
                 session.close()
         except Exception as exc:
-            print(f"[world-cup-sync] schedule/results failed: {exc}", flush=True)
-            record_world_cup_sync_failure(str(exc))
+            last_error = exc
+            print(f"[world-cup-sync] falhou tentativa {attempt}/{attempts}: {exc}", flush=True)
+            if attempt < attempts:
+                time_module.sleep(min(30, 2 ** attempt))
+    if last_error is not None:
+        record_world_cup_sync_failure(str(last_error))
+
+
+def world_cup_sync_loop() -> None:
+    last_schedule_at = 0.0
+    while True:
+        # Cadência adaptativa: rápido com jogo ao vivo, lento ocioso
+        try:
+            session = SessionLocal()
+            try:
+                live = world_cup_has_live_window(session)
+            finally:
+                session.close()
+        except Exception:
+            live = False
+        interval = WORLD_CUP_LIVE_INTERVAL if live else WORLD_CUP_IDLE_INTERVAL
+        time_module.sleep(interval)
+
+        # O sync completo (openfootball + football-data + API-Football live +
+        # finalização de goleadores + rescore) já é barato e idempotente; roda
+        # a cada tick. A API-Football se autolimita por orçamento/intervalo.
+        run_world_cup_sync_with_retries()
+
+        # Elencos: no máximo 1x/dia
         try:
             session = SessionLocal()
             try:
                 if world_cup_squads_due(session):
                     imported, updated = apply_world_cup_squads_sync(session)
-                    print(
-                        f"[world-cup-sync] squads imported={imported} updated={updated}",
-                        flush=True,
-                    )
+                    print(f"[world-cup-sync] squads imported={imported} updated={updated}", flush=True)
             finally:
                 session.close()
         except Exception as exc:
@@ -2778,20 +2973,44 @@ def world_cup_sync_status(
         except json.JSONDecodeError:
             return None
 
+    def read_json(key: str, fallback):
+        raw = get_app_setting(db, key)
+        if not raw:
+            return fallback
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return fallback
+
     finished_query = db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "finished")
+    live_now = world_cup_has_live_window(db)
     return {
         "last_sync": get_app_setting(db, "world_cup_last_sync"),
         "last_squad_sync": get_app_setting(db, "world_cup_last_squad_sync"),
         "games_sync": read_status("world_cup_sync_status"),
         "squad_sync": read_status("world_cup_squad_sync_status"),
-        "sync_interval_seconds": max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600"))),
+        "runs": read_json("world_cup_sync_runs", []),
+        "live_now": live_now,
+        # Cadência atual do loop e próxima janela
+        "interval_seconds": WORLD_CUP_LIVE_INTERVAL if live_now else WORLD_CUP_IDLE_INTERVAL,
+        "live_interval_seconds": WORLD_CUP_LIVE_INTERVAL,
+        "idle_interval_seconds": WORLD_CUP_IDLE_INTERVAL,
+        "sync_interval_seconds": WORLD_CUP_LIVE_INTERVAL if live_now else WORLD_CUP_IDLE_INTERVAL,
         "sources": {
             "openfootball_url": OPENFOOTBALL_2026_CUP_URL,
             "football_data_configured": bool(FOOTBALL_DATA_API_KEY),
+            "api_football_configured": bool(API_FOOTBALL_KEY),
+            "api_football_daily_remaining": (
+                int(get_app_setting(db, "api_football_daily_remaining"))
+                if (get_app_setting(db, "api_football_daily_remaining") or "").lstrip("-").isdigit()
+                else None
+            ),
+            "api_football_daily_limit": API_FOOTBALL_DAILY_BUDGET,
             "squads_source": "Wikipedia (elencos oficiais)",
         },
         "totals": {
             "games": db.query(models.WorldCupGame).count(),
+            "live_games": db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "live").count(),
             "finished_games": finished_query.count(),
             "finished_without_scorers": finished_query.filter(
                 or_(models.WorldCupGame.scorers.is_(None), models.WorldCupGame.scorers == "")

@@ -12215,3 +12215,106 @@ img.team-flag {
   height: 28px;
   border-width: 3px;
 }
+
+/* ===== Regras redesenhadas (cards com badge de pontos) ===== */
+.bolao-rules2 { display: grid; gap: 10px; }
+.bolao-rules2-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.bolao-rule-card {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(255,255,255,0.05), transparent 70%), rgba(2,8,23,0.5);
+  padding: 12px 12px 11px;
+  overflow: hidden;
+}
+.bolao-rule-card .bolao-rule-pts {
+  position: absolute; top: 10px; right: 12px;
+  font-size: 1.15rem; font-weight: 950; line-height: 1;
+  color: var(--accent, #00cfb4);
+}
+.bolao-rule-card .bolao-rule-pts small { font-size: 0.6rem; font-weight: 900; margin-left: 1px; opacity: 0.7; }
+.bolao-rule-ico { color: var(--accent, #00cfb4); }
+.bolao-rule-card strong { color: #fff; font-size: 0.84rem; font-weight: 900; }
+.bolao-rule-card span:last-child { color: var(--muted); font-size: 0.72rem; font-weight: 700; line-height: 1.35; }
+.bolao-rule-card.exact { --accent: #00cfb4; border-color: rgba(0,207,180,0.28); }
+.bolao-rule-card.outcome { --accent: #61a2ff; border-color: rgba(97,162,255,0.24); }
+.bolao-rule-card.scorer { --accent: #61dc64; border-color: rgba(97,220,100,0.24); }
+.bolao-rule-card.champion { --accent: #ffd75e; border-color: rgba(255,215,94,0.3); }
+.bolao-rules2-note { color: var(--muted); font-size: 0.76rem; font-weight: 750; line-height: 1.45; }
+.bolao-rules2-note strong { color: var(--brand-cyan); }
+@media (max-width: 420px) { .bolao-rules2-grid { grid-template-columns: 1fr; } }
+
+/* ===== Movimentação no ranking (subiu/desceu) ===== */
+.bolao-rank-pos { display: inline-flex; flex-direction: column; align-items: center; gap: 1px; min-width: 30px; }
+.bolao-rank-pos > strong { color: var(--brand-cyan); font-size: 0.82rem; font-weight: 950; }
+.bolao-move { font-size: 0.58rem; font-weight: 950; line-height: 1; min-height: 0.7rem; }
+.bolao-move.up { color: #61dc64; animation: bolao-move-pop 0.5s ease; }
+.bolao-move.down { color: #ff6b6b; animation: bolao-move-pop 0.5s ease; }
+.bolao-move.flat { color: transparent; }
+@keyframes bolao-move-pop { 0% { transform: translateY(3px) scale(0.6); opacity: 0; } 100% { transform: none; opacity: 1; } }
+.bolao-rank-fullname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.bolao-rank-row b > i { font-style: normal; font-size: 0.66rem; font-weight: 800; color: var(--muted); margin-left: 2px; }
+
+/* ===== Modal de pessoa sempre na frente + medalha ===== */
+.wc-person-backdrop { z-index: 95; }
+.wc-person-rank { font-size: 1.5rem; line-height: 1; min-width: 1.8rem; text-align: center; }
+.wc-person-rank.rank-1 { filter: drop-shadow(0 0 8px rgba(255,215,94,0.6)); }
+.wc-person-head { gap: 14px; }
+
+/* ===== Quem cravou a campeã (votantes + quem não votou) ===== */
+.wc-champ-voters { display: grid; gap: 10px; border-top: 1px solid rgba(255,255,255,0.08); margin-top: 14px; padding-top: 14px; }
+.wc-champ-voters-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wc-champ-voters-count { color: var(--muted); font-size: 0.74rem; font-weight: 900; }
+.wc-champ-voters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 10px;
+}
+.wc-champ-voter {
+  display: grid; justify-items: center; gap: 4px;
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 14px;
+  background: rgba(255,255,255,0.03); padding: 10px 6px;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.wc-champ-voter.voted:hover { transform: translateY(-2px); border-color: rgba(255,215,94,0.4); }
+.wc-champ-voter.missed { opacity: 0.62; border-style: dashed; border-color: rgba(255,107,107,0.3); }
+.wc-champ-voter-avatar { position: relative; }
+.wc-champ-voter-flag, .wc-champ-voter-x {
+  position: absolute; right: -4px; bottom: -4px;
+  display: grid; place-items: center;
+  width: 19px; height: 19px; border-radius: 50%;
+  border: 2px solid rgba(6,12,26,0.95);
+}
+.wc-champ-voter-flag { background: rgba(2,8,23,0.9); }
+.wc-champ-voter-flag .team-flag { width: 15px; height: 11px; border-radius: 2px; display: block; }
+.wc-champ-voter-x { background: #e0414a; color: #fff; }
+.wc-champ-voter strong { color: #fff; font-size: 0.74rem; font-weight: 850; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wc-champ-voter small { color: var(--muted); font-size: 0.62rem; font-weight: 800; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wc-champ-voter.voted small { color: #ffd75e; }
+
+/* ===== Painel admin: cadência + orçamento + histórico ===== */
+.wc-sync-overview { display: flex; flex-wrap: wrap; gap: 8px; }
+.wc-sync-cadence, .wc-sync-budget {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid rgba(255,255,255,0.1); border-radius: 999px;
+  background: rgba(255,255,255,0.04); padding: 5px 11px;
+  color: var(--muted); font-size: 0.72rem; font-weight: 900;
+}
+.wc-sync-cadence.live { border-color: rgba(227,28,121,0.45); color: #ffb3d4; }
+.wc-sync-budget svg { color: var(--brand-cyan); }
+.wc-sync-runs { display: grid; gap: 6px; }
+.wc-sync-runs-title { color: var(--muted); font-size: 0.7rem; font-weight: 950; letter-spacing: 0.08em; text-transform: uppercase; }
+.wc-sync-runs-list { display: grid; gap: 3px; max-height: 220px; overflow-y: auto; }
+.wc-sync-run { display: grid; grid-template-columns: 8px auto minmax(0,1fr); align-items: center; gap: 8px; padding: 4px 2px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.wc-sync-run-dot { width: 7px; height: 7px; border-radius: 50%; }
+.wc-sync-run-dot.ok { background: #61dc64; }
+.wc-sync-run-dot.err { background: #ff6b6b; }
+.wc-sync-run-time { color: #fff; font-size: 0.7rem; font-weight: 800; white-space: nowrap; }
+.wc-sync-run-meta { color: var(--muted); font-size: 0.7rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wc-sync-run.err .wc-sync-run-meta { color: #ff9b9b; }

@@ -330,11 +330,34 @@ export type WorldCupSyncStatus = {
       ok: boolean;
       live_games: number;
       scorers_updated: number;
-      calls_today: number;
+      finalized?: number;
+      calls_made?: number;
+      calls_today?: number;
+      daily_remaining?: number | null;
+      daily_limit?: number;
       skipped?: string | null;
       error?: string | null;
     };
   } | null;
+  runs?: Array<{
+    at?: string;
+    ok?: boolean;
+    error?: string | null;
+    imported?: number;
+    updated?: number;
+    finished?: number;
+    live_games?: number;
+    scorers_updated?: number;
+    finalized?: number;
+    api_calls?: number;
+    api_remaining?: number | null;
+    filled?: number;
+    conflicts?: number;
+  }>;
+  live_now?: boolean;
+  interval_seconds?: number;
+  live_interval_seconds?: number;
+  idle_interval_seconds?: number;
   squad_sync?: {
     at?: string;
     ok?: boolean;
@@ -348,10 +371,14 @@ export type WorldCupSyncStatus = {
   sources: {
     openfootball_url: string;
     football_data_configured: boolean;
+    api_football_configured?: boolean;
+    api_football_daily_remaining?: number | null;
+    api_football_daily_limit?: number;
     squads_source: string;
   };
   totals: {
     games: number;
+    live_games?: number;
     finished_games: number;
     finished_without_scorers: number;
     players: number;
