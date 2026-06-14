@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
@@ -860,6 +860,22 @@ export default function BolaoPage() {
     [board?.games],
   );
 
+  // Flash "+N pts" quando os pontos do próprio usuário sobem ao vivo (dopamina)
+  const [pointsFlash, setPointsFlash] = useState<number | null>(null);
+  const prevPointsRef = useRef<number | null>(null);
+  useEffect(() => {
+    const mine = board?.leaderboard.find((e) => e.user.id === profile?.id);
+    if (!mine) return;
+    const prev = prevPointsRef.current;
+    if (prev !== null && mine.points > prev) {
+      setPointsFlash(mine.points - prev);
+      const t = window.setTimeout(() => setPointsFlash(null), 2400);
+      prevPointsRef.current = mine.points;
+      return () => window.clearTimeout(t);
+    }
+    prevPointsRef.current = mine.points;
+  }, [board?.leaderboard, profile?.id]);
+
   // Quem cravou campeã vs quem não votou — voadores primeiro, ordenados por nome
   const championVoters = useMemo(() => {
     const rows = (board?.leaderboard ?? []).map((entry) => ({
@@ -1170,6 +1186,9 @@ export default function BolaoPage() {
 
   return (
     <AppShell hideRightRail user={profile} nextEvent={events[0] ?? null} leaderboard={leaderboard}>
+      {pointsFlash != null && (
+        <div className="bolao-points-flash" role="status">⚡ +{pointsFlash} {pointsFlash === 1 ? "ponto" : "pontos"}!</div>
+      )}
       <div className="wc-page">
       <section className="wc-hero2">
         <span className="wc-hero2-aurora" aria-hidden="true" />
