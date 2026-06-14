@@ -346,6 +346,7 @@ export type WorldCupSyncStatus = {
       reserve?: number;
       tsd_calls?: number;
       minute_throttled?: boolean;
+      goal_pending?: boolean;
       key_used?: number;
       skipped?: string | null;
       error?: string | null;

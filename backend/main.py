@@ -112,8 +112,16 @@ THESPORTSDB_CYCLE_LIMIT = max(1, int(os.getenv("THESPORTSDB_CYCLE_LIMIT", "6")))
 # pênaltis ≈ 3h) ainda está rolando. Se nenhuma fonte confirmou o fim, encerra
 # sozinho com o melhor placar — assim nenhum jogo fica "ao vivo" por horas.
 WORLD_CUP_FORCE_FINISH_AFTER = timedelta(hours=int(os.getenv("WORLD_CUP_FORCE_FINISH_HOURS", "4")))
-# Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há
-WORLD_CUP_LIVE_INTERVAL = max(45, int(os.getenv("WORLD_CUP_LIVE_INTERVAL_SECONDS", "75")))
+# AO VIVO EVENT-DRIVEN: a football-data (grátis) detecta o GOL (placar sobe) a cada
+# ciclo; aí disparamos a busca do NOME na API paga NA HORA — ~1 chamada por gol em
+# vez de polling cego. Reação rápida quando há gol sem goleador; poll de segurança
+# espaçado quando não há (quase não gasta cota).
+API_FOOTBALL_GOAL_GAP = max(40, int(os.getenv("API_FOOTBALL_GOAL_GAP", "60")))
+API_FOOTBALL_SAFETY_GAP = max(300, int(os.getenv("API_FOOTBALL_SAFETY_GAP", "600")))
+# Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há. 30s deixa
+# o PLACAR/GOL bem ao vivo (football-data 10/min aguenta de sobra: ~2/min) e faz o
+# gatilho de goleador disparar logo após o gol; a cota paga é protegida à parte.
+WORLD_CUP_LIVE_INTERVAL = max(25, int(os.getenv("WORLD_CUP_LIVE_INTERVAL_SECONDS", "30")))
 WORLD_CUP_IDLE_INTERVAL = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600")))
 # Schedule (openfootball/football-data) revalida no máximo a cada N segundos
 WORLD_CUP_SCHEDULE_MIN_GAP = max(120, int(os.getenv("WORLD_CUP_SCHEDULE_MIN_GAP", "300")))
@@ -2185,6 +2193,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         "live_gap_seconds": 0,
         "ai_reconciles": 0,
         "tsd_calls": 0,
+        "goal_pending": False,
         "skipped": None,
         "error": None,
     }
@@ -2333,6 +2342,22 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         .filter(models.WorldCupGame.kickoff_at <= now - timedelta(minutes=2))
         .all()
     )
+    # GATILHO POR GOL: um jogo ao vivo tem GOL NOVO sem goleador capturado se o
+    # placar (que a football-data já trouxe de graça) mudou desde a última busca
+    # paga e os goleadores ainda não cobrem os gols. Só isso dispara a cota.
+    def has_new_goal(g: models.WorldCupGame) -> bool:
+        if world_cup_scorers_complete(g):
+            return False
+        last_polled = get_app_setting(db, f"wc_live_polled_{g.id}")
+        current = f"{g.home_score or 0}-{g.away_score or 0}"
+        return last_polled != current  # placar mudou desde a última chamada paga
+
+    goal_pending = any(has_new_goal(g) for g in live_now_games)
+    status["goal_pending"] = goal_pending
+    # Reação rápida (60s) quando falta o nome de um gol; senão só um poll de
+    # segurança espaçado (600s) — na maior parte do tempo nem gasta cota.
+    effective_gap = API_FOOTBALL_GOAL_GAP if goal_pending else max(live_gap, API_FOOTBALL_SAFETY_GAP)
+    status["live_gap_seconds"] = effective_gap
     last_live_raw = get_app_setting(db, "api_football_last_live_at")
     gap_ok = True
     if last_live_raw:
@@ -2340,7 +2365,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             t = datetime.fromisoformat(last_live_raw)
             if t.tzinfo:
                 t = t.astimezone(timezone.utc).replace(tzinfo=None)
-            gap_ok = (now - t).total_seconds() >= live_gap
+            gap_ok = (now - t).total_seconds() >= effective_gap
         except ValueError:
             gap_ok = True
     # O live só roda se ainda houver cota ACIMA da reserva de fim — assim o
@@ -2386,6 +2411,9 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                     if new_s != (game.scorers or ""):
                         game.scorers = new_s
                         status["scorers_updated"] += 1
+                # marca que JÁ buscamos o nome neste placar — não re-dispara cota no
+                # mesmo gol (ex.: gol contra que nunca terá goleador nomeado)
+                set_app_setting(db, f"wc_live_polled_{game.id}", f"{game.home_score or 0}-{game.away_score or 0}")
                 status["mid_checks"] += 1
 
     # ── Confirmação GRÁTIS (TheSportsDB) pra encerrados ainda não confirmados ──

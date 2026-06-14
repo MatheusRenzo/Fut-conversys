@@ -2186,6 +2186,15 @@ export default function BolaoPage() {
                           proteção: máx 9 req/min na paga, 6 jogos/ciclo na grátis — nunca estoura
                           {syncStatus.games_sync?.live_source?.minute_throttled ? " · segurando até o próximo minuto" : ""}
                         </span>
+                        <span>
+                          ao vivo event-driven: o placar (grátis) detecta o gol e dispara o nome do goleador na
+                          hora{" "}
+                          {syncStatus.games_sync?.live_source?.goal_pending ? (
+                            <strong style={{ color: "var(--brand-green)" }}>⚡ buscando goleador de um gol agora</strong>
+                          ) : (
+                            "— sem gol pendente, só poll de segurança (quase não gasta cota)"
+                          )}
+                        </span>
                         <small className="muted">
                           A cota reseta pra {syncStatus.sources.api_football_daily_limit ?? 100} à meia-noite (UTC). Se zerar, placar
                           (football-data) + TheSportsDB + openfootball + IA seguem entregando o goleador — o fim do jogo nunca depende
