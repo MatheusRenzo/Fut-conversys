@@ -1951,10 +1951,13 @@ def api_football_key_remaining(db: Session, index: int) -> int | None:
 
 
 def api_football_pick_key(db: Session) -> tuple[int, str] | None:
-    """Escolhe a chave com mais cota hoje. None se todas no limite de reserva."""
+    """Escolhe a chave com mais cota hoje. Pula chaves SUSPENSAS e as que estão
+    no limite de reserva. None se nenhuma estiver utilizável."""
     best: tuple[int, str] | None = None
     best_rem = -1
     for index, key in enumerate(API_FOOTBALL_KEYS):
+        if get_app_setting(db, f"api_football_suspended_{index}") == "1":
+            continue  # conta suspensa pela API-Football — ignora de vez
         rem = api_football_key_remaining(db, index)
         effective = API_FOOTBALL_DAILY_BUDGET if rem is None else rem
         if effective <= API_FOOTBALL_DAILY_RESERVE:
@@ -1966,12 +1969,21 @@ def api_football_pick_key(db: Session) -> tuple[int, str] | None:
 
 
 def api_football_total_remaining(db: Session) -> int:
-    """Soma da cota disponível hoje entre todas as chaves (desconhecida = cheia)."""
+    """Soma da cota disponível hoje entre as chaves ATIVAS (suspensa = 0)."""
     total = 0
     for index in range(len(API_FOOTBALL_KEYS)):
+        if get_app_setting(db, f"api_football_suspended_{index}") == "1":
+            continue
         rem = api_football_key_remaining(db, index)
         total += API_FOOTBALL_DAILY_BUDGET if rem is None else max(0, rem)
     return total
+
+
+def api_football_active_keys(db: Session) -> int:
+    return sum(
+        1 for index in range(len(API_FOOTBALL_KEYS))
+        if get_app_setting(db, f"api_football_suspended_{index}") != "1"
+    )
 
 
 def api_football_get(url: str, db: Session, status: dict[str, Any]) -> dict[str, Any] | None:
@@ -2000,7 +2012,13 @@ def api_football_get(url: str, db: Session, status: dict[str, Any]) -> dict[str,
     status["key_used"] = index + 1
     status["daily_remaining"] = api_football_total_remaining(db)
     if payload.get("errors"):
-        status["error"] = json.dumps(payload["errors"], ensure_ascii=False)[:300]
+        errs = json.dumps(payload["errors"], ensure_ascii=False)
+        status["error"] = errs[:300]
+        # Conta suspensa/bloqueada → marca a chave pra rotação nunca mais usá-la
+        # (o sistema cai pra outra chave e pra football-data sem travar)
+        if "suspend" in errs.lower() or "access" in errs.lower():
+            set_app_setting(db, f"api_football_suspended_{index}", "1")
+            status["suspended_key"] = index + 1
         return None
     return payload
 
@@ -3377,6 +3395,8 @@ def world_cup_sync_status(
             "football_data_configured": bool(FOOTBALL_DATA_API_KEY),
             "api_football_configured": bool(API_FOOTBALL_KEYS),
             "api_football_keys": len(API_FOOTBALL_KEYS),
+            "api_football_active_keys": api_football_active_keys(db),
+            "api_football_suspended": len(API_FOOTBALL_KEYS) - api_football_active_keys(db),
             "api_football_daily_remaining": api_football_total_remaining(db) if API_FOOTBALL_KEYS else None,
             "api_football_daily_limit": API_FOOTBALL_DAILY_BUDGET * max(1, len(API_FOOTBALL_KEYS)),
             "score_source": "football-data.org (placar+status ao vivo)",
