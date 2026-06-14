@@ -2113,35 +2113,51 @@ export default function BolaoPage() {
                 >
                   <span className="wc-sync-card-head">
                     <Zap size={14} />
-                    <strong>Gols ao vivo — API-Football</strong>
+                    <strong>Goleadores — API-Football</strong>
                     <b
                       className={
-                        !syncStatus.games_sync?.live_source?.configured
+                        !syncStatus.sources.api_football_configured
                           ? "wc-sync-pill muted"
-                          : syncStatus.games_sync.live_source.error
+                          : syncStatus.games_sync?.live_source?.error
                             ? "wc-sync-pill error"
                             : "wc-sync-pill ok"
                       }
                     >
-                      {!syncStatus.games_sync?.live_source?.configured
+                      {!syncStatus.sources.api_football_configured
                         ? "Não configurada"
-                        : syncStatus.games_sync.live_source.error
+                        : syncStatus.games_sync?.live_source?.error
                           ? "Erro"
                           : "Ativa"}
                     </b>
                   </span>
-                  {!syncStatus.games_sync?.live_source?.configured ? (
-                    <small>Defina API_FOOTBALL_KEY no .env pra capturar placar parcial e artilheiros em tempo real.</small>
+                  {!syncStatus.sources.api_football_configured ? (
+                    <small>Defina API_FOOTBALL_KEY no .env pra capturar os goleadores em tempo real.</small>
                   ) : (
                     <>
                       <small>
-                        {syncStatus.games_sync.live_source.skipped
-                          ? syncStatus.games_sync.live_source.skipped
-                          : `${syncStatus.games_sync.live_source.live_games} jogo(s) ao vivo · artilheiros atualizados em ${syncStatus.games_sync.live_source.scorers_updated}`}
-                        {" · "}
-                        {syncStatus.games_sync.live_source.calls_today} chamadas hoje (limite 90)
+                        {syncStatus.sources.api_football_keys ?? 1} chave(s) ·{" "}
+                        <strong>{syncStatus.sources.api_football_daily_remaining ?? "?"}</strong>/
+                        {syncStatus.sources.api_football_daily_limit ?? 100} requisições restantes hoje
                       </small>
-                      {syncStatus.games_sync.live_source.error && (
+                      <div className="wc-quota-bar">
+                        <span
+                          style={{
+                            width: `${Math.max(
+                              2,
+                              Math.round(
+                                ((syncStatus.sources.api_football_daily_remaining ?? 0) /
+                                  (syncStatus.sources.api_football_daily_limit || 100)) *
+                                  100,
+                              ),
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      <small>football-data (placar): ilimitada · {syncStatus.games_sync?.secondary?.matched ?? 0} jogos casados</small>
+                      {syncStatus.games_sync?.live_source?.skipped && (
+                        <small className="muted">{syncStatus.games_sync.live_source.skipped}</small>
+                      )}
+                      {syncStatus.games_sync?.live_source?.error && (
                         <small className="wc-sync-warn">
                           <AlertTriangle size={12} /> {syncStatus.games_sync.live_source.error}
                         </small>
@@ -2168,6 +2184,44 @@ export default function BolaoPage() {
                     </small>
                   )}
                 </div>
+
+                {(syncStatus.games_health?.length ?? 0) > 0 && (
+                  <div className="wc-health">
+                    <span className="wc-sync-runs-title">Saúde dos jogos (ao vivo + encerrados)</span>
+                    <div className="wc-health-list">
+                      {(syncStatus.games_health ?? []).map((gh, i) => {
+                        const ok = gh.status === "finished" ? gh.scorers_final && gh.scorers_complete : true;
+                        const warn = gh.status === "finished" && !gh.scorers_complete;
+                        return (
+                          <div className={warn ? "wc-health-row warn" : "wc-health-row"} key={i}>
+                            <span className={`wc-health-badge ${gh.status}`}>
+                              {gh.status === "live" && <span className="wc-live-dot small" />}
+                              {gh.status === "live" ? "AO VIVO" : "ENCERRADO"}
+                            </span>
+                            <span className="wc-health-match">{gh.matchup}</span>
+                            <strong className="wc-health-score">{gh.score ?? "–"}</strong>
+                            <span
+                              className="wc-health-scorers"
+                              title={`${gh.scorers_count} goleadores capturados de ${gh.goals} gol(s)`}
+                            >
+                              {warn ? (
+                                <AlertTriangle size={13} />
+                              ) : ok ? (
+                                <CheckCircle2 size={13} />
+                              ) : (
+                                <RefreshCcw size={13} />
+                              )}
+                              {gh.scorers_count}/{gh.goals} ⚽
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <small className="muted">
+                      ⚠ = faltam goleadores (o sistema continua tentando sozinho a cada ciclo)
+                    </small>
+                  </div>
+                )}
 
                 {(syncStatus.runs?.length ?? 0) > 0 && (
                   <div className="wc-sync-runs">

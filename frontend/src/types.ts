@@ -373,10 +373,25 @@ export type WorldCupSyncStatus = {
     openfootball_url: string;
     football_data_configured: boolean;
     api_football_configured?: boolean;
+    api_football_keys?: number;
     api_football_daily_remaining?: number | null;
     api_football_daily_limit?: number;
+    score_source?: string;
+    scorer_source?: string;
     squads_source: string;
   };
+  games_health?: Array<{
+    match_number?: number | null;
+    matchup: string;
+    status: string;
+    score?: string | null;
+    goals: number;
+    scorers_count: number;
+    scorers_complete: boolean;
+    scorers_final: boolean;
+    has_fixture_id: boolean;
+    predictions: number;
+  }>;
   totals: {
     games: number;
     live_games?: number;

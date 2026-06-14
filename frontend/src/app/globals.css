@@ -12583,3 +12583,27 @@ img.team-flag {
   cursor: pointer; font-size: 0.76rem; font-weight: 900; padding: 6px 14px; margin-top: 4px;
 }
 .wc-champ-voters-more:hover { border-color: rgba(0,207,180,0.6); background: rgba(0,207,180,0.14); }
+
+/* ===== Painel admin: barra de cota + saúde por jogo ===== */
+.wc-quota-bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,0.1); overflow: hidden; margin: 2px 0; }
+.wc-quota-bar span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #ff5f5f 0%, #ffd75e 35%, #39d98a 70%); }
+.wc-sync-card small.muted { color: var(--muted); opacity: 0.75; }
+
+.wc-health { display: grid; gap: 6px; }
+.wc-health-list { display: grid; gap: 4px; max-height: 260px; overflow-y: auto; }
+.wc-health-row {
+  display: grid; grid-template-columns: auto minmax(0,1fr) auto auto; align-items: center; gap: 8px;
+  border: 1px solid rgba(255,255,255,0.07); border-radius: 10px;
+  background: rgba(255,255,255,0.03); padding: 6px 9px;
+}
+.wc-health-row.warn { border-color: rgba(255,176,46,0.4); background: rgba(255,176,46,0.06); }
+.wc-health-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.58rem; font-weight: 950; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 999px;
+}
+.wc-health-badge.live { background: rgba(227,28,121,0.18); color: #ffb3d4; }
+.wc-health-badge.finished { background: rgba(255,255,255,0.08); color: var(--muted); }
+.wc-health-match { color: #fff; font-size: 0.78rem; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wc-health-score { color: #fff; font-variant-numeric: tabular-nums; font-weight: 950; font-size: 0.82rem; }
+.wc-health-scorers { display: inline-flex; align-items: center; gap: 4px; color: var(--brand-green); font-size: 0.72rem; font-weight: 850; white-space: nowrap; }
+.wc-health-row.warn .wc-health-scorers { color: #ffb02e; }

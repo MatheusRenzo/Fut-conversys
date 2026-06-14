@@ -3382,6 +3382,26 @@ def world_cup_sync_status(
             "players": db.query(models.WorldCupPlayer).count(),
             "teams_with_squads": db.query(models.WorldCupPlayer.team).distinct().count(),
         },
+        # Saúde por jogo (ao vivo + encerrados): o admin vê o que está rolando,
+        # se encerrou, e se os goleadores já foram capturados por completo
+        "games_health": [
+            {
+                "match_number": g.match_number,
+                "matchup": f"{g.home_team} x {g.away_team}",
+                "status": g.status,
+                "score": f"{g.home_score}-{g.away_score}" if g.home_score is not None else None,
+                "goals": (g.home_score or 0) + (g.away_score or 0),
+                "scorers_count": len(game_scorer_names(g)),
+                "scorers_complete": world_cup_scorers_complete(g),
+                "scorers_final": bool(g.scorers_final),
+                "has_fixture_id": g.api_fixture_id is not None,
+                "predictions": len(g.predictions),
+            }
+            for g in db.query(models.WorldCupGame)
+            .filter(models.WorldCupGame.status.in_(("live", "finished")))
+            .order_by(models.WorldCupGame.kickoff_at.desc())
+            .all()
+        ],
     }
 
 
