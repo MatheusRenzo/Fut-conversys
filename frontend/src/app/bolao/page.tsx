@@ -209,6 +209,7 @@ type BolaoRankingPanelProps = {
   onShowAll?: () => void;
   onSelectEntry?: (entry: WorldCupLeaderboardEntry) => void;
   rankDelta?: Record<number, number>;
+  liveMoves?: Record<number, number>;
 };
 
 function MoveBadge({ delta }: { delta?: number }) {
@@ -229,6 +230,7 @@ function BolaoRankingPanel({
   onShowAll,
   onSelectEntry,
   rankDelta,
+  liveMoves,
 }: BolaoRankingPanelProps) {
   const entries = limit ? sortedRanking.slice(0, limit) : sortedRanking;
   const podium = entries.slice(0, 3);
@@ -290,9 +292,11 @@ function BolaoRankingPanel({
           {[podium[1], podium[0], podium[2]].map((entry, column) => {
             const place = column === 1 ? 1 : column === 0 ? 2 : 3;
             if (!entry) return <span className="bolao-podium2-step empty" key={`empty-${column}`} />;
+            const pLive = rankingTab === "geral" ? liveMoves?.[entry.user.id] : undefined;
+            const pMoveClass = pLive && pLive > 0 ? " moved-up" : pLive && pLive < 0 ? " moved-down" : "";
             return (
               <button
-                className={`bolao-podium2-step place-${place}`}
+                className={`bolao-podium2-step place-${place}${pMoveClass}`}
                 key={entry.user.id}
                 onClick={() => onSelectEntry?.(entry)}
                 type="button"
@@ -333,7 +337,8 @@ function BolaoRankingPanel({
       <div className="bolao-ranking-list">
         {listEntries.map((entry, index) => {
           const delta = rankingTab === "geral" ? rankDelta?.[entry.user.id] : undefined;
-          const moveClass = delta && delta > 0 ? " moved-up" : delta && delta < 0 ? " moved-down" : "";
+          const live = rankingTab === "geral" ? liveMoves?.[entry.user.id] : undefined;
+          const moveClass = live && live > 0 ? " moved-up" : live && live < 0 ? " moved-down" : "";
           return (
           <button className={`bolao-rank-row clickable${moveClass}`} key={entry.user.id} onClick={() => onSelectEntry?.(entry)} type="button">
             <span className="bolao-rank-pos">
@@ -860,6 +865,30 @@ export default function BolaoPage() {
     [board?.games],
   );
 
+  // Movimentação AO VIVO: compara a posição de cada um entre atualizações e mostra
+  // aura leve (sobe/desce) por alguns segundos — pega QUALQUER mudança, não só do
+  // último jogo. Some sozinho (não é pra sempre).
+  const [liveMovements, setLiveMovements] = useState<Record<number, number>>({});
+  const prevRanksRef = useRef<Record<number, number> | null>(null);
+  useEffect(() => {
+    const lb = board?.leaderboard ?? [];
+    if (lb.length === 0) return;
+    const curr: Record<number, number> = {};
+    lb.forEach((e) => { curr[e.user.id] = e.rank; });
+    const prev = prevRanksRef.current;
+    prevRanksRef.current = curr;
+    if (!prev) return; // primeira carga: sem efeito
+    const moves: Record<number, number> = {};
+    lb.forEach((e) => {
+      const p = prev[e.user.id];
+      if (p != null && p !== e.rank) moves[e.user.id] = p - e.rank; // + = subiu
+    });
+    if (Object.keys(moves).length === 0) return;
+    setLiveMovements(moves);
+    const t = window.setTimeout(() => setLiveMovements({}), 6000);
+    return () => window.clearTimeout(t);
+  }, [board?.leaderboard]);
+
   // Flash "+N pts" quando os pontos do próprio usuário sobem ao vivo (dopamina)
   const [pointsFlash, setPointsFlash] = useState<number | null>(null);
   const prevPointsRef = useRef<number | null>(null);
@@ -1371,6 +1400,7 @@ export default function BolaoPage() {
           onShowAll={() => setRankingModalOpen(true)}
           onTabChange={setRankingTab}
           rankDelta={rankDelta}
+          liveMoves={liveMovements}
           rankingTab={rankingTab}
           sortedRanking={sortedRanking}
         />
@@ -1968,6 +1998,7 @@ export default function BolaoPage() {
               onSelectEntry={setSelectedEntry}
               onTabChange={setRankingTab}
               rankDelta={rankDelta}
+              liveMoves={liveMovements}
               rankingTab={rankingTab}
               sortedRanking={sortedRanking}
             />

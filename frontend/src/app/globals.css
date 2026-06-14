@@ -12471,36 +12471,28 @@ img.team-flag {
 .bolao-move.stagnant { color: var(--muted); background: rgba(255,255,255,0.07); }
 @keyframes bolao-move-pop { 0% { transform: translateY(3px) scale(0.5); opacity: 0; } 60% { transform: scale(1.15); } 100% { transform: none; opacity: 1; } }
 
-/* Linha que se moveu: pulsa 3x e FICA com borda+tint (dopamina que dura) */
-.bolao-rank-row.moved-up {
-  border-left: 3px solid #39d98a;
-  background: linear-gradient(90deg, rgba(57,217,138,0.15), rgba(255,255,255,0.03)) !important;
-  animation: bolao-pulse-up 1.05s ease-in-out 3;
+/* Linha que se moveu: AURA LEVE verde/vermelha que aparece e some em ~6s (o JS
+   remove a classe). Sutil, minimalista, mas dá o toque de dopamina. */
+.bolao-rank-row.moved-up { animation: bolao-aura-up 6s ease-out forwards; }
+.bolao-rank-row.moved-down { animation: bolao-aura-down 6s ease-out forwards; }
+@keyframes bolao-aura-up {
+  0% { box-shadow: inset 2px 0 0 rgba(57,217,138,0), 0 0 0 rgba(57,217,138,0); }
+  12% { box-shadow: inset 2px 0 0 rgba(57,217,138,0.9), 0 0 16px rgba(57,217,138,0.32); background: rgba(57,217,138,0.10); }
+  100% { box-shadow: inset 2px 0 0 rgba(57,217,138,0), 0 0 0 rgba(57,217,138,0); background: transparent; }
 }
-.bolao-rank-row.moved-down {
-  border-left: 3px solid #ff5f5f;
-  background: linear-gradient(90deg, rgba(255,95,95,0.13), rgba(255,255,255,0.03)) !important;
-  animation: bolao-pulse-down 1.05s ease-in-out 3;
-}
-@keyframes bolao-pulse-up {
-  0%,100% { box-shadow: inset 0 0 0 rgba(57,217,138,0); }
-  50% { box-shadow: inset 0 0 22px rgba(57,217,138,0.45), 0 0 14px rgba(57,217,138,0.3);
-        background: linear-gradient(90deg, rgba(57,217,138,0.34), rgba(255,255,255,0.05)) !important; }
-}
-@keyframes bolao-pulse-down {
-  0%,100% { box-shadow: inset 0 0 0 rgba(255,95,95,0); }
-  50% { box-shadow: inset 0 0 20px rgba(255,95,95,0.38); background: linear-gradient(90deg, rgba(255,95,95,0.28), rgba(255,255,255,0.05)) !important; }
+@keyframes bolao-aura-down {
+  0% { box-shadow: inset 2px 0 0 rgba(255,95,95,0), 0 0 0 rgba(255,95,95,0); }
+  12% { box-shadow: inset 2px 0 0 rgba(255,95,95,0.85), 0 0 14px rgba(255,95,95,0.28); background: rgba(255,95,95,0.08); }
+  100% { box-shadow: inset 2px 0 0 rgba(255,95,95,0), 0 0 0 rgba(255,95,95,0); background: transparent; }
 }
 .bolao-rank-row.moved-up .bolao-rank-fullname::after { content: " ▲"; color: #39d98a; font-size: 0.7em; }
 .bolao-rank-row.moved-down .bolao-rank-fullname::after { content: " ▼"; color: #ff6b6b; font-size: 0.7em; }
+/* Pódio: mesma aura leve e temporária */
+.bolao-podium2-step.moved-up { animation: bolao-aura-up 6s ease-out forwards; }
+.bolao-podium2-step.moved-down { animation: bolao-aura-down 6s ease-out forwards; }
 
-.bolao-podium2-move { animation: bolao-badge-glow 1.4s ease-in-out infinite; }
 .bolao-podium2-move.up { color: #0c2a14; background: linear-gradient(135deg,#7ef29a,#39d98a); }
 .bolao-podium2-move.down { color: #2e0c0c; background: linear-gradient(135deg,#ff9a9a,#ff5f5f); }
-@keyframes bolao-badge-glow {
-  0%,100% { box-shadow: 0 0 0 rgba(57,217,138,0); transform: scale(1); }
-  50% { box-shadow: 0 0 12px rgba(57,217,138,0.55); transform: scale(1.05); }
-}
 
 /* Placar AO VIVO pulsando (dopamina de jogo rolando) */
 .wc-live-score {

@@ -1276,34 +1276,45 @@ def world_cup_leaderboard_response(db: Session) -> list[dict[str, Any]]:
     for index, row in enumerate(leaderboard, start=1):
         row["rank"] = index
 
-    # Movimentação determinística: compara o ranking ATUAL com o ranking SEM o
-    # último jogo encerrado. Verde = subiu por causa do último resultado.
-    last_game = (
-        db.query(models.WorldCupGame)
-        .filter(models.WorldCupGame.status == "finished")
-        .order_by(models.WorldCupGame.kickoff_at.desc())
-        .first()
-    )
-    last_game_points: dict[int, int] = {}
-    if last_game:
-        for pred in last_game.predictions:
-            last_game_points[pred.user_id] = last_game_points.get(pred.user_id, 0) + (pred.points or 0)
-    before = sorted(
-        leaderboard,
-        key=lambda item: (
-            item["points"] - last_game_points.get(item["user"]["id"], 0),
-            item["exact_scores"],
-            item["outcome_hits"],
-            item["scorer_hits"],
-            item["predictions"],
-        ),
-        reverse=True,
-    )
-    before_rank = {row["user"]["id"]: i for i, row in enumerate(before, start=1)}
+    # Movimentação = posição ANTES da última rodada menos a posição agora (persistida
+    # em wc_rank_movement pelo sync, que roda a cada ciclo). Sobrevive a reload e pega
+    # a subida real ao longo da rodada — não só do "último jogo".
+    raw_mv = get_app_setting(db, "wc_rank_movement")
+    try:
+        moves = json.loads(raw_mv) if raw_mv else {}
+    except json.JSONDecodeError:
+        moves = {}
     for row in leaderboard:
-        row["movement"] = before_rank.get(row["user"]["id"], row["rank"]) - row["rank"]
+        row["movement"] = int(moves.get(str(row["user"]["id"]), 0) or 0)
 
     return leaderboard[:30]
+
+
+def update_rank_movement(db: Session) -> None:
+    """Atualiza a movimentação do ranking: guarda a posição de cada um ANTES da
+    última rodada (snapshot que só avança quando um novo jogo encerra) e calcula o
+    delta vs a posição atual. Chamado pelo sync (que faz commit)."""
+    lb = world_cup_leaderboard_response(db)
+    current = {str(row["user"]["id"]): row["rank"] for row in lb}
+    finished = db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "finished").count()
+    raw = get_app_setting(db, "wc_rank_state")
+    try:
+        state = json.loads(raw) if raw else None
+    except json.JSONDecodeError:
+        state = None
+    if not state:
+        prev = current
+        state = {"prev": current, "curr": current, "games": finished}
+    elif state.get("games", 0) < finished:
+        # novo jogo encerrou → a posição "de antes" passa a ser a curr anterior
+        prev = state.get("curr", current)
+        state = {"prev": prev, "curr": current, "games": finished}
+    else:
+        prev = state.get("prev", current)
+        state = {"prev": prev, "curr": current, "games": finished}
+    movement = {uid: int(prev.get(uid, rank)) - int(rank) for uid, rank in current.items()}
+    set_app_setting(db, "wc_rank_state", json.dumps(state, ensure_ascii=False))
+    set_app_setting(db, "wc_rank_movement", json.dumps(movement, ensure_ascii=False))
 
 
 def world_cup_stage_from_section(section: str) -> tuple[str, str | None]:
@@ -2745,6 +2756,8 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
     finished_games = db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "finished").all()
     for game in finished_games:
         score_world_cup_game(game)
+    db.flush()
+    update_rank_movement(db)
     now_iso = datetime.now(timezone.utc).isoformat()
     set_app_setting(db, "world_cup_last_sync", now_iso)
     # marca quando os artilheiros mudaram pela última vez (pro painel/contagem)
