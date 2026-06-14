@@ -75,17 +75,25 @@ FOOTBALL_DATA_MATCHES_URL = os.getenv(
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_CHAT_URL = os.getenv("OPENAI_CHAT_URL", "https://api.openai.com/v1/chat/completions")
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "").strip()
+# Pode ter VÁRIAS chaves da API-Football (cada uma 100/dia) — usamos a que
+# tiver mais cota no dia, somando ~200+/dia e ficando bem mais ao vivo.
+API_FOOTBALL_KEYS = [
+    k.strip()
+    for k in ",".join(
+        filter(None, [os.getenv("API_FOOTBALL_KEY", ""), os.getenv("API_FOOTBALL_KEY_2", ""), os.getenv("API_FOOTBALL_KEY_3", "")])
+    ).split(",")
+    if k.strip()
+]
+API_FOOTBALL_KEY = API_FOOTBALL_KEYS[0] if API_FOOTBALL_KEYS else ""
 API_FOOTBALL_LIVE_URL = os.getenv("API_FOOTBALL_LIVE_URL", "https://v3.football.api-sports.io/fixtures?live=all")
 API_FOOTBALL_FIXTURE_URL = os.getenv("API_FOOTBALL_FIXTURE_URL", "https://v3.football.api-sports.io/fixtures")
 API_FOOTBALL_LEAGUE_ID = int(os.getenv("API_FOOTBALL_LEAGUE_ID", "1"))
 API_FOOTBALL_DAILY_BUDGET = int(os.getenv("API_FOOTBALL_DAILY_BUDGET", "100"))
-# Reserva: para de chamar a API quando restam só N requisições do dia
+# Reserva por chave: para de usar UMA chave quando restam só N req dela
 API_FOOTBALL_DAILY_RESERVE = int(os.getenv("API_FOOTBALL_DAILY_RESERVE", "4"))
-# Gap mínimo entre chamadas live=all da API-Football (goleadores ao vivo).
-# O PLACAR ao vivo vem da football-data (ilimitada) a cada ciclo; a API-Football
-# só enriquece com goleadores de tempos em tempos pra caber nas 100/dia.
-API_FOOTBALL_LIVE_GAP = max(300, int(os.getenv("API_FOOTBALL_LIVE_GAP_SECONDS", "600")))
+# Gap mínimo entre chamadas live=all (goleadores ao vivo). Com 2 chaves (200/dia)
+# dá pra ser bem mais frequente; o PLACAR já vem da football-data a cada ciclo.
+API_FOOTBALL_LIVE_GAP = max(120, int(os.getenv("API_FOOTBALL_LIVE_GAP_SECONDS", "240")))
 # Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há
 WORLD_CUP_LIVE_INTERVAL = max(45, int(os.getenv("WORLD_CUP_LIVE_INTERVAL_SECONDS", "75")))
 WORLD_CUP_IDLE_INTERVAL = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600")))
@@ -1869,7 +1877,7 @@ def discover_api_fixture_ids(db: Session, status: dict[str, Any]) -> None:
     """Descobre o fixture_id de jogos encerrados que não o têm, via
     fixtures?date=. Permite finalizar goleadores mesmo de jogos que já tinham
     acabado quando o sistema subiu (cold-start)."""
-    if not API_FOOTBALL_KEY:
+    if not API_FOOTBALL_KEYS:
         return
     candidates = (
         db.query(models.WorldCupGame)
@@ -1889,8 +1897,7 @@ def discover_api_fixture_ids(db: Session, status: dict[str, Any]) -> None:
         return
     dates = sorted({g.kickoff_at.strftime("%Y-%m-%d") for g in missing})
     for date in dates[:3]:  # no máx 3 chamadas por ciclo (orçamento)
-        rem = status.get("daily_remaining")
-        if rem is not None and rem <= API_FOOTBALL_DAILY_RESERVE:
+        if api_football_pick_key(db) is None:
             break
         payload = api_football_get(f"{API_FOOTBALL_FIXTURE_URL}?date={date}", db, status)
         if payload is None:
@@ -1922,14 +1929,50 @@ def discover_api_fixture_ids(db: Session, status: dict[str, Any]) -> None:
                 game.scorers_final = False  # força refinalização com a fonte definitiva
 
 
-def api_football_get(url: str, db: Session, status: dict[str, Any]) -> dict[str, Any] | None:
-    """GET na API-Football lendo a folga real de requisições dos headers.
+def api_football_key_remaining(db: Session, index: int) -> int | None:
+    """Cota restante HOJE (UTC) de uma chave; None se desconhecida (assume cheia)."""
+    raw = get_app_setting(db, f"api_football_remaining_{index}")
+    if raw and ":" in raw:
+        day_part, _, val = raw.partition(":")
+        if day_part == f"{datetime.utcnow():%Y%m%d}" and val.lstrip("-").isdigit():
+            return int(val)
+    return None
 
-    Atualiza o orçamento do dia pelos headers (fonte da verdade) e respeita o
-    limite diário. Devolve o payload ou None (com erro em status)."""
-    request = urllib.request.Request(
-        url, headers={"x-apisports-key": API_FOOTBALL_KEY, "User-Agent": "ConversysFut/1.0"}
-    )
+
+def api_football_pick_key(db: Session) -> tuple[int, str] | None:
+    """Escolhe a chave com mais cota hoje. None se todas no limite de reserva."""
+    best: tuple[int, str] | None = None
+    best_rem = -1
+    for index, key in enumerate(API_FOOTBALL_KEYS):
+        rem = api_football_key_remaining(db, index)
+        effective = API_FOOTBALL_DAILY_BUDGET if rem is None else rem
+        if effective <= API_FOOTBALL_DAILY_RESERVE:
+            continue
+        if effective > best_rem:
+            best_rem = effective
+            best = (index, key)
+    return best
+
+
+def api_football_total_remaining(db: Session) -> int:
+    """Soma da cota disponível hoje entre todas as chaves (desconhecida = cheia)."""
+    total = 0
+    for index in range(len(API_FOOTBALL_KEYS)):
+        rem = api_football_key_remaining(db, index)
+        total += API_FOOTBALL_DAILY_BUDGET if rem is None else max(0, rem)
+    return total
+
+
+def api_football_get(url: str, db: Session, status: dict[str, Any]) -> dict[str, Any] | None:
+    """GET na API-Football com ROTAÇÃO de chaves: usa a que tem mais cota hoje,
+    lê a folga real dos headers e guarda por chave (com a data UTC). Devolve o
+    payload ou None (erro/sem cota em status)."""
+    picked = api_football_pick_key(db)
+    if not picked:
+        status["skipped"] = "todas as chaves da API-Football no limite de reserva"
+        return None
+    index, key = picked
+    request = urllib.request.Request(url, headers={"x-apisports-key": key, "User-Agent": "ConversysFut/1.0"})
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             payload = json.loads(read_capped(response).decode("utf-8"))
@@ -1938,18 +1981,13 @@ def api_football_get(url: str, db: Session, status: dict[str, Any]) -> dict[str,
     except Exception as exc:
         status["error"] = str(exc)[:300]
         return None
-    if day_remaining is not None:
-        try:
-            status["daily_remaining"] = int(day_remaining)
-            status["daily_limit"] = int(day_limit) if day_limit else status.get("daily_limit")
-            # Guarda com a data UTC: a cota reseta à meia-noite UTC, então um
-            # valor de ontem não pode travar as chamadas de hoje
-            set_app_setting(
-                db, "api_football_daily_remaining", f"{datetime.utcnow():%Y%m%d}:{int(day_remaining)}"
-            )
-        except ValueError:
-            pass
+    if day_remaining is not None and day_remaining.lstrip("-").isdigit():
+        set_app_setting(db, f"api_football_remaining_{index}", f"{datetime.utcnow():%Y%m%d}:{int(day_remaining)}")
+        if day_limit and day_limit.isdigit():
+            status["daily_limit"] = int(day_limit) * len(API_FOOTBALL_KEYS)
     status["calls_made"] = status.get("calls_made", 0) + 1
+    status["key_used"] = index + 1
+    status["daily_remaining"] = api_football_total_remaining(db)
     if payload.get("errors"):
         status["error"] = json.dumps(payload["errors"], ensure_ascii=False)[:300]
         return None
@@ -1967,7 +2005,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     Tudo respeitando o limite diário (lido dos headers) e um intervalo mínimo
     entre chamadas, com os goleadores sempre UNIDOS (nunca sobrescritos)."""
     status: dict[str, Any] = {
-        "configured": bool(API_FOOTBALL_KEY),
+        "configured": bool(API_FOOTBALL_KEYS),
         "ok": False,
         "live_games": 0,
         "scorers_updated": 0,
@@ -1978,15 +2016,11 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         "skipped": None,
         "error": None,
     }
-    if not API_FOOTBALL_KEY:
+    if not API_FOOTBALL_KEYS:
         return status
 
-    # Lê a folga cacheada SÓ se for de hoje (UTC); de outro dia ignora (resetou)
-    cached_remaining = get_app_setting(db, "api_football_daily_remaining")
-    if cached_remaining and ":" in cached_remaining:
-        day_part, _, val = cached_remaining.partition(":")
-        if day_part == f"{datetime.utcnow():%Y%m%d}" and val.lstrip("-").isdigit():
-            status["daily_remaining"] = int(val)
+    # Folga total disponível hoje somando todas as chaves (rotação)
+    status["daily_remaining"] = api_football_total_remaining(db)
 
     now = datetime.utcnow()
     live_window = (
@@ -2018,9 +2052,8 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         status["skipped"] = "sem jogos em andamento"
         return status
 
-    remaining_guard = status["daily_remaining"]
-    if remaining_guard is not None and remaining_guard <= API_FOOTBALL_DAILY_RESERVE:
-        status["skipped"] = "folga diária de requisições no limite de reserva"
+    if api_football_pick_key(db) is None:
+        status["skipped"] = "todas as chaves no limite de reserva"
         return status
 
     # Descobre fixture_id dos encerrados que ainda não têm (cold-start)
@@ -2087,9 +2120,8 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
 
     # Fixa goleadores definitivos dos jogos encerrados (1 chamada cada, com folga)
     for game in pending_final:
-        rem = status["daily_remaining"]
-        if rem is not None and rem <= API_FOOTBALL_DAILY_RESERVE:
-            status["skipped"] = "folga diária insuficiente para finalizar goleadores"
+        if api_football_pick_key(db) is None:
+            status["skipped"] = "sem cota para finalizar goleadores"
             break
         payload = api_football_get(
             f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}", db, status
@@ -3332,13 +3364,10 @@ def world_cup_sync_status(
         "sources": {
             "openfootball_url": OPENFOOTBALL_2026_CUP_URL,
             "football_data_configured": bool(FOOTBALL_DATA_API_KEY),
-            "api_football_configured": bool(API_FOOTBALL_KEY),
-            "api_football_daily_remaining": (
-                int((get_app_setting(db, "api_football_daily_remaining") or "").split(":")[-1])
-                if (get_app_setting(db, "api_football_daily_remaining") or "").split(":")[-1].lstrip("-").isdigit()
-                else None
-            ),
-            "api_football_daily_limit": API_FOOTBALL_DAILY_BUDGET,
+            "api_football_configured": bool(API_FOOTBALL_KEYS),
+            "api_football_keys": len(API_FOOTBALL_KEYS),
+            "api_football_daily_remaining": api_football_total_remaining(db) if API_FOOTBALL_KEYS else None,
+            "api_football_daily_limit": API_FOOTBALL_DAILY_BUDGET * max(1, len(API_FOOTBALL_KEYS)),
             "score_source": "football-data.org (placar+status ao vivo)",
             "scorer_source": "API-Football (goleadores) + openfootball (backup)",
             "squads_source": "Wikipedia (elencos oficiais)",

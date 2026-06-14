@@ -46,6 +46,7 @@ services:
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-https://fut.conversys.global:9443/api/auth/callback/microsoft}
       FOOTBALL_DATA_API_KEY: ${FOOTBALL_DATA_API_KEY:-}
       API_FOOTBALL_KEY: ${API_FOOTBALL_KEY:-}
+      API_FOOTBALL_KEY_2: ${API_FOOTBALL_KEY_2:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     depends_on:
       db:
