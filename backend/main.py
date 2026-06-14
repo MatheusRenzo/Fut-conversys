@@ -112,6 +112,9 @@ THESPORTSDB_CYCLE_LIMIT = max(1, int(os.getenv("THESPORTSDB_CYCLE_LIMIT", "4")))
 # o teto por ciclo sozinho não basta — esta trava por janela de minuto garante que
 # NUNCA passa de 30/min mesmo com vários ciclos rápidos seguidos.
 THESPORTSDB_MINUTE_LIMIT = max(1, int(os.getenv("THESPORTSDB_MINUTE_LIMIT", "26")))
+# Backoff por jogo na confirmação grátis: re-tenta a TheSportsDB no máx a cada 15min
+# (em vez de todo ciclo de 30s), pra não consultar à toa jogos que ela ainda não tem.
+THESPORTSDB_CONFIRM_BACKOFF = max(120, int(os.getenv("THESPORTSDB_CONFIRM_BACKOFF", "900")))
 # Rede de segurança: depois disso desde o início, nenhum jogo (mesmo prorrogação +
 # pênaltis ≈ 3h) ainda está rolando. Se nenhuma fonte confirmou o fim, encerra
 # sozinho com o melhor placar — assim nenhum jogo fica "ao vivo" por horas.
@@ -2516,19 +2519,39 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
 
     # ── Confirmação GRÁTIS (TheSportsDB) pra encerrados ainda não confirmados ──
     # Cobre jogos antigos sem fixture_id da API paga (fora da janela do plano).
-    # Não gasta cota da API-Football; limitado a poucos por ciclo (30/min do free).
-    to_confirm = (
+    # Não gasta cota da API-Football. Só jogos RECENTES (TheSportsDB só tem ~hoje±) e
+    # com BACKOFF por jogo: re-tenta no máx a cada 15min em vez de todo ciclo (30s),
+    # senão jogos que a fonte nunca terá ficam sendo consultados pra sempre.
+    confirm_cutoff = now - timedelta(days=3)
+    candidates_confirm = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.status == "finished")
         .filter(or_(models.WorldCupGame.scorers_confirmed.is_(False), models.WorldCupGame.scorers_confirmed.is_(None)))
+        .filter(models.WorldCupGame.kickoff_at >= confirm_cutoff)
         .order_by(models.WorldCupGame.kickoff_at.desc())
-        .limit(THESPORTSDB_CYCLE_LIMIT)
         .all()
     )
+    to_confirm = []
+    for game in candidates_confirm:
+        last_try = get_app_setting(db, f"wc_tsd_tried_{game.id}")
+        due = True
+        if last_try:
+            try:
+                t = datetime.fromisoformat(last_try)
+                if t.tzinfo:
+                    t = t.astimezone(timezone.utc).replace(tzinfo=None)
+                due = (now - t).total_seconds() >= THESPORTSDB_CONFIRM_BACKOFF
+            except ValueError:
+                due = True
+        if due:
+            to_confirm.append(game)
+        if len(to_confirm) >= THESPORTSDB_CYCLE_LIMIT:
+            break
     for game in to_confirm:
         if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
             break  # teto por ciclo (30/min) — segue no próximo
         status["tsd_calls"] += 1
+        set_app_setting(db, f"wc_tsd_tried_{game.id}", datetime.now(timezone.utc).isoformat())
         tsd_names = fetch_thesportsdb_scorers(game, db)
         if tsd_names is None:
             continue
