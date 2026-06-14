@@ -12614,6 +12614,88 @@ img.team-flag {
 .wc-health-conf.low { background: rgba(255,255,255,0.06); color: var(--muted); }
 .wc-health-end { font-size: 0.6rem; font-weight: 800; color: var(--muted); opacity: 0.85; white-space: nowrap; }
 
+/* ===================== Dashboard admin premium ===================== */
+.wc-dash-section-title {
+  display: flex; align-items: center; gap: 6px; margin: 4px 2px 0;
+  font-size: 0.7rem; font-weight: 950; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted);
+}
+.wc-dash-section-title.detail { margin-top: 10px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.07); }
+
+/* Hero */
+.wc-dash-hero {
+  border-radius: 16px; padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(43,108,255,0.14), rgba(34,211,238,0.08));
+  border: 1px solid rgba(43,108,255,0.28);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.wc-dash-hero.live { background: linear-gradient(135deg, rgba(227,28,121,0.16), rgba(255,90,160,0.06)); border-color: rgba(227,28,121,0.4); }
+.wc-dash-hero-main { display: flex; flex-direction: column; gap: 4px; }
+.wc-dash-pulse {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  font-size: 0.72rem; font-weight: 950; letter-spacing: 0.05em; color: #aec4ff;
+  padding: 3px 10px; border-radius: 999px; background: rgba(43,108,255,0.18);
+}
+.wc-dash-pulse.on { color: #ffb3d4; background: rgba(227,28,121,0.2); animation: wcPulse 1.6s ease-in-out infinite; }
+@keyframes wcPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+.wc-dash-hero-sub { font-size: 0.72rem; color: var(--text-soft, #c7d0dd); }
+.wc-dash-hero-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+.wc-dash-stat {
+  display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 11px;
+  background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.07);
+}
+.wc-dash-stat-k { display: inline-flex; align-items: center; gap: 4px; font-size: 0.62rem; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.wc-dash-stat strong { font-size: 0.82rem; color: #fff; font-variant-numeric: tabular-nums; }
+
+/* Jogos de hoje */
+.wc-dash-today, .wc-dash-apis, .wc-dash-log { display: flex; flex-direction: column; gap: 8px; }
+.wc-dash-today-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px,1fr)); gap: 8px; }
+.wc-today-card {
+  border-radius: 12px; padding: 9px 11px; background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 6px;
+}
+.wc-today-card.live { border-color: rgba(227,28,121,0.4); background: rgba(227,28,121,0.07); }
+.wc-today-card.finished { opacity: 0.92; }
+.wc-today-top { display: flex; align-items: center; justify-content: space-between; }
+.wc-today-time { font-size: 0.74rem; font-weight: 900; color: #fff; font-variant-numeric: tabular-nums; }
+.wc-today-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.54rem; font-weight: 950; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,0.08); color: var(--muted); }
+.wc-today-badge.live { background: rgba(227,28,121,0.2); color: #ffb3d4; }
+.wc-today-badge.finished { background: rgba(57,217,138,0.14); color: var(--brand-green); }
+.wc-today-match { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 6px; font-size: 0.74rem; font-weight: 700; color: #e8eefc; }
+.wc-today-match span:first-child { text-align: right; }
+.wc-today-score { font-size: 0.95rem; font-weight: 950; color: #fff; font-variant-numeric: tabular-nums; padding: 0 4px; }
+.wc-today-scorers { display: flex; align-items: center; gap: 4px; font-size: 0.66rem; color: var(--brand-green); font-weight: 700; }
+.wc-today-meta { display: flex; gap: 8px; font-size: 0.6rem; font-weight: 800; }
+.wc-today-meta .ok { color: var(--brand-green); }
+.wc-today-meta .mid { color: #ffc879; }
+.wc-today-meta .low { color: var(--muted); }
+.wc-today-meta .muted { color: var(--muted); opacity: 0.8; }
+
+/* Requisições por API */
+.wc-dash-apis-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap: 8px; }
+.wc-api-card { border-radius: 12px; padding: 9px 11px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 5px; }
+.wc-api-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.wc-api-card-head strong { font-size: 0.74rem; color: #fff; }
+.wc-api-calls { font-size: 0.8rem; font-weight: 950; color: var(--brand-cyan, #22d3ee); font-variant-numeric: tabular-nums; }
+.wc-api-label { font-size: 0.62rem; color: var(--muted); }
+.wc-api-free { font-size: 0.6rem; color: var(--muted); opacity: 0.85; }
+.wc-api-rem { font-size: 0.6rem; color: var(--brand-green); font-weight: 700; }
+
+/* Log de eventos */
+.wc-dash-log-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.wc-log-row {
+  display: grid; grid-template-columns: auto auto 1fr; align-items: baseline; gap: 8px;
+  padding: 5px 8px; border-radius: 8px; font-size: 0.7rem;
+}
+.wc-log-row:nth-child(odd) { background: rgba(255,255,255,0.025); }
+.wc-log-time { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--muted); }
+.wc-log-game { font-weight: 800; color: #aec4ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+.wc-log-action { color: #e8eefc; }
+@media (max-width: 560px) {
+  .wc-dash-hero-stats { grid-template-columns: 1fr; }
+  .wc-log-row { grid-template-columns: auto 1fr; }
+  .wc-log-game { grid-column: 2; max-width: none; }
+}
+
 /* ============================================================
    Design system v2 — unifica feed/perfil/eventos com o bolão
    (vidro escuro, glow sutil, raio 16-18px, gradiente azul→ciano)

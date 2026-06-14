@@ -418,6 +418,43 @@ export type WorldCupSyncStatus = {
     players: number;
     teams_with_squads: number;
   };
+  game_events?: Array<{
+    at: string;
+    match_number?: number | null;
+    game: string;
+    action: string;
+  }>;
+  today_games?: Array<{
+    match_number?: number | null;
+    home_team: string;
+    away_team: string;
+    kickoff_at?: string | null;
+    status: string;
+    score?: string | null;
+    scorers?: string | null;
+    scorers_complete?: boolean;
+    scorers_confirmations?: number;
+    end_source?: string | null;
+  }>;
+  requests_today?: Record<
+    string,
+    {
+      calls: number;
+      daily_cap?: number | null;
+      remaining?: number | null;
+      limit_per_min?: number;
+      label?: string;
+    }
+  >;
+  cadence?: {
+    live_now: boolean;
+    loop_seconds: number;
+    last_sync_at?: string | null;
+    last_live_poll_at?: string | null;
+    live_poll_gap_seconds?: number;
+    goal_pending?: boolean;
+    last_scorer_update_at?: string | null;
+  };
 };
 
 export type SearchResults = {

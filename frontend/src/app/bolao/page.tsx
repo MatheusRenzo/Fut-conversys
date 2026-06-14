@@ -5,15 +5,18 @@ import type { FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
+  Activity,
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
+  Clock,
   Crown,
   Flame,
   Goal,
   Lock,
   Medal,
   Pencil,
+  Radio,
   RefreshCcw,
   Save,
   Settings2,
@@ -140,6 +143,34 @@ function countdownParts(targetIso: string, now: number) {
 
 function pad(value: number) {
   return String(value).padStart(2, "0");
+}
+
+// "há 12s" / "há 3min" / "há 2h" a partir de um ISO
+function agoLabel(iso: string | null | undefined, now: number) {
+  if (!iso) return "—";
+  const diff = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 1000));
+  if (diff < 60) return `há ${diff}s`;
+  if (diff < 3600) return `há ${Math.floor(diff / 60)}min`;
+  return `há ${Math.floor(diff / 3600)}h`;
+}
+
+// contagem regressiva "em 8s" / "em 2min" para a próxima atualização
+function inLabel(lastIso: string | null | undefined, gapSeconds: number | undefined, now: number) {
+  if (!gapSeconds) return "—";
+  const base = lastIso ? new Date(lastIso).getTime() : now;
+  const remaining = Math.max(0, Math.round((base + gapSeconds * 1000 - now) / 1000));
+  if (remaining <= 0) return "no próximo ciclo";
+  if (remaining < 60) return `em ${remaining}s`;
+  return `em ${Math.floor(remaining / 60)}min ${pad(remaining % 60)}s`;
+}
+
+function timeHM(iso: string | null | undefined) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Sao_Paulo",
+  });
 }
 
 function minutesUntilBetClose(game: WorldCupGame, now: number) {
@@ -809,18 +840,23 @@ export default function BolaoPage() {
   useEffect(() => {
     if (!adminModalOpen || !isAdminProfile) return;
     let active = true;
-    api
-      .worldCupSyncStatus()
-      .then((status) => {
-        if (!active) return;
-        setSyncStatus(status);
-        setSyncStatusError("");
-      })
-      .catch((nextError) => {
-        if (active) setSyncStatusError(nextError instanceof Error ? nextError.message : "Não foi possível carregar o status");
-      });
+    const load = () =>
+      api
+        .worldCupSyncStatus()
+        .then((status) => {
+          if (!active) return;
+          setSyncStatus(status);
+          setSyncStatusError("");
+        })
+        .catch((nextError) => {
+          if (active) setSyncStatusError(nextError instanceof Error ? nextError.message : "Não foi possível carregar o status");
+        });
+    load();
+    // re-busca a cada 10s enquanto o painel está aberto (dashboard ao vivo)
+    const poll = window.setInterval(load, 10_000);
     return () => {
       active = false;
+      window.clearInterval(poll);
     };
   }, [adminModalOpen, isAdminProfile]);
 
@@ -2001,26 +2037,121 @@ export default function BolaoPage() {
             {syncStatusError && <p className="bolao-feedback error">{syncStatusError}</p>}
             {syncStatus ? (
               <div className="wc-sync-status">
-                <div className="wc-sync-overview">
-                  <span className={syncStatus.live_now ? "wc-sync-cadence live" : "wc-sync-cadence"}>
-                    {syncStatus.live_now ? <span className="wc-live-dot" /> : <RefreshCcw size={13} />}
-                    {syncStatus.live_now ? "AO VIVO" : "Ocioso"} · atualiza a cada{" "}
-                    {syncStatus.live_now
-                      ? `${syncStatus.live_interval_seconds ?? 75}s`
-                      : `${Math.round((syncStatus.idle_interval_seconds ?? 600) / 60)} min`}
-                  </span>
-                  {syncStatus.sources.api_football_configured && (
-                    <span className="wc-sync-budget">
-                      <Zap size={12} /> API-Football: {syncStatus.sources.api_football_daily_remaining ?? "?"}/
-                      {syncStatus.sources.api_football_daily_limit ?? 100} req restantes hoje
+                {/* ── HERO AO VIVO: pulso + última sync + contagem regressiva ── */}
+                <div className={syncStatus.live_now ? "wc-dash-hero live" : "wc-dash-hero"}>
+                  <div className="wc-dash-hero-main">
+                    <span className={syncStatus.live_now ? "wc-dash-pulse on" : "wc-dash-pulse"}>
+                      {syncStatus.live_now ? <Radio size={15} /> : <Clock size={15} />}
+                      {syncStatus.live_now ? "AO VIVO" : "EM ESPERA"}
                     </span>
-                  )}
-                  {syncStatus.sources.ai_configured && (
-                    <span className="wc-sync-budget">
-                      <Sparkles size={12} /> GPT: {syncStatus.sources.ai_calls_today ?? 0} chamadas hoje
+                    <span className="wc-dash-hero-sub">
+                      ciclo a cada {syncStatus.cadence?.loop_seconds ?? syncStatus.sync_interval_seconds}s · última sync{" "}
+                      {agoLabel(syncStatus.cadence?.last_sync_at ?? syncStatus.last_sync, currentTime)}
                     </span>
-                  )}
+                  </div>
+                  <div className="wc-dash-hero-stats">
+                    <div className="wc-dash-stat">
+                      <span className="wc-dash-stat-k"><Activity size={12} /> painel ao vivo</span>
+                      <strong>{inLabel(syncStatus.cadence?.last_sync_at ?? syncStatus.last_sync, syncStatus.cadence?.loop_seconds, currentTime)}</strong>
+                    </div>
+                    <div className="wc-dash-stat">
+                      <span className="wc-dash-stat-k"><Goal size={12} /> goleadores</span>
+                      <strong>
+                        {syncStatus.cadence?.goal_pending
+                          ? "⚡ buscando agora"
+                          : inLabel(syncStatus.cadence?.last_live_poll_at, syncStatus.cadence?.live_poll_gap_seconds, currentTime)}
+                      </strong>
+                    </div>
+                    <div className="wc-dash-stat">
+                      <span className="wc-dash-stat-k"><Trophy size={12} /> artilheiros</span>
+                      <strong>{syncStatus.cadence?.last_scorer_update_at ? `atualizado ${agoLabel(syncStatus.cadence.last_scorer_update_at, currentTime)}` : "aguardando gol"}</strong>
+                    </div>
+                  </div>
                 </div>
+
+                {/* ── JOGOS DE HOJE ── */}
+                {(syncStatus.today_games?.length ?? 0) > 0 && (
+                  <div className="wc-dash-today">
+                    <span className="wc-dash-section-title"><Clock size={13} /> Jogos de hoje ({syncStatus.today_games?.length})</span>
+                    <div className="wc-dash-today-list">
+                      {(syncStatus.today_games ?? []).map((g, i) => (
+                        <div className={`wc-today-card ${g.status}`} key={i}>
+                          <div className="wc-today-top">
+                            <span className="wc-today-time">{timeHM(g.kickoff_at)}</span>
+                            <span className={`wc-today-badge ${g.status}`}>
+                              {g.status === "live" && <span className="wc-live-dot small" />}
+                              {g.status === "live" ? "AO VIVO" : g.status === "finished" ? "ENCERRADO" : "AGENDADO"}
+                            </span>
+                          </div>
+                          <div className="wc-today-match">
+                            <span>{g.home_team}</span>
+                            <strong className="wc-today-score">{g.score ?? "×"}</strong>
+                            <span>{g.away_team}</span>
+                          </div>
+                          {g.scorers && <div className="wc-today-scorers"><Goal size={11} /> {g.scorers}</div>}
+                          {g.status === "finished" && (g.score && g.score !== "0-0") && (
+                            <div className="wc-today-meta">
+                              <span className={(g.scorers_confirmations ?? 0) >= 2 ? "ok" : (g.scorers_confirmations ?? 0) === 1 ? "mid" : "low"}>
+                                {(g.scorers_confirmations ?? 0) >= 2 ? "✓✓" : "✓"} {g.scorers_confirmations ?? 0} fonte(s)
+                              </span>
+                              {g.end_source && <span className="muted">fim: {g.end_source}</span>}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── REQUISIÇÕES POR API (hoje) ── */}
+                {syncStatus.requests_today && (
+                  <div className="wc-dash-apis">
+                    <span className="wc-dash-section-title"><Zap size={13} /> Requisições hoje por API</span>
+                    <div className="wc-dash-apis-grid">
+                      {Object.entries(syncStatus.requests_today).map(([key, r]) => {
+                        const names: Record<string, string> = {
+                          football_data: "football-data", api_football: "API-Football",
+                          thesportsdb: "TheSportsDB", openai: "IA (GPT)",
+                        };
+                        const cap = r.daily_cap ?? null;
+                        const pct = cap ? Math.min(100, Math.round((r.calls / cap) * 100)) : null;
+                        return (
+                          <div className="wc-api-card" key={key}>
+                            <div className="wc-api-card-head">
+                              <strong>{names[key] ?? key}</strong>
+                              <span className="wc-api-calls">{r.calls}{cap ? `/${cap}` : ""}</span>
+                            </div>
+                            <span className="wc-api-label">{r.label}</span>
+                            {pct !== null ? (
+                              <div className="wc-quota-bar"><span style={{ width: `${Math.max(2, pct)}%` }} /></div>
+                            ) : (
+                              <span className="wc-api-free">{r.limit_per_min ? `${r.limit_per_min}/min · sem teto diário` : "sem teto"}</span>
+                            )}
+                            {cap && r.remaining != null && <span className="wc-api-rem">{r.remaining} restantes</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── LOG DE EVENTOS POR JOGO ── */}
+                {(syncStatus.game_events?.length ?? 0) > 0 && (
+                  <div className="wc-dash-log">
+                    <span className="wc-dash-section-title"><Activity size={13} /> Log dos jogos — o que o sistema fez e quando</span>
+                    <div className="wc-dash-log-list">
+                      {(syncStatus.game_events ?? []).slice(0, 14).map((ev, i) => (
+                        <div className="wc-log-row" key={i}>
+                          <span className="wc-log-time">{timeHM(ev.at)}</span>
+                          <span className="wc-log-game">{ev.match_number ? `#${ev.match_number} ` : ""}{ev.game}</span>
+                          <span className="wc-log-action">{ev.action}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <span className="wc-dash-section-title detail"><Settings2 size={13} /> Detalhes técnicos das fontes</span>
                 <div className={syncStatus.games_sync?.ok === false ? "wc-sync-card error" : "wc-sync-card ok"}>
                   <span className="wc-sync-card-head">
                     <RefreshCcw size={14} />
