@@ -1759,6 +1759,20 @@ def bump_thesportsdb_call(db: Session | None) -> None:
     set_app_setting(db, "thesportsdb_minute_window", f"{minute_key}:{used + 1}")
 
 
+def bump_game_poll(db: Session, game_id: int, api: str) -> None:
+    """Conta quantas vezes cada API foi consultada PARA ESTE JOGO (pro painel:
+    'rodou N× na API-Football, M× na TheSportsDB')."""
+    key = f"gpoll_{api}_{game_id}"
+    raw = get_app_setting(db, key)
+    n = int(raw) if (raw or "").isdigit() else 0
+    set_app_setting(db, key, str(n + 1))
+
+
+def game_poll_count(db: Session, game_id: int, api: str) -> int:
+    raw = get_app_setting(db, f"gpoll_{api}_{game_id}")
+    return int(raw) if (raw or "").isdigit() else 0
+
+
 def log_game_event(db: Session, game: models.WorldCupGame, action: str) -> None:
     """Registra um evento do jogo (gol, encerramento, confirmação) num log rolante
     pro painel: 'o que fez, em qual jogo, quando'."""
@@ -2351,6 +2365,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         payload = call(f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}")
         if payload is None:
             break
+        bump_game_poll(db, game.id, "af")
         fixtures = payload.get("response") or []
         if not fixtures:
             game.scorers_final = True
@@ -2372,6 +2387,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         tsd_names = []
         if status["tsd_calls"] < THESPORTSDB_CYCLE_LIMIT:
             status["tsd_calls"] += 1
+            bump_game_poll(db, game.id, "tsd")
             tsd_names = fetch_thesportsdb_scorers(game, db) or []
         # Fonte 3 (backup): o que o openfootball/feed já tinha
         of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
@@ -2491,6 +2507,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 ))
                 if not item:
                     continue
+                bump_game_poll(db, game.id, "af")
                 fid = ((item.get("fixture") or {}).get("id"))
                 if fid and not game.api_fixture_id:
                     game.api_fixture_id = int(fid)
@@ -2551,6 +2568,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
             break  # teto por ciclo (30/min) — segue no próximo
         status["tsd_calls"] += 1
+        bump_game_poll(db, game.id, "tsd")
         set_app_setting(db, f"wc_tsd_tried_{game.id}", datetime.now(timezone.utc).isoformat())
         # [] (não None): mesmo que a TheSportsDB não tenha o jogo, ainda re-confirmamos
         # via openfootball — assim TODO jogo recebe ao menos 1 fonte corroborando.
@@ -2582,6 +2600,57 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             status["confirmed"] += 1
         if world_cup_scorers_complete(game):
             game.scorers_final = True
+
+    # ── RE-CONFIRMAÇÃO PELA API-FOOTBALL (3ª fonte definitiva): jogos finalizados
+    # com MENOS de 2 fontes corroborando recebem uma re-checagem na API paga quando
+    # há cota SOBRANDO (acima da reserva + folga). Backoff por jogo. É o "todos têm
+    # que re-confirmar usando todas as APIs". ──
+    if api_football_total_remaining(db) > finalize_reserve + 3:
+        reconf = (
+            db.query(models.WorldCupGame)
+            .filter(models.WorldCupGame.status == "finished")
+            .filter(models.WorldCupGame.api_fixture_id.isnot(None))
+            .filter((models.WorldCupGame.scorers_confirmations < 2) | (models.WorldCupGame.scorers_confirmations.is_(None)))
+            .order_by(models.WorldCupGame.kickoff_at.desc())
+            .all()
+        )
+        for game in reconf:
+            if api_football_total_remaining(db) <= finalize_reserve + 3:
+                break
+            last = get_app_setting(db, f"wc_af_reconf_{game.id}")
+            if last:
+                try:
+                    t = datetime.fromisoformat(last)
+                    if t.tzinfo:
+                        t = t.astimezone(timezone.utc).replace(tzinfo=None)
+                    if (now - t).total_seconds() < 3600:  # re-confirma no máx 1×/h por jogo
+                        continue
+                except ValueError:
+                    pass
+            set_app_setting(db, f"wc_af_reconf_{game.id}", datetime.now(timezone.utc).isoformat())
+            payload = call(f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}")
+            if payload is None:
+                break
+            bump_game_poll(db, game.id, "af")
+            fixtures = payload.get("response") or []
+            if not fixtures:
+                continue
+            api_names = extract_api_football_scorers(fixtures[0])
+            squad = world_cup_game_squad(db, game)
+            of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+            candidate = api_names + of_names
+            official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in candidate) if n], squad)
+            if ", ".join(official) != (game.scorers or "") and official:
+                game.scorers = ", ".join(official)[:500]
+                status["scorers_updated"] += 1
+            prev_sources = [s.strip() for s in (game.confirmation_sources or "").split(",") if s.strip()]
+            if scorer_source_corroborates(api_names, official) and "API-Football" not in prev_sources:
+                prev_sources.append("API-Football")
+            game.confirmation_sources = ", ".join(prev_sources) or game.confirmation_sources
+            game.scorers_confirmations = max(game.scorers_confirmations or 0, len(prev_sources))
+            if len(prev_sources) >= 2 and world_cup_scorers_complete(game):
+                game.scorers_confirmed = True
+                status["confirmed"] += 1
 
     # ── VARREDURA FINAL: jogo encerrado cujos goleadores JÁ cobrem os gols vira
     # 'final' mesmo que nenhuma fonte de confirmação tenha o jogo (o openfootball já
@@ -3998,6 +4067,7 @@ def world_cup_sync_status(
                 "scorers_confirmations": g.scorers_confirmations or 0,
                 "confirmation_sources": g.confirmation_sources,
                 "end_source": g.end_source,
+                "polls": {"api_football": game_poll_count(db, g.id, "af"), "thesportsdb": game_poll_count(db, g.id, "tsd")},
                 "has_fixture_id": g.api_fixture_id is not None,
                 "predictions": len(g.predictions),
             }

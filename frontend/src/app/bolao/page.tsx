@@ -1887,7 +1887,8 @@ export default function BolaoPage() {
                         <span>
                           <TeamFlag team={game.home_team} /> {teamLabel(game.home_team)}
                         </span>
-                        <strong>
+                        <strong className={game.status === "live" ? "wc-live-score" : ""}>
+                          {game.status === "live" && <span className="wc-live-dot small" />}
                           {showScore ? `${game.home_score} x ${game.away_score}` : `${prediction.home_score} x ${prediction.away_score}`}
                         </strong>
                         <span>
@@ -2071,144 +2072,56 @@ export default function BolaoPage() {
                   );
                 })()}
 
-                <div className="wc-tech-block">
-                  <div className="wc-tech-h">Como funciona — regras reais</div>
-                  <div className="wc-tech-rules">
-                    <div><b>Pontos:</b> placar exato 3 · só o vencedor 1 · acertar goleador +1 (soma) · campeã 10.</div>
-                    <div><b>Palpite fecha:</b> 1h antes do início de cada jogo (campeã: 1h antes da estreia do Brasil).</div>
-                    <div><b>Pipeline de cada jogo:</b> football-data marca AO VIVO e o placar (grátis) → no GOL a API-Football pega o NOME (paga) → no fim a IA cruza tudo com o elenco e fixa a lista → TheSportsDB/openfootball re-confirmam.</div>
-                    <div><b>Nunca perde goleador:</b> a lista só CRESCE (união); todo nome é encaixado no elenco oficial salvo.</div>
-                    <div><b>Limites (nunca estoura):</b> API-Football 100/dia + 9/min · TheSportsDB 26/min · football-data 1 por ciclo · IA cacheada (1×/jogo).</div>
-                    <div>
-                      <b>Ciclos hoje:</b> {syncStatus.runs?.length ?? 0} registrados · loop a cada{" "}
-                      {syncStatus.cadence?.loop_seconds ?? syncStatus.sync_interval_seconds}s quando há jogo.
-                    </div>
-                  </div>
+                {/* Legenda curta: quem faz o quê */}
+                <div className="wc-tech-legend">
+                  <span><b>Placar/fim:</b> football-data (não traz goleador)</span>
+                  <span><b>Goleador:</b> API-Football → confirma TheSportsDB → openfootball</span>
+                  <span><b>IA:</b> junta as 3 + elenco e normaliza os nomes</span>
+                  <span><b>Cota paga:</b> {syncStatus.requests_today?.api_football?.remaining ?? "?"}/{syncStatus.requests_today?.api_football?.daily_cap ?? 100} · TheSportsDB {syncStatus.requests_today?.thesportsdb?.calls ?? 0} hoje · IA {syncStatus.requests_today?.openai?.calls ?? 0}</span>
                 </div>
 
-                <div className="wc-tech-block">
-                  <div className="wc-tech-h">APIs — uso hoje · limite · sobra</div>
-                  {syncStatus.requests_today &&
-                    Object.entries(syncStatus.requests_today).map(([key, r]) => {
-                      const names: Record<string, string> = {
-                        football_data: "football-data",
-                        api_football: "API-Football",
-                        thesportsdb: "TheSportsDB",
-                        openai: "IA (GPT-4o-mini)",
-                      };
-                      const role: Record<string, string> = {
-                        football_data: "placar + status ao vivo (grátis)",
-                        api_football: "nome dos goleadores (paga)",
-                        thesportsdb: "2ª confirmação (grátis)",
-                        openai: "reconcilia + normaliza nomes",
-                      };
-                      const limit = r.daily_cap
-                        ? `${r.limit_per_min ?? "?"}/min · ${r.daily_cap}/dia`
-                        : r.limit_per_min
-                          ? `${r.limit_per_min}/min · ilimitado/dia`
-                          : "sem limite";
-                      return (
-                        <div className="wc-tech-row" key={key}>
-                          <span className="k">{names[key] ?? key}</span>
-                          <span className="d">{role[key]}</span>
-                          <span className="v">
-                            {r.calls}
-                            {r.daily_cap ? `/${r.daily_cap}` : " hoje"}
-                            {r.remaining != null ? ` · sobra ${r.remaining}` : ""}
-                          </span>
-                          <span className="lim">{limit}</span>
-                        </div>
-                      );
-                    })}
-                </div>
-
-                <div className="wc-tech-block">
-                  <div className="wc-tech-h">Cadência — quando roda de novo</div>
-                  <div className="wc-tech-row">
-                    <span className="k">placar/painel</span>
-                    <span className="v2">
-                      {inLabel(syncStatus.cadence?.last_sync_at ?? syncStatus.last_sync, syncStatus.cadence?.loop_seconds, currentTime)}
-                    </span>
-                    <span className="d">ciclo {syncStatus.cadence?.loop_seconds ?? "?"}s · football-data</span>
-                  </div>
-                  <div className="wc-tech-row">
-                    <span className="k">goleadores</span>
-                    <span className="v2">
-                      {syncStatus.cadence?.goal_pending
-                        ? "⚡ buscando agora"
-                        : inLabel(syncStatus.cadence?.last_live_poll_at, syncStatus.cadence?.live_poll_gap_seconds, currentTime)}
-                    </span>
-                    <span className="d">dispara no gol · API paga</span>
-                  </div>
-                  <div className="wc-tech-row">
-                    <span className="k">artilheiros</span>
-                    <span className="v2">
-                      {syncStatus.cadence?.last_scorer_update_at
-                        ? agoLabel(syncStatus.cadence.last_scorer_update_at, currentTime)
-                        : "aguardando gol"}
-                    </span>
-                    <span className="d">recalcula quando muda goleador</span>
-                  </div>
-                </div>
-
+                {/* JOGOS — centro do painel: por jogo, quem fez o quê */}
                 {(syncStatus.games_health?.length ?? 0) > 0 && (
                   <div className="wc-tech-block">
-                    <div className="wc-tech-h">Jogos — finalizou · confirmou (qual fonte) · re-confirmou</div>
+                    <div className="wc-tech-h">Por jogo — finalizou · confirmou · re-confirmou · 3ª · rodadas</div>
                     {(syncStatus.games_health ?? []).map((g, i) => {
                       const conf = g.scorers_confirmations ?? 0;
                       const srcs = (g.confirmation_sources ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+                      const af = g.polls?.api_football ?? 0;
+                      const tsd = g.polls?.thesportsdb ?? 0;
                       return (
-                        <div className="wc-tech-game" key={i}>
-                          <span className={`st ${g.status}`}>{g.status === "live" ? "● LIVE" : "FIM"}</span>
-                          <span className="mt">
-                            {g.match_number ? `#${g.match_number} ` : ""}
-                            {g.matchup}
-                          </span>
-                          <span className="sc">{g.score ?? "—"}</span>
-                          <span className="gl">
-                            gols {g.scorers_count}/{g.goals}
-                          </span>
-                          <span className={g.scorers_final ? "fl ok" : "fl no"}>
-                            {g.scorers_final ? "finalizado✓" : "finalizando…"}
-                          </span>
-                          <span className={conf >= 1 ? "cf ok" : "cf no"}>
-                            {conf >= 1 ? `confirmou✓ (${srcs[0] ?? "?"})` : "confirmar…"}
-                          </span>
-                          <span className={conf >= 2 ? "cf ok" : "cf no"}>
-                            {conf >= 2 ? `re-confirmou✓✓ (${srcs[1] ?? "?"})` : "re-confirmar…"}
-                          </span>
-                          {g.end_source && <span className="es">fim: {g.end_source}</span>}
+                        <div className="wc-tech-g2" key={i}>
+                          <div className="wc-tech-g2-top">
+                            <span className={`st ${g.status}`}>{g.status === "live" ? "● AO VIVO" : "FIM"}</span>
+                            <span className="mt">{g.match_number ? `#${g.match_number} ` : ""}{g.matchup}</span>
+                            <span className="sc">{g.score ?? "—"}</span>
+                            <span className="gl">{g.scorers_count}/{g.goals} ⚽</span>
+                          </div>
+                          <div className="wc-tech-g2-pipe">
+                            <span className={g.scorers_final ? "ok" : "no"}>
+                              {g.scorers_final ? `finalizou✓ (${g.end_source ?? "?"})` : "finalizando…"}
+                            </span>
+                            <span className={conf >= 1 ? "ok" : "no"}>1ª {conf >= 1 ? `✓ ${srcs[0]}` : "—"}</span>
+                            <span className={conf >= 2 ? "ok" : "no"}>2ª {conf >= 2 ? `✓ ${srcs[1]}` : "—"}</span>
+                            <span className={conf >= 3 ? "ok" : "no"}>3ª {conf >= 3 ? `✓ ${srcs[2]}` : "—"}</span>
+                            <span className="run">rodou: API-Football ×{af} · TheSportsDB ×{tsd}</span>
+                          </div>
                         </div>
                       );
                     })}
                     <div className="wc-tech-foot">
-                      finalizado = API-Football FT ou placar completo · confirmou/re-confirmou = nº de fontes
-                      independentes (API-Football, TheSportsDB, openfootball) que batem com a lista, sem contradizer
+                      &quot;confirmou/re-confirmou&quot; = fontes independentes que batem com a lista (sem contradizer).
+                      A re-confirmação na API-Football roda quando há cota sobrando (≤1×/h por jogo).
                     </div>
                   </div>
                 )}
 
-                {(syncStatus.today_games ?? []).filter((g) => g.status === "scheduled").length > 0 && (
-                  <div className="wc-tech-block">
-                    <div className="wc-tech-h">Hoje — ainda vão começar</div>
-                    {(syncStatus.today_games ?? [])
-                      .filter((g) => g.status === "scheduled")
-                      .map((g, i) => (
-                        <div className="wc-tech-row" key={i}>
-                          <span className="k">{timeHM(g.kickoff_at)}</span>
-                          <span className="d">
-                            {g.home_team} x {g.away_team}
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                )}
-
+                {/* LOG — o que fez e quando */}
                 {(syncStatus.game_events?.length ?? 0) > 0 && (
                   <div className="wc-tech-block">
                     <div className="wc-tech-h">Log — o que fez e quando</div>
                     <div className="wc-tech-log">
-                      {(syncStatus.game_events ?? []).slice(0, 20).map((ev, i) => (
+                      {(syncStatus.game_events ?? []).slice(0, 16).map((ev, i) => (
                         <div className="wc-tech-logrow" key={i}>
                           <span className="t">{timeHM(ev.at)}</span>
                           <span className="g">{ev.match_number ? `#${ev.match_number}` : ""}</span>
@@ -2216,22 +2129,6 @@ export default function BolaoPage() {
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {(syncStatus.runs?.length ?? 0) > 0 && (
-                  <div className="wc-tech-block">
-                    <div className="wc-tech-h">Últimos ciclos</div>
-                    {(syncStatus.runs ?? []).slice(0, 6).map((run, i) => (
-                      <div className="wc-tech-logrow" key={i}>
-                        <span className="t">{run.at ? timeHM(run.at) : "—"}</span>
-                        <span className={run.ok === false ? "a err" : "a"}>
-                          {run.ok === false
-                            ? `FALHOU: ${(run.error ?? "").slice(0, 50)}`
-                            : `${run.live_games ?? 0} live · ${run.scorers_updated ?? 0} gols · ${run.finalized ?? 0} fechados · ${run.api_calls ?? 0} req paga`}
-                        </span>
-                      </div>
-                    ))}
                   </div>
                 )}
               </div>

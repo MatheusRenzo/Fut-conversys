@@ -408,6 +408,7 @@ export type WorldCupSyncStatus = {
     scorers_confirmations?: number;
     confirmation_sources?: string | null;
     end_source?: string | null;
+    polls?: { api_football: number; thesportsdb: number };
     has_fixture_id: boolean;
     predictions: number;
   }>;
