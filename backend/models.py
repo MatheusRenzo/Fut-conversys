@@ -177,8 +177,10 @@ class WorldCupGame(Base):
     api_mid_checked = Column(Boolean, default=False)
     # goleadores confirmados pela 2ª fonte (TheSportsDB) batendo com a 1ª
     scorers_confirmed = Column(Boolean, default=False)
-    # quantas fontes independentes concordam com o conjunto final de goleadores
+    # quantas fontes independentes corroboram o conjunto final de goleadores
     scorers_confirmations = Column(Integer, default=0)
+    # nomes das fontes que corroboraram (ex.: "API-Football, TheSportsDB")
+    confirmation_sources = Column(String, nullable=True)
     # quem confirmou o FIM do jogo (football-data / api-football / auto:tempo)
     end_source = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

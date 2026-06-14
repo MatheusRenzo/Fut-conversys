@@ -538,6 +538,7 @@ def ensure_schema() -> None:
             "api_mid_checked": "BOOLEAN DEFAULT FALSE",
             "scorers_confirmed": "BOOLEAN DEFAULT FALSE",
             "scorers_confirmations": "INTEGER DEFAULT 0",
+            "confirmation_sources": "VARCHAR",
             "end_source": "VARCHAR",
             "created_at": "TIMESTAMP",
         },
@@ -2005,6 +2006,16 @@ def scorer_sets_agree(source_names: list[str], official: list[str]) -> bool:
     return every_official_in_source and every_source_in_official
 
 
+def scorer_source_corroborates(source_names: list[str], official: list[str]) -> bool:
+    """A fonte CORROBORA o conjunto final se tudo que ela reportou está na lista
+    final (subconjunto, sem contradição) — mesmo que ela seja parcial. É o que
+    importa pra 'confirmar/re-confirmar' em jogos de muitos gols, onde uma fonte
+    pode ter só parte dos goleadores mas não contradiz nenhum."""
+    if not source_names or not official:
+        return False
+    return all(any(same_scorer(s, o) for o in official) for s in source_names)
+
+
 def extract_api_football_scorers(fixture: dict[str, Any]) -> list[str]:
     names: list[str] = []
     for event in fixture.get("events") or []:
@@ -2368,23 +2379,28 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             {"API-Football": api_names, "TheSportsDB": tsd_names, "openfootball": of_names},
             status, squad=squad,
         )
-        base = reconciled if reconciled else merge_scorers(game.scorers, api_names + tsd_names)[0].split(", ")
-        base = [n for n in (s.strip() for s in base) if n]
-        # Encaixa no nome EXATO do elenco salvo (à prova de bala pro casamento com o
-        # palpite, que vem do dropdown do elenco). 'unmatched' = revisar.
-        official, unmatched = snap_scorers_to_squad(base, squad)
+        # UNIÃO obrigatória: junta a IA + TODAS as fontes + o que já tínhamos. A IA
+        # pode re-rodar com fontes piores e devolver MENOS nomes — nunca podemos
+        # PERDER um goleador já capturado (era o bug do 7-1 que virava 4).
+        candidate = (reconciled or []) + api_names + tsd_names + of_names
+        official, unmatched = snap_scorers_to_squad(
+            [n for n in (s.strip() for s in candidate) if n], squad
+        )
         new_scorers = ", ".join(official)[:500]
         if new_scorers != (game.scorers or ""):
             game.scorers = new_scorers
             status["scorers_updated"] += 1
         status["finalized"] += 1
-        # CONTAGEM DE CONFIRMAÇÕES: só fontes INDEPENDENTES de verdade (a paga e a
-        # grátis). openfootball não conta aqui pra não inflar (pode espelhar o que a
-        # própria API já gravou). 2 = paga e grátis bateram.
-        confirms = sum(1 for src in (api_names, tsd_names) if scorer_sets_agree(src, official))
-        game.scorers_confirmations = confirms
-        # 2+ fontes concordando, OU dado completo já reconciliado pela IA → confirmado
-        if confirms >= 2 or (reconciled and world_cup_scorers_complete(game)):
+        # CONFIRMAÇÃO: cada fonte independente que CORROBORA (tudo que ela reportou
+        # está na lista final, sem contradizer) conta. Guarda QUAIS confirmaram.
+        agreeing = [
+            name for name, src in (("API-Football", api_names), ("TheSportsDB", tsd_names), ("openfootball", of_names))
+            if scorer_source_corroborates(src, official)
+        ]
+        game.scorers_confirmations = len(agreeing)
+        game.confirmation_sources = ", ".join(agreeing) or None
+        # 2+ fontes corroborando = re-confirmado (confiança alta)
+        if len(agreeing) >= 2:
             game.scorers_confirmed = True
             status["confirmed"] += 1
         if unmatched:
@@ -2522,17 +2538,22 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         reconciled = ai_reconcile_scorers(
             db, game, {"TheSportsDB": tsd_names, "openfootball": of_names}, status, squad=squad
         )
-        base = reconciled if reconciled else merge_scorers(game.scorers, tsd_names)[0].split(", ")
-        base = [n for n in (s.strip() for s in base) if n]
-        official, _ = snap_scorers_to_squad(base, squad)
+        # UNIÃO obrigatória — nunca perde goleador já capturado
+        candidate = (reconciled or []) + tsd_names + of_names
+        official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in candidate) if n], squad)
         new_scorers = ", ".join(official)[:500]
         if new_scorers != (game.scorers or ""):
             game.scorers = new_scorers
             status["scorers_updated"] += 1
-        # aqui não há fonte paga; TheSportsDB é a única confirmação independente
-        confirms = 1 if scorer_sets_agree(tsd_names, official) else 0
-        game.scorers_confirmations = max(game.scorers_confirmations or 0, confirms)
-        if confirms >= 1 and world_cup_scorers_complete(game):
+        # fontes que corroboram (TheSportsDB + o backup openfootball)
+        agreeing = [
+            name for name, src in (("TheSportsDB", tsd_names), ("openfootball", of_names))
+            if scorer_source_corroborates(src, official)
+        ]
+        game.scorers_confirmations = max(game.scorers_confirmations or 0, len(agreeing))
+        if agreeing and not game.confirmation_sources:
+            game.confirmation_sources = ", ".join(agreeing)
+        if len(agreeing) >= 2 and world_cup_scorers_complete(game):
             game.scorers_confirmed = True
             status["confirmed"] += 1
         if world_cup_scorers_complete(game):
@@ -3951,6 +3972,7 @@ def world_cup_sync_status(
                 "scorers_final": bool(g.scorers_final),
                 "scorers_confirmed": bool(g.scorers_confirmed),
                 "scorers_confirmations": g.scorers_confirmations or 0,
+                "confirmation_sources": g.confirmation_sources,
                 "end_source": g.end_source,
                 "has_fixture_id": g.api_fixture_id is not None,
                 "predictions": len(g.predictions),

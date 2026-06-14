@@ -2053,6 +2053,21 @@ export default function BolaoPage() {
                 })()}
 
                 <div className="wc-tech-block">
+                  <div className="wc-tech-h">Como funciona — regras reais</div>
+                  <div className="wc-tech-rules">
+                    <div><b>Pontos:</b> placar exato 3 · só o vencedor 1 · acertar goleador +1 (soma) · campeã 10.</div>
+                    <div><b>Palpite fecha:</b> 1h antes do início de cada jogo (campeã: 1h antes da estreia do Brasil).</div>
+                    <div><b>Pipeline de cada jogo:</b> football-data marca AO VIVO e o placar (grátis) → no GOL a API-Football pega o NOME (paga) → no fim a IA cruza tudo com o elenco e fixa a lista → TheSportsDB/openfootball re-confirmam.</div>
+                    <div><b>Nunca perde goleador:</b> a lista só CRESCE (união); todo nome é encaixado no elenco oficial salvo.</div>
+                    <div><b>Limites (nunca estoura):</b> API-Football 100/dia + 9/min · TheSportsDB 26/min · football-data 1 por ciclo · IA cacheada (1×/jogo).</div>
+                    <div>
+                      <b>Ciclos hoje:</b> {syncStatus.runs?.length ?? 0} registrados · loop a cada{" "}
+                      {syncStatus.cadence?.loop_seconds ?? syncStatus.sync_interval_seconds}s quando há jogo.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="wc-tech-block">
                   <div className="wc-tech-h">APIs — uso hoje · limite · sobra</div>
                   {syncStatus.requests_today &&
                     Object.entries(syncStatus.requests_today).map(([key, r]) => {
@@ -2119,9 +2134,10 @@ export default function BolaoPage() {
 
                 {(syncStatus.games_health?.length ?? 0) > 0 && (
                   <div className="wc-tech-block">
-                    <div className="wc-tech-h">Jogos — finalizou · confirmou · re-confirmou</div>
+                    <div className="wc-tech-h">Jogos — finalizou · confirmou (qual fonte) · re-confirmou</div>
                     {(syncStatus.games_health ?? []).map((g, i) => {
                       const conf = g.scorers_confirmations ?? 0;
+                      const srcs = (g.confirmation_sources ?? "").split(",").map((s) => s.trim()).filter(Boolean);
                       return (
                         <div className="wc-tech-game" key={i}>
                           <span className={`st ${g.status}`}>{g.status === "live" ? "● LIVE" : "FIM"}</span>
@@ -2134,18 +2150,22 @@ export default function BolaoPage() {
                             gols {g.scorers_count}/{g.goals}
                           </span>
                           <span className={g.scorers_final ? "fl ok" : "fl no"}>
-                            {g.scorers_final ? "finalizado ✓" : "finalizando…"}
+                            {g.scorers_final ? "finalizado✓" : "finalizando…"}
                           </span>
                           <span className={conf >= 1 ? "cf ok" : "cf no"}>
-                            {conf >= 1 ? "confirmou ✓" : "confirmar…"}
+                            {conf >= 1 ? `confirmou✓ (${srcs[0] ?? "?"})` : "confirmar…"}
                           </span>
                           <span className={conf >= 2 ? "cf ok" : "cf no"}>
-                            {conf >= 2 ? "re-confirmou ✓✓" : "re-confirmar…"}
+                            {conf >= 2 ? `re-confirmou✓✓ (${srcs[1] ?? "?"})` : "re-confirmar…"}
                           </span>
                           {g.end_source && <span className="es">fim: {g.end_source}</span>}
                         </div>
                       );
                     })}
+                    <div className="wc-tech-foot">
+                      finalizado = API-Football FT ou placar completo · confirmou/re-confirmou = nº de fontes
+                      independentes (API-Football, TheSportsDB, openfootball) que batem com a lista, sem contradizer
+                    </div>
                   </div>
                 )}
 

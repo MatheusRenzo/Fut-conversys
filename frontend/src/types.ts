@@ -406,6 +406,7 @@ export type WorldCupSyncStatus = {
     scorers_final: boolean;
     scorers_confirmed?: boolean;
     scorers_confirmations?: number;
+    confirmation_sources?: string | null;
     end_source?: string | null;
     has_fixture_id: boolean;
     predictions: number;

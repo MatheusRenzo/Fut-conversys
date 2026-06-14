@@ -12753,6 +12753,10 @@ img.team-flag {
 .wc-tech-logrow .g { color: #8fa3c8; font-weight: 700; }
 .wc-tech-logrow .a { color: #d6deea; }
 .wc-tech-logrow .a.err { color: #ff8a8a; }
+.wc-tech-rules { display: flex; flex-direction: column; gap: 4px; padding: 4px 2px; }
+.wc-tech-rules > div { font-size: 11.5px; color: #b6c1d4; line-height: 1.5; }
+.wc-tech-rules b { color: #fff; font-weight: 700; }
+.wc-tech-foot { font-size: 10.5px; color: #7f8ba0; line-height: 1.45; padding: 5px 4px 0; font-style: italic; }
 @media (max-width: 560px) {
   .wc-tech-row { grid-template-columns: 1fr auto; }
   .wc-tech-row .d { grid-column: 1 / -1; }
