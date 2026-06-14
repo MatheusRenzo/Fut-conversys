@@ -81,7 +81,7 @@ API_FOOTBALL_FIXTURE_URL = os.getenv("API_FOOTBALL_FIXTURE_URL", "https://v3.foo
 API_FOOTBALL_LEAGUE_ID = int(os.getenv("API_FOOTBALL_LEAGUE_ID", "1"))
 API_FOOTBALL_DAILY_BUDGET = int(os.getenv("API_FOOTBALL_DAILY_BUDGET", "100"))
 # Reserva: para de chamar a API quando restam só N requisições do dia
-API_FOOTBALL_DAILY_RESERVE = int(os.getenv("API_FOOTBALL_DAILY_RESERVE", "8"))
+API_FOOTBALL_DAILY_RESERVE = int(os.getenv("API_FOOTBALL_DAILY_RESERVE", "4"))
 # Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há
 WORLD_CUP_LIVE_INTERVAL = max(45, int(os.getenv("WORLD_CUP_LIVE_INTERVAL_SECONDS", "75")))
 WORLD_CUP_IDLE_INTERVAL = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600")))
@@ -1766,20 +1766,29 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
         finished_remote = item["status"] in ("FINISHED", "AWARDED") and item["home_score"] is not None and item["away_score"] is not None
         if not finished_remote:
             continue
-        if game.home_score is None or game.away_score is None:
-            game.home_score = int(item["home_score"])
-            game.away_score = int(item["away_score"])
+        official_h, official_a = int(item["home_score"]), int(item["away_score"])
+        # A fonte oficial diz que ACABOU: confia nela. Sobrescreve placar parcial
+        # do feed ao vivo (que pode ter congelado) e promove o jogo a "finished".
+        already_finished = (game.status or "") == "finished"
+        scores_differ = game.home_score != official_h or game.away_score != official_a
+        if not already_finished or scores_differ:
+            # Conflito real só quando JÁ estava encerrado com placar diferente
+            if already_finished and scores_differ:
+                status["conflicts"].append(
+                    {
+                        "match_number": game.match_number,
+                        "game": f"{game.home_team} x {game.away_team}",
+                        "antes": f"{game.home_score}-{game.away_score}",
+                        "football_data": f"{official_h}-{official_a}",
+                    }
+                )
+            game.home_score = official_h
+            game.away_score = official_a
             game.status = "finished"
+            # placar mudou → goleadores precisam ser refinalizados pela fonte definitiva
+            if scores_differ:
+                game.scorers_final = False
             status["filled"] += 1
-        elif int(item["home_score"]) != game.home_score or int(item["away_score"]) != game.away_score:
-            status["conflicts"].append(
-                {
-                    "match_number": game.match_number,
-                    "game": f"{game.home_team} x {game.away_team}",
-                    "openfootball": f"{game.home_score}-{game.away_score}",
-                    "football_data": f"{item['home_score']}-{item['away_score']}",
-                }
-            )
     return status
 
 
@@ -1974,7 +1983,16 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         .filter(or_(models.WorldCupGame.scorers_final.is_(False), models.WorldCupGame.scorers_final.is_(None)))
         .all()
     )
-    if not live_window and not incomplete_finished:
+    # Jogos presos em "live" mas que provavelmente já acabaram (kickoff > 2h30):
+    # se as outras fontes atrasarem, a API-Football fecha pelo fixture id
+    stuck_live = (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.status == "live")
+        .filter(models.WorldCupGame.api_fixture_id.isnot(None))
+        .filter(models.WorldCupGame.kickoff_at <= now - timedelta(hours=2, minutes=30))
+        .all()
+    )
+    if not live_window and not incomplete_finished and not stuck_live:
         status["ok"] = True
         status["skipped"] = "sem jogos em andamento"
         return status
@@ -1987,8 +2005,10 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     # Descobre fixture_id dos encerrados que ainda não têm (cold-start)
     discover_api_fixture_ids(db, status)
     db.flush()
-    # Agora (re)coleta os pendentes que têm id
+    # Agora (re)coleta os pendentes que têm id (encerrados + presos em live)
     pending_final = [g for g in incomplete_finished if g.api_fixture_id]
+    pending_ids = {g.id for g in pending_final}
+    pending_final += [g for g in stuck_live if g.id not in pending_ids]
     status["ok"] = True
 
     if live_window:
@@ -2049,6 +2069,13 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         short = (((fixture.get("fixture") or {}).get("status") or {}).get("short")) or ""
         if short not in ("FT", "AET", "PEN", "AWD", "WO"):
             continue  # ainda não é definitivo
+        # Jogo acabou de verdade: aplica placar final oficial e fecha o status
+        # (resolve o jogo preso em "live" com placar parcial congelado)
+        goals = fixture.get("goals") or {}
+        if goals.get("home") is not None and goals.get("away") is not None:
+            game.home_score = int(goals["home"])
+            game.away_score = int(goals["away"])
+        game.status = "finished"
         merged, changed = merge_scorers(game.scorers, extract_api_football_scorers(fixture))
         if changed:
             game.scorers = merged
