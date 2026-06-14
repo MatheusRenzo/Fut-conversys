@@ -173,6 +173,10 @@ class WorldCupGame(Base):
     api_fixture_id = Column(Integer, nullable=True)
     # marca quando os goleadores já foram fixados pela fonte definitiva
     scorers_final = Column(Boolean, default=False)
+    # checagem de goleadores no meio do jogo (1ª das 2 chamadas pagas por jogo)
+    api_mid_checked = Column(Boolean, default=False)
+    # goleadores confirmados pela 2ª fonte (TheSportsDB) batendo com a 1ª
+    scorers_confirmed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     predictions = relationship("WorldCupPrediction", back_populates="game", lazy="select")

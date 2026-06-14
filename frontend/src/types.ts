@@ -378,6 +378,9 @@ export type WorldCupSyncStatus = {
     api_football_daily_limit?: number;
     score_source?: string;
     scorer_source?: string;
+    ai_configured?: boolean;
+    ai_calls_today?: number;
+    thesportsdb_configured?: boolean;
     squads_source: string;
   };
   games_health?: Array<{

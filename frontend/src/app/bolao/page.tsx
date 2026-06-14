@@ -2015,6 +2015,11 @@ export default function BolaoPage() {
                       {syncStatus.sources.api_football_daily_limit ?? 100} req restantes hoje
                     </span>
                   )}
+                  {syncStatus.sources.ai_configured && (
+                    <span className="wc-sync-budget">
+                      <Sparkles size={12} /> GPT: {syncStatus.sources.ai_calls_today ?? 0} chamadas hoje
+                    </span>
+                  )}
                 </div>
                 <div className={syncStatus.games_sync?.ok === false ? "wc-sync-card error" : "wc-sync-card ok"}>
                   <span className="wc-sync-card-head">
