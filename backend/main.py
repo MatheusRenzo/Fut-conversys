@@ -1204,7 +1204,7 @@ def world_cup_game_response(game: models.WorldCupGame, user: models.User | None 
     }
 
 
-def world_cup_leaderboard_response(db: Session) -> list[dict[str, Any]]:
+def world_cup_leaderboard_response(db: Session, exclude_game_id: int | None = None) -> list[dict[str, Any]]:
     rows: dict[int, dict[str, Any]] = {}
     predictions = (
         db.query(models.WorldCupPrediction)
@@ -1234,6 +1234,10 @@ def world_cup_leaderboard_response(db: Session) -> list[dict[str, Any]]:
         }
 
     for prediction in predictions:
+        # reconstrução "antes da rodada": ignora o jogo excluído por completo
+        # (pontos E desempates), pra calcular a posição real anterior
+        if exclude_game_id is not None and prediction.game_id == exclude_game_id:
+            continue
         if prediction.user_id not in rows:
             rows[prediction.user_id] = empty_row(prediction.user)
 
@@ -1319,20 +1323,11 @@ def update_rank_movement(db: Session) -> None:
             .order_by(models.WorldCupGame.kickoff_at.desc())
             .first()
         )
-        last_pts: dict[int, int] = {}
-        if last_game:
-            for p in last_game.predictions:
-                last_pts[p.user_id] = last_pts.get(p.user_id, 0) + (p.points or 0)
-        before = sorted(
-            lb,
-            key=lambda e: (
-                e["points"] - last_pts.get(e["user"]["id"], 0),
-                e["exact_scores"], e["outcome_hits"], e["scorer_hits"], e["predictions"],
-            ),
-            reverse=True,
-        )
-        prev = {str(e["user"]["id"]): i for i, e in enumerate(before, start=1)}
-        prev_pts = {str(e["user"]["id"]): e["points"] - last_pts.get(e["user"]["id"], 0) for e in lb}
+        # reconstrói o ranking REAL de antes do último jogo (exclui o jogo inteiro:
+        # pontos e desempates) — assim quem virou de posição mostra a seta certa
+        before_lb = world_cup_leaderboard_response(db, exclude_game_id=last_game.id) if last_game else lb
+        prev = {str(e["user"]["id"]): e["rank"] for e in before_lb}
+        prev_pts = {str(e["user"]["id"]): e["points"] for e in before_lb}
         state = {"prev": prev, "prev_pts": prev_pts, "curr": current, "curr_pts": current_pts, "games": finished}
     elif state.get("games", 0) < finished:
         # novo jogo encerrou → a posição/pontos "de antes" passam a ser os curr anteriores
