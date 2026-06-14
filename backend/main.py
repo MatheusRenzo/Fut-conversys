@@ -2368,8 +2368,11 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 {"game": f"{game.home_team} x {game.away_team}", "fora_do_elenco": unmatched,
                  "api": api_names, "tsd": tsd_names}
             )
-        if world_cup_scorers_complete(game):
-            game.scorers_final = True
+        # A API-Football FT é a fonte DEFINITIVA: extraímos todos os eventos de gol,
+        # então a lista (distinta) já é a verdadeira — mesmo que tenha menos nomes que
+        # gols (jogador que fez 2-3, ex.: hat-trick num 7-1). Fixa de vez e para de
+        # gastar cota re-tentando o impossível.
+        game.scorers_final = True
         conf_txt = f" · ✓✓ {confirms} fonte(s)" if game.scorers_confirmed else ""
         gol_txt = f" · goleadores: {game.scorers}" if game.scorers else " · sem goleador ainda"
         log_game_event(db, game, f"🏁 encerrado {game.home_score}-{game.away_score} (API-Football){conf_txt}{gol_txt}")

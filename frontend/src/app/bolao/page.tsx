@@ -2405,8 +2405,11 @@ export default function BolaoPage() {
                     <span className="wc-sync-runs-title">Saúde dos jogos (ao vivo + encerrados)</span>
                     <div className="wc-health-list">
                       {(syncStatus.games_health ?? []).map((gh, i) => {
-                        const ok = gh.status === "finished" ? gh.scorers_final && gh.scorers_complete : true;
-                        const warn = gh.status === "finished" && !gh.scorers_complete;
+                        // final = fonte definitiva já fixou (lista verdadeira, mesmo
+                        // com menos nomes que gols quando alguém faz 2+). Só alarma se
+                        // NÃO foi fixado E ainda falta nome.
+                        const ok = gh.status === "finished" ? gh.scorers_final : true;
+                        const warn = gh.status === "finished" && !gh.scorers_final && !gh.scorers_complete;
                         return (
                           <div className={warn ? "wc-health-row warn" : "wc-health-row"} key={i}>
                             <span className={`wc-health-badge ${gh.status}`}>
