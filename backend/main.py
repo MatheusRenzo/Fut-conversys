@@ -106,8 +106,12 @@ API_FOOTBALL_LIVE_GAP_FLOOR = max(120, int(os.getenv("API_FOOTBALL_LIVE_GAP_FLOO
 # finalizar de uma vez). O que passar fica pro próximo ciclo (idempotente).
 API_FOOTBALL_MINUTE_LIMIT = max(1, int(os.getenv("API_FOOTBALL_MINUTE_LIMIT", "9")))
 # Limite POR CICLO da TheSportsDB (grátis, 30/min). Cada jogo conferido custa até
-# ~4 chamadas (busca dia ±1 + timeline), então 6 jogos/ciclo = ~24 < 30. Seguro.
-THESPORTSDB_CYCLE_LIMIT = max(1, int(os.getenv("THESPORTSDB_CYCLE_LIMIT", "6")))
+# ~4 chamadas (busca dia ±1 + timeline).
+THESPORTSDB_CYCLE_LIMIT = max(1, int(os.getenv("THESPORTSDB_CYCLE_LIMIT", "4")))
+# Limite POR MINUTO da TheSportsDB (30/min). Como o ciclo caiu pra 30s (2 ciclos/min),
+# o teto por ciclo sozinho não basta — esta trava por janela de minuto garante que
+# NUNCA passa de 30/min mesmo com vários ciclos rápidos seguidos.
+THESPORTSDB_MINUTE_LIMIT = max(1, int(os.getenv("THESPORTSDB_MINUTE_LIMIT", "26")))
 # Rede de segurança: depois disso desde o início, nenhum jogo (mesmo prorrogação +
 # pênaltis ≈ 3h) ainda está rolando. Se nenhuma fonte confirmou o fim, encerra
 # sozinho com o melhor placar — assim nenhum jogo fica "ao vivo" por horas.
@@ -1738,6 +1742,19 @@ def daily_counter(db: Session, name: str) -> int:
     return int(raw) if (raw or "").lstrip("-").isdigit() else 0
 
 
+def bump_thesportsdb_call(db: Session | None) -> None:
+    """Conta uma chamada HTTP à TheSportsDB: contador do dia (painel) + janela de
+    minuto (trava de 30/min)."""
+    if db is None:
+        return
+    bump_daily_counter(db, "thesportsdb")
+    minute_key = f"{datetime.utcnow():%Y%m%d%H%M}"
+    raw = get_app_setting(db, "thesportsdb_minute_window") or ""
+    cur, _, cnt = raw.partition(":")
+    used = int(cnt) if cur == minute_key and cnt.isdigit() else 0
+    set_app_setting(db, "thesportsdb_minute_window", f"{minute_key}:{used + 1}")
+
+
 def log_game_event(db: Session, game: models.WorldCupGame, action: str) -> None:
     """Registra um evento do jogo (gol, encerramento, confirmação) num log rolante
     pro painel: 'o que fez, em qual jogo, quando'."""
@@ -2077,6 +2094,15 @@ def fetch_thesportsdb_scorers(game: models.WorldCupGame, db: Session | None = No
     gols. Devolve a lista de nomes ou None se não achou."""
     if not game.kickoff_at:
         return None
+    # Trava por minuto (30/min): este jogo gasta até ~4 req (dia ±1 + timeline).
+    # Se não há headroom no minuto atual, pula — confirma no próximo ciclo.
+    if db is not None:
+        minute_key = f"{datetime.utcnow():%Y%m%d%H%M}"
+        raw_min = get_app_setting(db, "thesportsdb_minute_window") or ""
+        cur_min, _, cnt = raw_min.partition(":")
+        used = int(cnt) if cur_min == minute_key and cnt.isdigit() else 0
+        if used >= THESPORTSDB_MINUTE_LIMIT - 4:
+            return None
     home_key = normalize_scorer_name(normalize_world_cup_team(game.home_team))
     away_key = normalize_scorer_name(normalize_world_cup_team(game.away_team))
     event_id = None
@@ -2089,8 +2115,7 @@ def fetch_thesportsdb_scorers(game: models.WorldCupGame, db: Session | None = No
                 f"{THESPORTSDB_BASE}/{THESPORTSDB_KEY}/eventsday.php?d={date}&s=Soccer", timeout=15
             ) as resp:
                 day = json.loads(read_capped(resp).decode("utf-8"))
-            if db is not None:
-                bump_daily_counter(db, "thesportsdb")
+            bump_thesportsdb_call(db)
         except Exception:
             continue
         for ev in day.get("events") or []:
@@ -2113,8 +2138,7 @@ def fetch_thesportsdb_scorers(game: models.WorldCupGame, db: Session | None = No
             f"{THESPORTSDB_BASE}/{THESPORTSDB_KEY}/lookuptimeline.php?id={event_id}", timeout=15
         ) as resp:
             tl = json.loads(read_capped(resp).decode("utf-8"))
-        if db is not None:
-            bump_daily_counter(db, "thesportsdb")
+        bump_thesportsdb_call(db)
     except Exception:
         return None
     names: list[str] = []
@@ -2511,6 +2535,20 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         if confirms >= 1 and world_cup_scorers_complete(game):
             game.scorers_confirmed = True
             status["confirmed"] += 1
+        if world_cup_scorers_complete(game):
+            game.scorers_final = True
+
+    # ── VARREDURA FINAL: jogo encerrado cujos goleadores JÁ cobrem os gols vira
+    # 'final' mesmo que nenhuma fonte de confirmação tenha o jogo (o openfootball já
+    # bastou). Sem isso, jogos antigos que a TheSportsDB não tem ficavam "pendentes"
+    # pra sempre e o sistema seguia tentando finalizar à toa. ──
+    leftover = (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.status == "finished")
+        .filter(or_(models.WorldCupGame.scorers_final.is_(False), models.WorldCupGame.scorers_final.is_(None)))
+        .all()
+    )
+    for game in leftover:
         if world_cup_scorers_complete(game):
             game.scorers_final = True
 
