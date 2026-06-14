@@ -1303,8 +1303,29 @@ def update_rank_movement(db: Session) -> None:
     except json.JSONDecodeError:
         state = None
     if not state:
-        prev = current
-        state = {"prev": current, "curr": current, "games": finished}
+        # 1ª vez: reconstrói a posição de ANTES da última rodada (tira os pontos do
+        # último jogo encerrado) pra TODO MUNDO — assim o movimento real da última
+        # rodada já aparece, em vez de zerar todos.
+        last_game = (
+            db.query(models.WorldCupGame)
+            .filter(models.WorldCupGame.status == "finished")
+            .order_by(models.WorldCupGame.kickoff_at.desc())
+            .first()
+        )
+        last_pts: dict[int, int] = {}
+        if last_game:
+            for p in last_game.predictions:
+                last_pts[p.user_id] = last_pts.get(p.user_id, 0) + (p.points or 0)
+        before = sorted(
+            lb,
+            key=lambda e: (
+                e["points"] - last_pts.get(e["user"]["id"], 0),
+                e["exact_scores"], e["outcome_hits"], e["scorer_hits"], e["predictions"],
+            ),
+            reverse=True,
+        )
+        prev = {str(e["user"]["id"]): i for i, e in enumerate(before, start=1)}
+        state = {"prev": prev, "curr": current, "games": finished}
     elif state.get("games", 0) < finished:
         # novo jogo encerrou → a posição "de antes" passa a ser a curr anterior
         prev = state.get("curr", current)
