@@ -12574,3 +12574,12 @@ img.team-flag {
 }
 .wc-ai-insight-card .wc-ai-insight-tag { font-size: 0.6rem; }
 .wc-ai-insight-card p { color: #f0ecff; font-size: 0.8rem; font-weight: 700; line-height: 1.35; }
+
+/* "Ver todos" do módulo da campeã */
+.wc-champ-voters-more {
+  display: inline-flex; align-items: center; gap: 5px; justify-self: start;
+  border: 1px solid rgba(0,207,180,0.35); border-radius: 999px;
+  background: rgba(0,207,180,0.08); color: #bafff2;
+  cursor: pointer; font-size: 0.76rem; font-weight: 900; padding: 6px 14px; margin-top: 4px;
+}
+.wc-champ-voters-more:hover { border-color: rgba(0,207,180,0.6); background: rgba(0,207,180,0.14); }

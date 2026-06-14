@@ -77,11 +77,9 @@ const statusLabels: Record<WorldCupGame["status"], string> = {
 };
 
 const quickFilters: Array<{ key: QuickFilter; label: string }> = [
-  { key: "today", label: "Hoje" },
   { key: "open", label: "Abertos" },
   { key: "live", label: "Ao vivo" },
-  { key: "finished", label: "Encerrados" },
-  { key: "all", label: "Todos" },
+  { key: "today", label: "Hoje" },
 ];
 
 const rankingTabs: Array<{ key: RankingTab; label: string }> = [
@@ -946,10 +944,11 @@ export default function BolaoPage() {
     () =>
       games
         .filter((game) => game.status === "finished" && game.home_score !== null && game.away_score !== null)
-        .sort((a, b) => new Date(b.kickoff_at).getTime() - new Date(a.kickoff_at).getTime())
-        .slice(0, 6),
+        .sort((a, b) => new Date(b.kickoff_at).getTime() - new Date(a.kickoff_at).getTime()),
     [games],
   );
+  const [resultsExpanded, setResultsExpanded] = useState(false);
+  const [championExpanded, setChampionExpanded] = useState(false);
 
   const scrollToGame = (gameId: number) => {
     setExpandedGameId(gameId);
@@ -1439,7 +1438,7 @@ export default function BolaoPage() {
               </span>
             </div>
             <div className="wc-champ-voters-grid">
-              {championVoters.map((voter) => (
+              {(championExpanded ? championVoters : championVoters.slice(0, 8)).map((voter) => (
                 <div
                   className={voter.team ? "wc-champ-voter voted" : "wc-champ-voter missed"}
                   key={voter.user.id}
@@ -1456,11 +1455,17 @@ export default function BolaoPage() {
                 </div>
               ))}
             </div>
+            {championVoters.length > 8 && (
+              <button className="wc-champ-voters-more" onClick={() => setChampionExpanded((v) => !v)} type="button">
+                {championExpanded ? "Mostrar menos" : `Ver todos (${championVoters.length})`}
+                <ChevronRight size={14} className={championExpanded ? "wc-fcard-chevron open" : "wc-fcard-chevron"} />
+              </button>
+            )}
           </div>
         )}
       </section>
 
-      {recentResults.length > 0 && (quickFilter === "open" || quickFilter === "live") && (
+      {recentResults.length > 0 && (
         <section className="wc-results-panel glass-panel">
           <div className="wc-section-head">
             <div>
@@ -1468,15 +1473,24 @@ export default function BolaoPage() {
               <h2>Resultados, gols e palpites</h2>
               <p className="wc-section-copy">
                 Placar, quem fez o gol e o que a galera cravou — tudo junto. Atualiza sozinho e a pontuação entra na hora.
-                Veja todos em <strong>Encerrados</strong>.
               </p>
             </div>
+            <span className="wc-section-count">{recentResults.length} jogos</span>
           </div>
           <div className="wc-fcard-list">
-            {recentResults.map((game) => (
+            {(resultsExpanded ? recentResults : recentResults.slice(0, 3)).map((game) => (
               <FinishedGameCard game={game} key={game.id} viewerId={profile?.id} />
             ))}
           </div>
+          {recentResults.length > 3 && (
+            <button className="wc-ranking-show-more" onClick={() => setResultsExpanded((v) => !v)} type="button">
+              <span className="wc-ranking-show-more-copy">
+                <Medal size={16} />
+                <span>{resultsExpanded ? "Mostrar menos" : `Ver mais ${recentResults.length - 3} jogos`}</span>
+              </span>
+              <ChevronRight size={15} className={resultsExpanded ? "wc-fcard-chevron open" : "wc-fcard-chevron"} />
+            </button>
+          )}
         </section>
       )}
 

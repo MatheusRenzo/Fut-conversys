@@ -1215,39 +1215,34 @@ def world_cup_leaderboard_response(db: Session) -> list[dict[str, Any]]:
     for index, row in enumerate(leaderboard, start=1):
         row["rank"] = index
 
-    # Movimentação desde o último jogo pontuado (verde sobe / vermelho desce)
-    baseline = {}
-    raw = get_app_setting(db, "world_cup_rank_baseline")
-    if raw:
-        try:
-            baseline = (json.loads(raw) or {}).get("ranks", {})
-        except json.JSONDecodeError:
-            baseline = {}
+    # Movimentação determinística: compara o ranking ATUAL com o ranking SEM o
+    # último jogo encerrado. Verde = subiu por causa do último resultado.
+    last_game = (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.status == "finished")
+        .order_by(models.WorldCupGame.kickoff_at.desc())
+        .first()
+    )
+    last_game_points: dict[int, int] = {}
+    if last_game:
+        for pred in last_game.predictions:
+            last_game_points[pred.user_id] = last_game_points.get(pred.user_id, 0) + (pred.points or 0)
+    before = sorted(
+        leaderboard,
+        key=lambda item: (
+            item["points"] - last_game_points.get(item["user"]["id"], 0),
+            item["exact_scores"],
+            item["outcome_hits"],
+            item["scorer_hits"],
+            item["predictions"],
+        ),
+        reverse=True,
+    )
+    before_rank = {row["user"]["id"]: i for i, row in enumerate(before, start=1)}
     for row in leaderboard:
-        before = baseline.get(str(row["user"]["id"]))
-        row["movement"] = (before - row["rank"]) if isinstance(before, int) else 0
+        row["movement"] = before_rank.get(row["user"]["id"], row["rank"]) - row["rank"]
 
     return leaderboard[:30]
-
-
-def maybe_snapshot_rank_baseline(db: Session) -> None:
-    """Captura a foto do ranking ANTES de pontuar uma nova rodada, para mostrar
-    quem subiu/caiu por causa do último jogo. Só refaz quando o nº de jogos
-    encerrados muda (a movimentação fica visível até o próximo jogo)."""
-    finished = db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "finished").count()
-    raw = get_app_setting(db, "world_cup_rank_baseline")
-    current = None
-    if raw:
-        try:
-            current = json.loads(raw)
-        except json.JSONDecodeError:
-            current = None
-    if current and current.get("finished") == finished:
-        return  # mesma rodada — mantém o baseline pra movimentação persistir
-    ranks = {str(row["user"]["id"]): row["rank"] for row in world_cup_leaderboard_response(db)}
-    set_app_setting(
-        db, "world_cup_rank_baseline", json.dumps({"finished": finished, "ranks": ranks}, ensure_ascii=False)
-    )
 
 
 def world_cup_stage_from_section(section: str) -> tuple[str, str | None]:
@@ -2123,7 +2118,6 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
     secondary = cross_check_world_cup_results(db)
     live_source = apply_api_football_live(db)
     refresh_world_cup_live_statuses(db)
-    maybe_snapshot_rank_baseline(db)
     finished_games = db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "finished").all()
     for game in finished_games:
         score_world_cup_game(game)
@@ -3343,7 +3337,6 @@ def set_world_cup_game_result(
     if request.scorers is not None:
         game.scorers = re.sub(r"\s+", " ", request.scorers).strip()[:500] or None
     db.flush()
-    maybe_snapshot_rank_baseline(db)
     score_world_cup_game(game)
     db.commit()
     db.refresh(game)
