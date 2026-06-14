@@ -1711,10 +1711,15 @@ def get_app_setting(db: Session, key: str) -> str | None:
 
 
 def set_app_setting(db: Session, key: str, value: str | None) -> None:
-    row = db.query(models.AppSetting).filter(models.AppSetting.key == key).first()
-    if not row:
+    # db.get usa o identity map primeiro: se a MESMA chave já foi escrita nesta
+    # transação (ex.: contador incrementado várias vezes no ciclo), reaproveita a
+    # linha em vez de tentar um 2º INSERT da mesma PK (que dava UniqueViolation e
+    # derrubava o ciclo inteiro). O flush ao criar deixa a linha visível pra leitura.
+    row = db.get(models.AppSetting, key)
+    if row is None:
         row = models.AppSetting(key=key)
         db.add(row)
+        db.flush()
     row.value = value
     row.updated_at = datetime.utcnow()
 
