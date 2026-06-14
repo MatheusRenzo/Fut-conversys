@@ -5,19 +5,14 @@ import type { FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
-  Activity,
-  AlertTriangle,
   CheckCircle2,
   ChevronRight,
-  Clock,
   Crown,
   Flame,
   Goal,
   Lock,
   Medal,
   Pencil,
-  Radio,
-  RefreshCcw,
   Save,
   Settings2,
   Sparkles,
@@ -2036,441 +2031,168 @@ export default function BolaoPage() {
 
             {syncStatusError && <p className="bolao-feedback error">{syncStatusError}</p>}
             {syncStatus ? (
-              <div className="wc-sync-status">
-                {/* ── HERO AO VIVO: pulso + última sync + contagem regressiva ── */}
-                <div className={syncStatus.live_now ? "wc-dash-hero live" : "wc-dash-hero"}>
-                  <div className="wc-dash-hero-main">
-                    <span className={syncStatus.live_now ? "wc-dash-pulse on" : "wc-dash-pulse"}>
-                      {syncStatus.live_now ? <Radio size={15} /> : <Clock size={15} />}
-                      {syncStatus.live_now ? "AO VIVO" : "EM ESPERA"}
-                    </span>
-                    <span className="wc-dash-hero-sub">
-                      ciclo a cada {syncStatus.cadence?.loop_seconds ?? syncStatus.sync_interval_seconds}s · última sync{" "}
-                      {agoLabel(syncStatus.cadence?.last_sync_at ?? syncStatus.last_sync, currentTime)}
-                    </span>
-                  </div>
-                  <div className="wc-dash-hero-stats">
-                    <div className="wc-dash-stat">
-                      <span className="wc-dash-stat-k"><Activity size={12} /> painel ao vivo</span>
-                      <strong>{inLabel(syncStatus.cadence?.last_sync_at ?? syncStatus.last_sync, syncStatus.cadence?.loop_seconds, currentTime)}</strong>
+              <div className="wc-tech">
+                {(() => {
+                  const cad = syncStatus.cadence;
+                  const lastOk = syncStatus.games_sync?.ok !== false;
+                  const health = syncStatus.games_health ?? [];
+                  const pendentes = health.filter((g) => g.status === "finished" && !g.scorers_final);
+                  const verdictOk = lastOk && pendentes.length === 0;
+                  return (
+                    <div className={verdictOk ? "wc-tech-verdict ok" : "wc-tech-verdict warn"}>
+                      <strong>{verdictOk ? "✓ RODANDO CERTINHO" : "⚠ VERIFICAR"}</strong>
+                      <span>
+                        {syncStatus.live_now ? "AO VIVO" : "EM ESPERA"} · última sync{" "}
+                        {agoLabel(cad?.last_sync_at ?? syncStatus.last_sync, currentTime)} · próxima{" "}
+                        {inLabel(cad?.last_sync_at ?? syncStatus.last_sync, cad?.loop_seconds, currentTime)}
+                        {!lastOk && " · ÚLTIMO CICLO FALHOU"}
+                        {pendentes.length > 0 && ` · ${pendentes.length} jogo(s) sem goleador completo`}
+                      </span>
                     </div>
-                    <div className="wc-dash-stat">
-                      <span className="wc-dash-stat-k"><Goal size={12} /> goleadores</span>
-                      <strong>
-                        {syncStatus.cadence?.goal_pending
-                          ? "⚡ buscando agora"
-                          : inLabel(syncStatus.cadence?.last_live_poll_at, syncStatus.cadence?.live_poll_gap_seconds, currentTime)}
-                      </strong>
-                    </div>
-                    <div className="wc-dash-stat">
-                      <span className="wc-dash-stat-k"><Trophy size={12} /> artilheiros</span>
-                      <strong>{syncStatus.cadence?.last_scorer_update_at ? `atualizado ${agoLabel(syncStatus.cadence.last_scorer_update_at, currentTime)}` : "aguardando gol"}</strong>
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
-                {/* ── JOGOS DE HOJE ── */}
-                {(syncStatus.today_games?.length ?? 0) > 0 && (
-                  <div className="wc-dash-today">
-                    <span className="wc-dash-section-title"><Clock size={13} /> Jogos de hoje ({syncStatus.today_games?.length})</span>
-                    <div className="wc-dash-today-list">
-                      {(syncStatus.today_games ?? []).map((g, i) => (
-                        <div className={`wc-today-card ${g.status}`} key={i}>
-                          <div className="wc-today-top">
-                            <span className="wc-today-time">{timeHM(g.kickoff_at)}</span>
-                            <span className={`wc-today-badge ${g.status}`}>
-                              {g.status === "live" && <span className="wc-live-dot small" />}
-                              {g.status === "live" ? "AO VIVO" : g.status === "finished" ? "ENCERRADO" : "AGENDADO"}
-                            </span>
-                          </div>
-                          <div className="wc-today-match">
-                            <span>{g.home_team}</span>
-                            <strong className="wc-today-score">{g.score ?? "×"}</strong>
-                            <span>{g.away_team}</span>
-                          </div>
-                          {g.scorers && <div className="wc-today-scorers"><Goal size={11} /> {g.scorers}</div>}
-                          {g.status === "finished" && (g.score && g.score !== "0-0") && (
-                            <div className="wc-today-meta">
-                              <span className={(g.scorers_confirmations ?? 0) >= 2 ? "ok" : (g.scorers_confirmations ?? 0) === 1 ? "mid" : "low"}>
-                                {(g.scorers_confirmations ?? 0) >= 2 ? "✓✓" : "✓"} {g.scorers_confirmations ?? 0} fonte(s)
-                              </span>
-                              {g.end_source && <span className="muted">fim: {g.end_source}</span>}
-                            </div>
-                          )}
+                <div className="wc-tech-block">
+                  <div className="wc-tech-h">APIs — uso hoje · limite · sobra</div>
+                  {syncStatus.requests_today &&
+                    Object.entries(syncStatus.requests_today).map(([key, r]) => {
+                      const names: Record<string, string> = {
+                        football_data: "football-data",
+                        api_football: "API-Football",
+                        thesportsdb: "TheSportsDB",
+                        openai: "IA (GPT-4o-mini)",
+                      };
+                      const role: Record<string, string> = {
+                        football_data: "placar + status ao vivo (grátis)",
+                        api_football: "nome dos goleadores (paga)",
+                        thesportsdb: "2ª confirmação (grátis)",
+                        openai: "reconcilia + normaliza nomes",
+                      };
+                      const limit = r.daily_cap
+                        ? `${r.limit_per_min ?? "?"}/min · ${r.daily_cap}/dia`
+                        : r.limit_per_min
+                          ? `${r.limit_per_min}/min · ilimitado/dia`
+                          : "sem limite";
+                      return (
+                        <div className="wc-tech-row" key={key}>
+                          <span className="k">{names[key] ?? key}</span>
+                          <span className="d">{role[key]}</span>
+                          <span className="v">
+                            {r.calls}
+                            {r.daily_cap ? `/${r.daily_cap}` : " hoje"}
+                            {r.remaining != null ? ` · sobra ${r.remaining}` : ""}
+                          </span>
+                          <span className="lim">{limit}</span>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
+                </div>
+
+                <div className="wc-tech-block">
+                  <div className="wc-tech-h">Cadência — quando roda de novo</div>
+                  <div className="wc-tech-row">
+                    <span className="k">placar/painel</span>
+                    <span className="v2">
+                      {inLabel(syncStatus.cadence?.last_sync_at ?? syncStatus.last_sync, syncStatus.cadence?.loop_seconds, currentTime)}
+                    </span>
+                    <span className="d">ciclo {syncStatus.cadence?.loop_seconds ?? "?"}s · football-data</span>
                   </div>
-                )}
-
-                {/* ── REQUISIÇÕES POR API (hoje) ── */}
-                {syncStatus.requests_today && (
-                  <div className="wc-dash-apis">
-                    <span className="wc-dash-section-title"><Zap size={13} /> Requisições hoje por API</span>
-                    <div className="wc-dash-apis-grid">
-                      {Object.entries(syncStatus.requests_today).map(([key, r]) => {
-                        const names: Record<string, string> = {
-                          football_data: "football-data", api_football: "API-Football",
-                          thesportsdb: "TheSportsDB", openai: "IA (GPT)",
-                        };
-                        const cap = r.daily_cap ?? null;
-                        const pct = cap ? Math.min(100, Math.round((r.calls / cap) * 100)) : null;
-                        return (
-                          <div className="wc-api-card" key={key}>
-                            <div className="wc-api-card-head">
-                              <strong>{names[key] ?? key}</strong>
-                              <span className="wc-api-calls">{r.calls}{cap ? `/${cap}` : ""}</span>
-                            </div>
-                            <span className="wc-api-label">{r.label}</span>
-                            {pct !== null ? (
-                              <div className="wc-quota-bar"><span style={{ width: `${Math.max(2, pct)}%` }} /></div>
-                            ) : (
-                              <span className="wc-api-free">{r.limit_per_min ? `${r.limit_per_min}/min · sem teto diário` : "sem teto"}</span>
-                            )}
-                            {cap && r.remaining != null && <span className="wc-api-rem">{r.remaining} restantes</span>}
-                          </div>
-                        );
-                      })}
-                    </div>
+                  <div className="wc-tech-row">
+                    <span className="k">goleadores</span>
+                    <span className="v2">
+                      {syncStatus.cadence?.goal_pending
+                        ? "⚡ buscando agora"
+                        : inLabel(syncStatus.cadence?.last_live_poll_at, syncStatus.cadence?.live_poll_gap_seconds, currentTime)}
+                    </span>
+                    <span className="d">dispara no gol · API paga</span>
                   </div>
-                )}
-
-                {/* ── LOG DE EVENTOS POR JOGO ── */}
-                {(syncStatus.game_events?.length ?? 0) > 0 && (
-                  <div className="wc-dash-log">
-                    <span className="wc-dash-section-title"><Activity size={13} /> Log dos jogos — o que o sistema fez e quando</span>
-                    <div className="wc-dash-log-list">
-                      {(syncStatus.game_events ?? []).slice(0, 14).map((ev, i) => (
-                        <div className="wc-log-row" key={i}>
-                          <span className="wc-log-time">{timeHM(ev.at)}</span>
-                          <span className="wc-log-game">{ev.match_number ? `#${ev.match_number} ` : ""}{ev.game}</span>
-                          <span className="wc-log-action">{ev.action}</span>
-                        </div>
-                      ))}
-                    </div>
+                  <div className="wc-tech-row">
+                    <span className="k">artilheiros</span>
+                    <span className="v2">
+                      {syncStatus.cadence?.last_scorer_update_at
+                        ? agoLabel(syncStatus.cadence.last_scorer_update_at, currentTime)
+                        : "aguardando gol"}
+                    </span>
+                    <span className="d">recalcula quando muda goleador</span>
                   </div>
-                )}
-
-                <span className="wc-dash-section-title detail"><Settings2 size={13} /> Detalhes técnicos das fontes</span>
-                <div className={syncStatus.games_sync?.ok === false ? "wc-sync-card error" : "wc-sync-card ok"}>
-                  <span className="wc-sync-card-head">
-                    <RefreshCcw size={14} />
-                    <strong>Jogos & resultados — openfootball</strong>
-                    <b className={syncStatus.games_sync?.ok === false ? "wc-sync-pill error" : "wc-sync-pill ok"}>
-                      {syncStatus.games_sync ? (syncStatus.games_sync.ok ? "Rodou certinho" : "Falhou") : "Nunca rodou"}
-                    </b>
-                  </span>
-                  <small>
-                    Última atualização: {syncStatus.games_sync?.at ? formatEventDate(syncStatus.games_sync.at) : "—"} ·
-                    automático a cada {Math.round(syncStatus.sync_interval_seconds / 60)} min
-                  </small>
-                  <small>
-                    {syncStatus.totals.games} jogos na tabela · {syncStatus.totals.finished_games} encerrados ·{" "}
-                    {syncStatus.games_sync?.updated ?? 0} atualizados no último sync
-                  </small>
-                  {syncStatus.games_sync?.error && (
-                    <small className="wc-sync-warn">
-                      <AlertTriangle size={12} /> {syncStatus.games_sync.error}
-                    </small>
-                  )}
-                  {(syncStatus.games_sync?.missing_scorers?.length ?? 0) > 0 && (
-                    <small className="wc-sync-warn">
-                      <AlertTriangle size={12} /> Encerrados sem artilheiro:{" "}
-                      {(syncStatus.games_sync?.missing_scorers ?? []).join(", ")}
-                    </small>
-                  )}
-                </div>
-
-                <div
-                  className={
-                    !syncStatus.sources.football_data_configured
-                      ? "wc-sync-card muted"
-                      : syncStatus.games_sync?.secondary?.ok
-                        ? "wc-sync-card ok"
-                        : "wc-sync-card error"
-                  }
-                >
-                  <span className="wc-sync-card-head">
-                    <CheckCircle2 size={14} />
-                    <strong>Conferência — football-data.org</strong>
-                    <b
-                      className={
-                        !syncStatus.sources.football_data_configured
-                          ? "wc-sync-pill muted"
-                          : syncStatus.games_sync?.secondary?.ok
-                            ? "wc-sync-pill ok"
-                            : "wc-sync-pill error"
-                      }
-                    >
-                      {!syncStatus.sources.football_data_configured
-                        ? "Não configurada"
-                        : syncStatus.games_sync?.secondary?.ok
-                          ? "Conferindo"
-                          : "Falhou"}
-                    </b>
-                  </span>
-                  {syncStatus.sources.football_data_configured ? (
-                    <>
-                      <small>
-                        {syncStatus.games_sync?.secondary?.matched ?? 0} jogos casados ·{" "}
-                        {syncStatus.games_sync?.secondary?.filled ?? 0} resultados preenchidos por ela
-                      </small>
-                      {syncStatus.games_sync?.secondary?.error && (
-                        <small className="wc-sync-warn">
-                          <AlertTriangle size={12} /> {syncStatus.games_sync.secondary.error}
-                        </small>
-                      )}
-                      {(syncStatus.games_sync?.secondary?.conflicts?.length ?? 0) > 0 ? (
-                        <small className="wc-sync-warn">
-                          <AlertTriangle size={12} /> Placares divergentes:{" "}
-                          {(syncStatus.games_sync?.secondary?.conflicts ?? [])
-                            .map((conflict) => `${conflict.game} (of ${conflict.openfootball} x fd ${conflict.football_data})`)
-                            .join(" · ")}
-                        </small>
-                      ) : (
-                        <small>Nenhuma divergência entre as duas fontes.</small>
-                      )}
-                    </>
-                  ) : (
-                    <small>
-                      Defina FOOTBALL_DATA_API_KEY no .env (chave grátis em football-data.org) pra conferir os placares
-                      em duas fontes.
-                    </small>
-                  )}
-                </div>
-
-                <div
-                  className={
-                    !syncStatus.games_sync?.live_source?.configured
-                      ? "wc-sync-card muted"
-                      : syncStatus.games_sync.live_source.error
-                        ? "wc-sync-card error"
-                        : "wc-sync-card ok"
-                  }
-                >
-                  <span className="wc-sync-card-head">
-                    <Zap size={14} />
-                    <strong>Goleadores — API-Football</strong>
-                    <b
-                      className={
-                        !syncStatus.sources.api_football_configured
-                          ? "wc-sync-pill muted"
-                          : syncStatus.games_sync?.live_source?.error
-                            ? "wc-sync-pill error"
-                            : "wc-sync-pill ok"
-                      }
-                    >
-                      {!syncStatus.sources.api_football_configured
-                        ? "Não configurada"
-                        : syncStatus.games_sync?.live_source?.error
-                          ? "Erro"
-                          : "Ativa"}
-                    </b>
-                  </span>
-                  {!syncStatus.sources.api_football_configured ? (
-                    <small>Defina API_FOOTBALL_KEY no .env pra capturar os goleadores em tempo real.</small>
-                  ) : (
-                    <>
-                      <small>
-                        {syncStatus.sources.api_football_keys ?? 1} chave(s) ·{" "}
-                        <strong>{syncStatus.sources.api_football_daily_remaining ?? "?"}</strong>/
-                        {syncStatus.sources.api_football_daily_limit ?? 100} requisições restantes hoje
-                      </small>
-                      <div className="wc-quota-bar">
-                        <span
-                          style={{
-                            width: `${Math.max(
-                              2,
-                              Math.round(
-                                ((syncStatus.sources.api_football_daily_remaining ?? 0) /
-                                  (syncStatus.sources.api_football_daily_limit || 100)) *
-                                  100,
-                              ),
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                      <div className="wc-quota-math">
-                        <span>
-                          {syncStatus.games_sync?.live_source?.daily_remaining ?? "?"} restantes
-                          {" − "}{syncStatus.games_sync?.live_source?.reserve ?? 2} reserva (fim de jogo)
-                          {" ÷ "}{syncStatus.games_sync?.live_source?.active_today ?? 0} jogo(s) ativo(s)
-                          {" = "}
-                          <strong>{syncStatus.games_sync?.live_source?.per_game_cap ?? 0} chamada(s)/jogo</strong>
-                        </span>
-                        <span>
-                          {(syncStatus.games_sync?.live_source?.games_today ?? 0)} jogo(s) hoje · ao vivo a cada{" "}
-                          <strong>
-                            {(() => {
-                              const g = syncStatus.games_sync?.live_source?.live_gap_seconds ?? 0;
-                              return g >= 60 ? `${Math.round(g / 60)} min` : `${g}s`;
-                            })()}
-                          </strong>{" "}
-                          · {syncStatus.games_sync?.live_source?.calls_made ?? 0} chamadas neste ciclo
-                        </span>
-                        <span>
-                          confirmados pela 2ª fonte: {syncStatus.games_sync?.live_source?.confirmed ?? 0} ·
-                          reconciliações IA: {syncStatus.games_sync?.live_source?.ai_reconciles ?? 0} ·
-                          jogos finalizados: {syncStatus.games_sync?.live_source?.finalized ?? 0}
-                        </span>
-                        <span>
-                          proteção: máx 9 req/min na paga, 6 jogos/ciclo na grátis — nunca estoura
-                          {syncStatus.games_sync?.live_source?.minute_throttled ? " · segurando até o próximo minuto" : ""}
-                        </span>
-                        <span>
-                          ao vivo event-driven: o placar (grátis) detecta o gol e dispara o nome do goleador na
-                          hora{" "}
-                          {syncStatus.games_sync?.live_source?.goal_pending ? (
-                            <strong style={{ color: "var(--brand-green)" }}>⚡ buscando goleador de um gol agora</strong>
-                          ) : (
-                            "— sem gol pendente, só poll de segurança (quase não gasta cota)"
-                          )}
-                        </span>
-                        <small className="muted">
-                          A cota reseta pra {syncStatus.sources.api_football_daily_limit ?? 100} à meia-noite (UTC). Se zerar, placar
-                          (football-data) + TheSportsDB + openfootball + IA seguem entregando o goleador — o fim do jogo nunca depende
-                          só da paga.
-                        </small>
-                      </div>
-                      <small>football-data (placar): ilimitada · {syncStatus.games_sync?.secondary?.matched ?? 0} jogos casados</small>
-                      {syncStatus.games_sync?.live_source?.skipped && (
-                        <small className="muted">{syncStatus.games_sync.live_source.skipped}</small>
-                      )}
-                      {syncStatus.games_sync?.live_source?.error && (
-                        <small className="wc-sync-warn">
-                          <AlertTriangle size={12} /> {syncStatus.games_sync.live_source.error}
-                        </small>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                <div className={syncStatus.sources.thesportsdb_configured ? "wc-sync-card ok" : "wc-sync-card muted"}>
-                  <span className="wc-sync-card-head">
-                    <CheckCircle2 size={14} />
-                    <strong>2ª fonte de goleadores — TheSportsDB</strong>
-                    <b className={syncStatus.sources.thesportsdb_configured ? "wc-sync-pill ok" : "wc-sync-pill muted"}>
-                      {syncStatus.sources.thesportsdb_configured ? "Confirmando" : "Não configurada"}
-                    </b>
-                  </span>
-                  <small>
-                    Grátis · 30 req/min · confere se os goleadores batem com a API-Football.{" "}
-                    {syncStatus.games_sync?.live_source?.confirmed ?? 0} confirmados neste ciclo.
-                  </small>
-                  <small className="muted">
-                    Cobertura best-effort: a fonte grátis nem sempre tem todos os jogos da Copa. Quando bate, marca
-                    confirmado; quando falta, a IA reconcilia as fontes que existem.
-                  </small>
-                </div>
-
-                <div className={syncStatus.sources.ai_configured ? "wc-sync-card ok" : "wc-sync-card muted"}>
-                  <span className="wc-sync-card-head">
-                    <Sparkles size={14} />
-                    <strong>Reconciliação — IA (GPT-4o-mini)</strong>
-                    <b className={syncStatus.sources.ai_configured ? "wc-sync-pill ok" : "wc-sync-pill muted"}>
-                      {syncStatus.sources.ai_configured ? "Ativa em todo jogo" : "Não configurada"}
-                    </b>
-                  </span>
-                  <small>
-                    {syncStatus.sources.ai_calls_today ?? 0} chamadas hoje ·{" "}
-                    {syncStatus.games_sync?.live_source?.ai_reconciles ?? 0} reconciliações neste ciclo
-                  </small>
-                  <small className="muted">
-                    No fim de cada jogo a IA cruza as 3 fontes e fixa a lista definitiva de goleadores (resultado cacheado,
-                    então roda 1x por jogo e fica barato).
-                  </small>
-                </div>
-
-                <div className={syncStatus.squad_sync?.ok === false ? "wc-sync-card error" : "wc-sync-card ok"}>
-                  <span className="wc-sync-card-head">
-                    <Users size={14} />
-                    <strong>Elencos — Wikipedia</strong>
-                    <b className={syncStatus.squad_sync?.ok === false ? "wc-sync-pill error" : "wc-sync-pill ok"}>
-                      {syncStatus.totals.players > 0 ? "Jogadores puxados" : "Sem jogadores"}
-                    </b>
-                  </span>
-                  <small>
-                    {syncStatus.totals.players} jogadores de {syncStatus.totals.teams_with_squads} seleções · última:{" "}
-                    {syncStatus.last_squad_sync ? formatEventDate(syncStatus.last_squad_sync) : "—"}
-                  </small>
-                  {syncStatus.squad_sync?.error && (
-                    <small className="wc-sync-warn">
-                      <AlertTriangle size={12} /> {syncStatus.squad_sync.error}
-                    </small>
-                  )}
                 </div>
 
                 {(syncStatus.games_health?.length ?? 0) > 0 && (
-                  <div className="wc-health">
-                    <span className="wc-sync-runs-title">Saúde dos jogos (ao vivo + encerrados)</span>
-                    <div className="wc-health-list">
-                      {(syncStatus.games_health ?? []).map((gh, i) => {
-                        // final = fonte definitiva já fixou (lista verdadeira, mesmo
-                        // com menos nomes que gols quando alguém faz 2+). Só alarma se
-                        // NÃO foi fixado E ainda falta nome.
-                        const ok = gh.status === "finished" ? gh.scorers_final : true;
-                        const warn = gh.status === "finished" && !gh.scorers_final && !gh.scorers_complete;
-                        return (
-                          <div className={warn ? "wc-health-row warn" : "wc-health-row"} key={i}>
-                            <span className={`wc-health-badge ${gh.status}`}>
-                              {gh.status === "live" && <span className="wc-live-dot small" />}
-                              {gh.status === "live" ? "AO VIVO" : "ENCERRADO"}
-                            </span>
-                            <span className="wc-health-match">{gh.matchup}</span>
-                            <strong className="wc-health-score">{gh.score ?? "–"}</strong>
-                            <span
-                              className="wc-health-scorers"
-                              title={`${gh.scorers_count} goleadores capturados de ${gh.goals} gol(s)`}
-                            >
-                              {warn ? (
-                                <AlertTriangle size={13} />
-                              ) : ok ? (
-                                <CheckCircle2 size={13} />
-                              ) : (
-                                <RefreshCcw size={13} />
-                              )}
-                              {gh.scorers_count}/{gh.goals} ⚽
-                            </span>
-                            {gh.status === "finished" && (gh.goals ?? 0) > 0 && (
-                              <span
-                                className={`wc-health-conf ${(gh.scorers_confirmations ?? 0) >= 2 ? "ok" : (gh.scorers_confirmations ?? 0) === 1 ? "mid" : "low"}`}
-                                title={`${gh.scorers_confirmations ?? 0} fonte(s) independentes confirmaram os goleadores`}
-                              >
-                                {gh.scorers_confirmed ? "✓✓" : "✓"} {gh.scorers_confirmations ?? 0} fonte(s)
-                              </span>
-                            )}
-                            {gh.status === "finished" && gh.end_source && (
-                              <span className="wc-health-end" title="Quem confirmou o fim do jogo">
-                                fim: {gh.end_source}
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
+                  <div className="wc-tech-block">
+                    <div className="wc-tech-h">Jogos — finalizou · confirmou · re-confirmou</div>
+                    {(syncStatus.games_health ?? []).map((g, i) => {
+                      const conf = g.scorers_confirmations ?? 0;
+                      return (
+                        <div className="wc-tech-game" key={i}>
+                          <span className={`st ${g.status}`}>{g.status === "live" ? "● LIVE" : "FIM"}</span>
+                          <span className="mt">
+                            {g.match_number ? `#${g.match_number} ` : ""}
+                            {g.matchup}
+                          </span>
+                          <span className="sc">{g.score ?? "—"}</span>
+                          <span className="gl">
+                            gols {g.scorers_count}/{g.goals}
+                          </span>
+                          <span className={g.scorers_final ? "fl ok" : "fl no"}>
+                            {g.scorers_final ? "finalizado ✓" : "finalizando…"}
+                          </span>
+                          <span className={conf >= 1 ? "cf ok" : "cf no"}>
+                            {conf >= 1 ? "confirmou ✓" : "confirmar…"}
+                          </span>
+                          <span className={conf >= 2 ? "cf ok" : "cf no"}>
+                            {conf >= 2 ? "re-confirmou ✓✓" : "re-confirmar…"}
+                          </span>
+                          {g.end_source && <span className="es">fim: {g.end_source}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {(syncStatus.today_games ?? []).filter((g) => g.status === "scheduled").length > 0 && (
+                  <div className="wc-tech-block">
+                    <div className="wc-tech-h">Hoje — ainda vão começar</div>
+                    {(syncStatus.today_games ?? [])
+                      .filter((g) => g.status === "scheduled")
+                      .map((g, i) => (
+                        <div className="wc-tech-row" key={i}>
+                          <span className="k">{timeHM(g.kickoff_at)}</span>
+                          <span className="d">
+                            {g.home_team} x {g.away_team}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+
+                {(syncStatus.game_events?.length ?? 0) > 0 && (
+                  <div className="wc-tech-block">
+                    <div className="wc-tech-h">Log — o que fez e quando</div>
+                    <div className="wc-tech-log">
+                      {(syncStatus.game_events ?? []).slice(0, 20).map((ev, i) => (
+                        <div className="wc-tech-logrow" key={i}>
+                          <span className="t">{timeHM(ev.at)}</span>
+                          <span className="g">{ev.match_number ? `#${ev.match_number}` : ""}</span>
+                          <span className="a">{ev.action}</span>
+                        </div>
+                      ))}
                     </div>
-                    <small className="muted">
-                      ⚠ = faltam goleadores (o sistema continua tentando sozinho a cada ciclo) · ✓✓ = 2+ fontes
-                      bateram · &quot;fim&quot; = quem confirmou o encerramento (nenhum jogo fica aberto por horas)
-                    </small>
                   </div>
                 )}
 
                 {(syncStatus.runs?.length ?? 0) > 0 && (
-                  <div className="wc-sync-runs">
-                    <span className="wc-sync-runs-title">Últimas execuções</span>
-                    <div className="wc-sync-runs-list">
-                      {(syncStatus.runs ?? []).slice(0, 8).map((run, i) => (
-                        <div className={run.ok === false ? "wc-sync-run err" : "wc-sync-run"} key={i}>
-                          <span className={run.ok === false ? "wc-sync-run-dot err" : "wc-sync-run-dot ok"} />
-                          <span className="wc-sync-run-time">{run.at ? formatEventDate(run.at) : "—"}</span>
-                          <span className="wc-sync-run-meta">
-                            {run.ok === false
-                              ? (run.error ?? "falhou").slice(0, 40)
-                              : `${run.live_games ?? 0} ao vivo · ${run.scorers_updated ?? 0} gols · ${run.finalized ?? 0} fechados · ${run.api_calls ?? 0} req`}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                  <div className="wc-tech-block">
+                    <div className="wc-tech-h">Últimos ciclos</div>
+                    {(syncStatus.runs ?? []).slice(0, 6).map((run, i) => (
+                      <div className="wc-tech-logrow" key={i}>
+                        <span className="t">{run.at ? timeHM(run.at) : "—"}</span>
+                        <span className={run.ok === false ? "a err" : "a"}>
+                          {run.ok === false
+                            ? `FALHOU: ${(run.error ?? "").slice(0, 50)}`
+                            : `${run.live_games ?? 0} live · ${run.scorers_updated ?? 0} gols · ${run.finalized ?? 0} fechados · ${run.api_calls ?? 0} req paga`}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

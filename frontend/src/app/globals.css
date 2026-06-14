@@ -12696,6 +12696,69 @@ img.team-flag {
   .wc-log-game { grid-column: 2; max-width: none; }
 }
 
+/* ===================== Console técnico (denso, scaneável) ===================== */
+.wc-tech {
+  display: flex; flex-direction: column; gap: 10px;
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 12px; line-height: 1.5; color: #d6deea;
+}
+.wc-tech-verdict {
+  display: flex; flex-direction: column; gap: 2px;
+  border-radius: 8px; padding: 8px 11px; border-left: 3px solid var(--brand-green);
+  background: rgba(57,217,138,0.08);
+}
+.wc-tech-verdict.warn { border-left-color: #ffb02e; background: rgba(255,176,46,0.08); }
+.wc-tech-verdict strong { font-size: 12px; letter-spacing: 0.03em; color: var(--brand-green); }
+.wc-tech-verdict.warn strong { color: #ffc879; }
+.wc-tech-verdict span { font-size: 11px; color: var(--muted); }
+
+.wc-tech-block { display: flex; flex-direction: column; }
+.wc-tech-h {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: #7f8ba0; padding: 2px 2px 5px; border-bottom: 1px solid rgba(255,255,255,0.08); margin-bottom: 3px;
+}
+.wc-tech-row {
+  display: grid; grid-template-columns: 120px 1fr auto auto; gap: 8px; align-items: baseline;
+  padding: 3px 4px; border-radius: 4px;
+}
+.wc-tech-row:nth-child(even) { background: rgba(255,255,255,0.02); }
+.wc-tech-row .k { color: #fff; font-weight: 700; }
+.wc-tech-row .d { color: #8b97ab; }
+.wc-tech-row .v { color: var(--brand-cyan, #22d3ee); font-weight: 700; text-align: right; white-space: nowrap; }
+.wc-tech-row .v2 { color: #fff; font-weight: 700; white-space: nowrap; }
+.wc-tech-row .lim { color: #7f8ba0; text-align: right; white-space: nowrap; }
+
+.wc-tech-game {
+  display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline;
+  padding: 4px 4px; border-radius: 4px;
+}
+.wc-tech-game:nth-child(even) { background: rgba(255,255,255,0.02); }
+.wc-tech-game .st { font-weight: 800; min-width: 44px; }
+.wc-tech-game .st.live { color: #ff6aa8; }
+.wc-tech-game .st.finished { color: #7f8ba0; }
+.wc-tech-game .mt { color: #fff; font-weight: 700; flex: 1 1 150px; }
+.wc-tech-game .sc { color: #fff; font-weight: 800; }
+.wc-tech-game .gl { color: #8b97ab; }
+.wc-tech-game .fl.ok, .wc-tech-game .cf.ok { color: var(--brand-green); }
+.wc-tech-game .fl.no, .wc-tech-game .cf.no { color: #ffb02e; }
+.wc-tech-game .es { color: #7f8ba0; }
+
+.wc-tech-log { display: flex; flex-direction: column; max-height: 240px; overflow-y: auto; }
+.wc-tech-logrow {
+  display: grid; grid-template-columns: 52px 36px 1fr; gap: 8px; align-items: baseline;
+  padding: 2px 4px; border-radius: 4px;
+}
+.wc-tech-logrow:nth-child(odd) { background: rgba(255,255,255,0.02); }
+.wc-tech-logrow .t { color: #7f8ba0; }
+.wc-tech-logrow .g { color: #8fa3c8; font-weight: 700; }
+.wc-tech-logrow .a { color: #d6deea; }
+.wc-tech-logrow .a.err { color: #ff8a8a; }
+@media (max-width: 560px) {
+  .wc-tech-row { grid-template-columns: 1fr auto; }
+  .wc-tech-row .d { grid-column: 1 / -1; }
+  .wc-tech-row .lim { grid-column: 1 / -1; text-align: left; }
+}
+
 /* ============================================================
    Design system v2 — unifica feed/perfil/eventos com o bolão
    (vidro escuro, glow sutil, raio 16-18px, gradiente azul→ciano)
