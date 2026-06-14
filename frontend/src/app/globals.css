@@ -12513,3 +12513,64 @@ img.team-flag {
 .wc-scorer-option-body small { color: var(--muted); font-size: 0.72rem; font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wc-scorer-check { color: var(--brand-green); flex: 0 0 auto; }
 .wc-scorer-option.active { border-color: rgba(57,217,138,0.45); background: rgba(57,217,138,0.08); }
+
+/* ===== Card de jogo finalizado/ao vivo — compacto e unificado ===== */
+.wc-fcard-list { display: grid; gap: 10px; }
+.wc-fcard {
+  display: grid; gap: 9px;
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 16px;
+  background: linear-gradient(165deg, rgba(10,18,36,0.9), rgba(4,9,20,0.95));
+  padding: 13px 14px;
+}
+.wc-fcard.live { border-color: rgba(227,28,121,0.4); animation: wc-hero2-live 2.4s ease-in-out infinite; }
+.wc-fcard-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wc-fcard-status { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 9px; font-size: 0.64rem; font-weight: 950; text-transform: uppercase; }
+.wc-fcard-status.finished { background: rgba(255,255,255,0.07); color: var(--muted); }
+.wc-fcard-status.live { background: rgba(227,28,121,0.16); color: #ffb3d4; }
+.wc-fcard-status.scheduled { background: rgba(0,207,180,0.12); color: #bafff2; }
+.wc-fcard-top .wc-game-date { margin-left: auto; }
+.wc-fcard-score { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 10px; }
+.wc-fcard-team { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: #fff; font-weight: 850; font-size: 0.86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wc-fcard-team.away { justify-content: flex-end; }
+.wc-fcard-score > strong { display: inline-flex; align-items: baseline; gap: 5px; color: #fff; font-size: 1.5rem; font-weight: 950; font-variant-numeric: tabular-nums; }
+.wc-fcard-score > strong i { font-style: normal; color: var(--muted); font-size: 0.8rem; font-weight: 800; }
+.wc-fcard.live .wc-fcard-score > strong { color: #ff7eb6; text-shadow: 0 0 18px rgba(227,28,121,0.4); }
+.wc-fcard-scorers { display: flex; align-items: center; gap: 6px; color: rgba(214,226,244,0.85); font-size: 0.78rem; font-weight: 700; }
+.wc-fcard-scorers svg { color: var(--brand-green); flex: 0 0 auto; }
+.wc-fcard-scorers.muted { color: var(--muted); }
+.wc-fcard-mine {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  border: 1px solid rgba(0,207,180,0.3); border-radius: 12px;
+  background: rgba(0,207,180,0.07); padding: 7px 11px;
+}
+.wc-fcard-mine.won { border-color: rgba(57,217,138,0.45); background: rgba(57,217,138,0.1); }
+.wc-fcard-mine-tag { color: var(--brand-cyan); font-size: 0.62rem; font-weight: 950; letter-spacing: 0.06em; text-transform: uppercase; }
+.wc-fcard-mine > strong { color: #fff; font-weight: 950; font-variant-numeric: tabular-nums; }
+.wc-fcard-mine-scorer { color: var(--muted); font-size: 0.76rem; font-weight: 800; }
+.wc-fcard-mine-scorer.hit { color: var(--brand-green); }
+.wc-fcard-mine .wc-points-badge { margin-left: auto; }
+.wc-fcard-toggle {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  border: 0; border-top: 1px solid rgba(255,255,255,0.07);
+  background: transparent; color: var(--muted);
+  cursor: pointer; padding: 8px 0 2px; font-size: 0.74rem; font-weight: 800;
+}
+.wc-fcard-toggle span { flex: 1; text-align: left; }
+.wc-fcard-chevron { transition: transform 0.2s ease; flex: 0 0 auto; }
+.wc-fcard-chevron.open { transform: rotate(90deg); }
+.wc-fcard-preds { display: grid; gap: 4px; }
+.wc-fcard-pred { display: grid; grid-template-columns: auto auto minmax(0,1fr) auto; align-items: center; gap: 8px; border-radius: 9px; padding: 3px 5px; }
+.wc-fcard-pred.scored { background: rgba(57,217,138,0.08); }
+.wc-fcard-pred > span { color: #fff; font-size: 0.78rem; font-weight: 850; }
+.wc-fcard-pred small { color: var(--muted); font-size: 0.72rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Insight da IA dentro do card do próximo jogo (compacto, não quebra) */
+.wc-ai-insight-card {
+  border: 1px solid rgba(149,128,255,0.32);
+  border-radius: 12px;
+  background: linear-gradient(120deg, rgba(149,128,255,0.13), rgba(0,207,180,0.05));
+  padding: 8px 11px;
+}
+.wc-ai-insight-card .wc-ai-insight-tag { font-size: 0.6rem; }
+.wc-ai-insight-card p { color: #f0ecff; font-size: 0.8rem; font-weight: 700; line-height: 1.35; }

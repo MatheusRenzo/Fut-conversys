@@ -1214,7 +1214,40 @@ def world_cup_leaderboard_response(db: Session) -> list[dict[str, Any]]:
     )
     for index, row in enumerate(leaderboard, start=1):
         row["rank"] = index
+
+    # Movimentação desde o último jogo pontuado (verde sobe / vermelho desce)
+    baseline = {}
+    raw = get_app_setting(db, "world_cup_rank_baseline")
+    if raw:
+        try:
+            baseline = (json.loads(raw) or {}).get("ranks", {})
+        except json.JSONDecodeError:
+            baseline = {}
+    for row in leaderboard:
+        before = baseline.get(str(row["user"]["id"]))
+        row["movement"] = (before - row["rank"]) if isinstance(before, int) else 0
+
     return leaderboard[:30]
+
+
+def maybe_snapshot_rank_baseline(db: Session) -> None:
+    """Captura a foto do ranking ANTES de pontuar uma nova rodada, para mostrar
+    quem subiu/caiu por causa do último jogo. Só refaz quando o nº de jogos
+    encerrados muda (a movimentação fica visível até o próximo jogo)."""
+    finished = db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "finished").count()
+    raw = get_app_setting(db, "world_cup_rank_baseline")
+    current = None
+    if raw:
+        try:
+            current = json.loads(raw)
+        except json.JSONDecodeError:
+            current = None
+    if current and current.get("finished") == finished:
+        return  # mesma rodada — mantém o baseline pra movimentação persistir
+    ranks = {str(row["user"]["id"]): row["rank"] for row in world_cup_leaderboard_response(db)}
+    set_app_setting(
+        db, "world_cup_rank_baseline", json.dumps({"finished": finished, "ranks": ranks}, ensure_ascii=False)
+    )
 
 
 def world_cup_stage_from_section(section: str) -> tuple[str, str | None]:
@@ -2090,6 +2123,7 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
     secondary = cross_check_world_cup_results(db)
     live_source = apply_api_football_live(db)
     refresh_world_cup_live_statuses(db)
+    maybe_snapshot_rank_baseline(db)
     finished_games = db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "finished").all()
     for game in finished_games:
         score_world_cup_game(game)
@@ -2367,15 +2401,20 @@ def world_cup_ai_insight(db: Session) -> dict[str, Any]:
         partes.append(f"artilheiro favorito: {top_scorer[0]} ({top_scorer[1]} palpites)")
     text = openai_chat(
         system=(
-            "Você é um narrador esportivo brasileiro animado de um bolão de Copa entre amigos. "
-            "Escreva 1 a 2 frases curtas e empolgantes (pt-BR, máx 240 caracteres) resumindo a "
-            "tendência dos palpites pro próximo jogo, ajudando quem não entende muito a sentir o clima. "
-            "Não revele nomes de quem palpitou. Não invente números além dos fornecidos. Sem hashtags."
+            "Você é um narrador esportivo brasileiro animado de um bolão de Copa. "
+            "Escreva UMA frase curtíssima e empolgante (pt-BR, no MÁXIMO 110 caracteres) sobre a "
+            "tendência dos palpites pro próximo jogo. Direto e com energia. "
+            "Não revele nomes de quem palpitou. Não invente números. Sem hashtags."
         ),
         user="Tendência dos palpites: " + "; ".join(partes) + ".",
+        max_tokens=70,
     )
     if not text:
         return base
+    # Teto rígido pra nunca quebrar o card, independente do que a IA escrever
+    text = text.strip().strip('"')
+    if len(text) > 150:
+        text = text[:147].rsplit(" ", 1)[0] + "…"
     set_app_setting(
         db,
         "world_cup_ai_insight",
@@ -3303,6 +3342,8 @@ def set_world_cup_game_result(
     game.status = result_status
     if request.scorers is not None:
         game.scorers = re.sub(r"\s+", " ", request.scorers).strip()[:500] or None
+    db.flush()
+    maybe_snapshot_rank_baseline(db)
     score_world_cup_game(game)
     db.commit()
     db.refresh(game)

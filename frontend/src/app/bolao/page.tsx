@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -645,6 +645,87 @@ function ScorerPicker({
   );
 }
 
+function FinishedGameCard({ game, viewerId }: { game: WorldCupGame; viewerId?: number }) {
+  const [open, setOpen] = useState(false);
+  const preds = game.predictions ?? [];
+  const mine = viewerId ? preds.find((p) => p.user.id === viewerId) : undefined;
+  const others = preds.filter((p) => p.user.id !== mine?.user.id);
+  const exactCount = preds.filter((p) => p.home_score === game.home_score && p.away_score === game.away_score).length;
+  const scorerCount = preds.filter((p) => p.scorer_hit).length;
+  const finished = game.status === "finished";
+
+  return (
+    <article className={`wc-fcard${finished ? "" : " live"}`}>
+      <div className="wc-fcard-top">
+        <span className="wc-game-stage">
+          {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
+        </span>
+        <span className={`wc-fcard-status ${game.status}`}>
+          {game.status === "live" && <span className="wc-live-dot small" />}
+          {statusLabels[game.status]}
+        </span>
+        <span className="wc-game-date">{formatEventDate(game.kickoff_at)}</span>
+      </div>
+
+      <div className="wc-fcard-score">
+        <span className="wc-fcard-team">
+          <TeamFlag team={game.home_team} /> {teamLabel(game.home_team)}
+        </span>
+        <strong>{game.home_score ?? "–"}<i>x</i>{game.away_score ?? "–"}</strong>
+        <span className="wc-fcard-team away">
+          {teamLabel(game.away_team)} <TeamFlag team={game.away_team} />
+        </span>
+      </div>
+
+      {game.scorers ? (
+        <div className="wc-fcard-scorers"><Goal size={13} /> <span>{game.scorers}</span></div>
+      ) : finished ? (
+        <div className="wc-fcard-scorers muted">Artilheiros ainda não publicados.</div>
+      ) : null}
+
+      {mine && (
+        <div className={`wc-fcard-mine${(mine.points ?? 0) > 0 ? " won" : ""}`}>
+          <span className="wc-fcard-mine-tag">Seu palpite</span>
+          <strong>{mine.home_score}x{mine.away_score}</strong>
+          {mine.scorer_guess && (
+            <span className={mine.scorer_hit ? "wc-fcard-mine-scorer hit" : "wc-fcard-mine-scorer"}>
+              ⚽ {mine.scorer_guess}{mine.scorer_hit ? " ✓" : ""}
+            </span>
+          )}
+          <b className={(mine.points ?? 0) > 0 ? "wc-points-badge won" : "wc-points-badge"}>
+            {finished ? ((mine.points ?? 0) > 0 ? `+${mine.points} pts` : "0 pts") : "aguardando"}
+          </b>
+        </div>
+      )}
+
+      {preds.length > 0 && (
+        <button className="wc-fcard-toggle" onClick={() => setOpen((v) => !v)} type="button">
+          <Users size={13} />
+          <span>{preds.length} palpitaram · {exactCount} cravaram o placar · {scorerCount} ⚽</span>
+          <ChevronRight className={open ? "wc-fcard-chevron open" : "wc-fcard-chevron"} size={15} />
+        </button>
+      )}
+
+      {open && (
+        <div className="wc-fcard-preds">
+          {others.map((p) => (
+            <div className={p.points > 0 ? "wc-fcard-pred scored" : "wc-fcard-pred"} key={p.id}>
+              <Avatar user={p.user} size="sm" />
+              <span>{p.user.name.split(" ")[0]}</span>
+              <small>
+                {p.home_score}x{p.away_score}
+                {p.scorer_guess ? ` · ⚽ ${p.scorer_guess}${p.scorer_hit ? " ✓" : ""}` : ""}
+              </small>
+              <b className={p.points > 0 ? "wc-points-badge won" : "wc-points-badge"}>{p.points > 0 ? `+${p.points}` : "0"}</b>
+            </div>
+          ))}
+          {others.length === 0 && <p className="rail-empty-copy">Só você palpitou nesse jogo.</p>}
+        </div>
+      )}
+    </article>
+  );
+}
+
 export default function BolaoPage() {
   const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -904,29 +985,13 @@ export default function BolaoPage() {
     return entries.sort((a, b) => rankingValue(b, rankingTab) - rankingValue(a, rankingTab));
   }, [board?.leaderboard, rankingTab]);
 
-  // Movimentação: compara a posição atual de cada um com a anterior (delta > 0 subiu)
-  const prevRanksRef = useRef<Record<number, number>>({});
-  const [rankDelta, setRankDelta] = useState<Record<number, number>>({});
-  useEffect(() => {
-    const current: Record<number, number> = {};
+  // Movimentação vem pronta do servidor (subiu/caiu desde o último jogo pontuado)
+  const rankDelta = useMemo(() => {
+    const map: Record<number, number> = {};
     (board?.leaderboard ?? []).forEach((entry) => {
-      current[entry.user.id] = entry.rank;
+      if (entry.movement) map[entry.user.id] = entry.movement;
     });
-    const prev = prevRanksRef.current;
-    if (Object.keys(prev).length > 0) {
-      const delta: Record<number, number> = {};
-      for (const [id, rank] of Object.entries(current)) {
-        const before = prev[Number(id)];
-        if (before && before !== rank) delta[Number(id)] = before - rank;
-      }
-      if (Object.keys(delta).length > 0) {
-        setRankDelta(delta);
-        const timer = window.setTimeout(() => setRankDelta({}), 8000);
-        prevRanksRef.current = current;
-        return () => window.clearTimeout(timer);
-      }
-    }
-    prevRanksRef.current = current;
+    return map;
   }, [board?.leaderboard]);
 
   const gamePlayers = useCallback(
@@ -1240,13 +1305,6 @@ export default function BolaoPage() {
         </div>
       </section>
 
-      {aiInsight && (
-        <section className="wc-ai-insight wc-ai-insight-banner">
-          <span className="wc-ai-insight-tag"><Sparkles size={13} /> Resenha da IA · próximo jogo</span>
-          <p>{aiInsight}</p>
-        </section>
-      )}
-
       <section className="wc-ranking-inline glass-panel wc-ranking-mobile-only" id="bolao-ranking">
         <div className="wc-section-head wc-ranking-inline-head">
           <div>
@@ -1414,54 +1472,9 @@ export default function BolaoPage() {
               </p>
             </div>
           </div>
-          <div className="wc-results-list">
+          <div className="wc-fcard-list">
             {recentResults.map((game) => (
-              <article className="wc-result-card" key={game.id}>
-                <div className="wc-result-top">
-                  <span className="wc-game-stage">
-                    {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
-                  </span>
-                  <span className="wc-game-date">{formatEventDate(game.kickoff_at)}</span>
-                </div>
-                <div className="wc-result-scoreline">
-                  <span><TeamFlag team={game.home_team} /> {teamLabel(game.home_team)}</span>
-                  <strong>
-                    {game.home_score} x {game.away_score}
-                  </strong>
-                  <span>
-                    {teamLabel(game.away_team)} <TeamFlag team={game.away_team} />
-                  </span>
-                </div>
-                {game.scorers ? (
-                  <div className="wc-result-scorers">
-                    <Goal size={14} />
-                    <span>{game.scorers}</span>
-                  </div>
-                ) : (
-                  <div className="wc-result-scorers muted">Artilheiros ainda não publicados na fonte.</div>
-                )}
-                {(game.predictions ?? []).length > 0 && (
-                  <div className="wc-result-preds">
-                    <span className="wc-result-preds-label">Palpites da galera</span>
-                    {(game.predictions ?? []).map((prediction) => (
-                      <div
-                        className={prediction.points > 0 ? "wc-result-pred scored" : "wc-result-pred"}
-                        key={prediction.id}
-                      >
-                        <Avatar user={prediction.user} size="sm" />
-                        <span>{prediction.user.name.split(" ")[0]}</span>
-                        <small>
-                          {prediction.home_score}x{prediction.away_score}
-                          {prediction.scorer_guess ? ` · ⚽ ${prediction.scorer_guess}${prediction.scorer_hit ? " ✓" : ""}` : ""}
-                        </small>
-                        <b className={prediction.points > 0 ? "wc-points-badge won" : "wc-points-badge"}>
-                          {prediction.points > 0 ? `+${prediction.points}` : "0"}
-                        </b>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </article>
+              <FinishedGameCard game={game} key={game.id} viewerId={profile?.id} />
             ))}
           </div>
         </section>
@@ -1528,83 +1541,9 @@ export default function BolaoPage() {
       {gridGames.length > 0 ? (
         <section className="wc-game-grid">
           {gridGames.map((game) => {
-            // Jogo fechado/ao vivo/encerrado: card de resultado com palpites da galera
+            // Jogo fechado/ao vivo/encerrado: card compacto unificado (resultado + gols + seu palpite + galera)
             if (isGameLocked(game, currentTime)) {
-              const viewerPick = game.viewer_prediction;
-              return (
-                <article className="wc-game-card glass-panel closed-card" id={`game-${game.id}`} key={game.id}>
-                  <div className="wc-game-top">
-                    <span className="wc-game-stage">
-                      {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
-                    </span>
-                    <span className="wc-game-date">{formatEventDate(game.kickoff_at)}</span>
-                    <div className="wc-game-top-actions">
-                      <span className={`wc-game-status ${game.status}`}>
-                        {game.status === "live" && <span className="wc-live-dot small" />}
-                        {game.status === "scheduled" ? "Fechado" : statusLabels[game.status]}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="wc-result-scoreline">
-                    <span>
-                      <TeamFlag team={game.home_team} /> {teamLabel(game.home_team)}
-                    </span>
-                    <strong>
-                      {game.home_score ?? "–"} x {game.away_score ?? "–"}
-                    </strong>
-                    <span>
-                      {teamLabel(game.away_team)} <TeamFlag team={game.away_team} />
-                    </span>
-                  </div>
-                  {game.scorers && (
-                    <div className="wc-result-scorers">
-                      <Goal size={14} />
-                      <span>{game.scorers}</span>
-                    </div>
-                  )}
-                  {viewerPick && (
-                    <div className="wc-bet-slip-pick">
-                      <span>
-                        Seu palpite: <strong>{viewerPick.home_score}x{viewerPick.away_score}</strong>
-                        {viewerPick.scorer_guess ? (
-                          <>
-                            {" · "}
-                            <strong className={viewerPick.scorer_hit ? "hit" : ""}>⚽ {viewerPick.scorer_guess}</strong>
-                          </>
-                        ) : null}
-                      </span>
-                      {viewerPick.status === "scored" ? (
-                        <b className={viewerPick.points > 0 ? "wc-points-badge won" : "wc-points-badge"}>
-                          {viewerPick.points > 0 ? `+${viewerPick.points} pts` : "0 pts"}
-                        </b>
-                      ) : (
-                        <b className="wc-points-badge pending">Aguardando</b>
-                      )}
-                    </div>
-                  )}
-                  {(game.predictions ?? []).length > 0 && (
-                    <div className="wc-result-preds">
-                      <span className="wc-result-preds-label">Palpites da galera</span>
-                      {(game.predictions ?? []).map((prediction) => (
-                        <div
-                          className={prediction.points > 0 ? "wc-result-pred scored" : "wc-result-pred"}
-                          key={prediction.id}
-                        >
-                          <Avatar user={prediction.user} size="sm" />
-                          <span>{prediction.user.name.split(" ")[0]}</span>
-                          <small>
-                            {prediction.home_score}x{prediction.away_score}
-                            {prediction.scorer_guess ? ` · ⚽ ${prediction.scorer_guess}${prediction.scorer_hit ? " ✓" : ""}` : ""}
-                          </small>
-                          <b className={prediction.points > 0 ? "wc-points-badge won" : "wc-points-badge"}>
-                            {prediction.points > 0 ? `+${prediction.points}` : "0"}
-                          </b>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </article>
-              );
+              return <FinishedGameCard game={game} key={game.id} viewerId={profile?.id} />;
             }
 
             const draft = predictionDraftFor(game);
@@ -1682,6 +1621,13 @@ export default function BolaoPage() {
                 <div className={lockMinutes < 120 ? "wc-lock-timer urgent" : "wc-lock-timer"}>
                   <span>{urgencyLabel(lockMinutes)}</span>
                 </div>
+
+                {isNextScheduled && aiInsight && (
+                  <div className="wc-ai-insight wc-ai-insight-card">
+                    <span className="wc-ai-insight-tag"><Sparkles size={12} /> Resenha da IA</span>
+                    <p>{aiInsight}</p>
+                  </div>
+                )}
 
                 {hasBet && game.viewer_prediction && !isEditing ? (
                   <>
