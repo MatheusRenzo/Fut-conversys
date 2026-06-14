@@ -82,6 +82,10 @@ API_FOOTBALL_LEAGUE_ID = int(os.getenv("API_FOOTBALL_LEAGUE_ID", "1"))
 API_FOOTBALL_DAILY_BUDGET = int(os.getenv("API_FOOTBALL_DAILY_BUDGET", "100"))
 # Reserva: para de chamar a API quando restam só N requisições do dia
 API_FOOTBALL_DAILY_RESERVE = int(os.getenv("API_FOOTBALL_DAILY_RESERVE", "4"))
+# Gap mínimo entre chamadas live=all da API-Football (goleadores ao vivo).
+# O PLACAR ao vivo vem da football-data (ilimitada) a cada ciclo; a API-Football
+# só enriquece com goleadores de tempos em tempos pra caber nas 100/dia.
+API_FOOTBALL_LIVE_GAP = max(300, int(os.getenv("API_FOOTBALL_LIVE_GAP_SECONDS", "600")))
 # Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há
 WORLD_CUP_LIVE_INTERVAL = max(45, int(os.getenv("WORLD_CUP_LIVE_INTERVAL_SECONDS", "75")))
 WORLD_CUP_IDLE_INTERVAL = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600")))
@@ -1763,7 +1767,20 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
         if not item:
             continue
         status["matched"] += 1
-        finished_remote = item["status"] in ("FINISHED", "AWARDED") and item["home_score"] is not None and item["away_score"] is not None
+        remote_status = item["status"]
+        has_score = item["home_score"] is not None and item["away_score"] is not None
+        # AO VIVO: football-data dirige o placar parcial (fonte ilimitada, sem
+        # gastar a cota da API-Football). IN_PLAY/PAUSED → live + placar.
+        if remote_status in ("IN_PLAY", "PAUSED") and has_score:
+            lh, la = int(item["home_score"]), int(item["away_score"])
+            if game.status in ("scheduled", "live") or game.status is None:
+                if game.home_score != lh or game.away_score != la or game.status != "live":
+                    game.home_score = lh
+                    game.away_score = la
+                    game.status = "live"
+                    status["filled"] += 1
+            continue
+        finished_remote = remote_status in ("FINISHED", "AWARDED") and has_score
         if not finished_remote:
             continue
         official_h, official_a = int(item["home_score"]), int(item["away_score"])
@@ -1925,7 +1942,11 @@ def api_football_get(url: str, db: Session, status: dict[str, Any]) -> dict[str,
         try:
             status["daily_remaining"] = int(day_remaining)
             status["daily_limit"] = int(day_limit) if day_limit else status.get("daily_limit")
-            set_app_setting(db, "api_football_daily_remaining", day_remaining)
+            # Guarda com a data UTC: a cota reseta à meia-noite UTC, então um
+            # valor de ontem não pode travar as chamadas de hoje
+            set_app_setting(
+                db, "api_football_daily_remaining", f"{datetime.utcnow():%Y%m%d}:{int(day_remaining)}"
+            )
         except ValueError:
             pass
     status["calls_made"] = status.get("calls_made", 0) + 1
@@ -1960,12 +1981,12 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     if not API_FOOTBALL_KEY:
         return status
 
+    # Lê a folga cacheada SÓ se for de hoje (UTC); de outro dia ignora (resetou)
     cached_remaining = get_app_setting(db, "api_football_daily_remaining")
-    if cached_remaining is not None:
-        try:
-            status["daily_remaining"] = int(cached_remaining)
-        except ValueError:
-            pass
+    if cached_remaining and ":" in cached_remaining:
+        day_part, _, val = cached_remaining.partition(":")
+        if day_part == f"{datetime.utcnow():%Y%m%d}" and val.lstrip("-").isdigit():
+            status["daily_remaining"] = int(val)
 
     now = datetime.utcnow()
     live_window = (
@@ -2011,10 +2032,24 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     pending_final += [g for g in stuck_live if g.id not in pending_ids]
     status["ok"] = True
 
-    if live_window:
+    # live=all (goleadores ao vivo) só de tempos em tempos — o placar já vem da
+    # football-data a cada ciclo, então não precisamos gastar cota com frequência
+    last_live_raw = get_app_setting(db, "api_football_last_live_at")
+    live_gap_ok = True
+    if last_live_raw:
+        try:
+            last_live = datetime.fromisoformat(last_live_raw)
+            if last_live.tzinfo:
+                last_live = last_live.astimezone(timezone.utc).replace(tzinfo=None)
+            live_gap_ok = (datetime.utcnow() - last_live).total_seconds() >= API_FOOTBALL_LIVE_GAP
+        except ValueError:
+            live_gap_ok = True
+
+    if live_window and live_gap_ok:
+        set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
         payload = api_football_get(API_FOOTBALL_LIVE_URL, db, status)
         if payload is None:
-            return status
+            payload = {"response": []}
         status["ok"] = True
         by_teams: dict[tuple[str, str], dict[str, Any]] = {}
         for item in payload.get("response", []):
@@ -2104,7 +2139,23 @@ def world_cup_scorers_complete(game: models.WorldCupGame) -> bool:
 def apply_world_cup_sync(db: Session) -> tuple[int, int]:
     imported = 0
     updated = 0
-    for item in fetch_openfootball_world_cup_games():
+    # openfootball (tabela + backup de goleadores) muda devagar: revalida só a
+    # cada poucos minutos. O placar ao vivo vem da football-data a cada ciclo.
+    last_of_raw = get_app_setting(db, "openfootball_last_fetch_at")
+    of_due = True
+    if last_of_raw:
+        try:
+            last_of = datetime.fromisoformat(last_of_raw)
+            if last_of.tzinfo:
+                last_of = last_of.astimezone(timezone.utc).replace(tzinfo=None)
+            of_due = (datetime.utcnow() - last_of).total_seconds() >= WORLD_CUP_SCHEDULE_MIN_GAP
+        except ValueError:
+            of_due = True
+    openfootball_games = []
+    if of_due:
+        openfootball_games = fetch_openfootball_world_cup_games()
+        set_app_setting(db, "openfootball_last_fetch_at", datetime.now(timezone.utc).isoformat())
+    for item in openfootball_games:
         data = dict(item)
         home_score = data.pop("home_score", None)
         away_score = data.pop("away_score", None)
@@ -3283,11 +3334,13 @@ def world_cup_sync_status(
             "football_data_configured": bool(FOOTBALL_DATA_API_KEY),
             "api_football_configured": bool(API_FOOTBALL_KEY),
             "api_football_daily_remaining": (
-                int(get_app_setting(db, "api_football_daily_remaining"))
-                if (get_app_setting(db, "api_football_daily_remaining") or "").lstrip("-").isdigit()
+                int((get_app_setting(db, "api_football_daily_remaining") or "").split(":")[-1])
+                if (get_app_setting(db, "api_football_daily_remaining") or "").split(":")[-1].lstrip("-").isdigit()
                 else None
             ),
             "api_football_daily_limit": API_FOOTBALL_DAILY_BUDGET,
+            "score_source": "football-data.org (placar+status ao vivo)",
+            "scorer_source": "API-Football (goleadores) + openfootball (backup)",
             "squads_source": "Wikipedia (elencos oficiais)",
         },
         "totals": {
