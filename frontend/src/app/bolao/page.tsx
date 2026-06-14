@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -579,8 +580,8 @@ function ScorerPicker({
         {value ? <CheckCircle2 size={15} /> : <Users size={15} />}
       </button>
 
-      {open && (
-        <div className="event-modal-backdrop" onClick={() => setOpen(false)}>
+      {open && typeof document !== "undefined" && createPortal(
+        <div className="event-modal-backdrop wc-scorer-backdrop" onClick={() => setOpen(false)}>
           <div className="event-modal glass-panel wc-modal wc-scorer-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
@@ -636,7 +637,8 @@ function ScorerPicker({
               {groups.length === 0 && <p className="rail-empty-copy">Nenhum jogador encontrado com esse nome.</p>}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
