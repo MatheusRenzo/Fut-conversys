@@ -344,6 +344,9 @@ export type WorldCupSyncStatus = {
       confirmed?: number;
       ai_reconciles?: number;
       reserve?: number;
+      tsd_calls?: number;
+      minute_throttled?: boolean;
+      key_used?: number;
       skipped?: string | null;
       error?: string | null;
     };

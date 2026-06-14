@@ -2182,6 +2182,10 @@ export default function BolaoPage() {
                           reconciliações IA: {syncStatus.games_sync?.live_source?.ai_reconciles ?? 0} ·
                           jogos finalizados: {syncStatus.games_sync?.live_source?.finalized ?? 0}
                         </span>
+                        <span>
+                          proteção: máx 9 req/min na paga, 6 jogos/ciclo na grátis — nunca estoura
+                          {syncStatus.games_sync?.live_source?.minute_throttled ? " · segurando até o próximo minuto" : ""}
+                        </span>
                         <small className="muted">
                           A cota reseta pra {syncStatus.sources.api_football_daily_limit ?? 100} à meia-noite (UTC). Se zerar, placar
                           (football-data) + TheSportsDB + openfootball + IA seguem entregando o goleador — o fim do jogo nunca depende

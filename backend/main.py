@@ -97,6 +97,17 @@ API_FOOTBALL_DAILY_RESERVE = int(os.getenv("API_FOOTBALL_DAILY_RESERVE", "2"))
 # Gap mínimo entre chamadas live=all (goleadores ao vivo). Com 2 chaves (200/dia)
 # dá pra ser bem mais frequente; o PLACAR já vem da football-data a cada ciclo.
 API_FOOTBALL_LIVE_GAP = max(120, int(os.getenv("API_FOOTBALL_LIVE_GAP_SECONDS", "240")))
+# Piso do gap ao vivo: o PLACAR já vem grátis da football-data a cada ciclo, então
+# não precisa torrar a cota buscando NOME de goleador a cada 75s. 180s é ao-vivo o
+# bastante e deixa cota pra todos os jogos do dia.
+API_FOOTBALL_LIVE_GAP_FLOOR = max(120, int(os.getenv("API_FOOTBALL_LIVE_GAP_FLOOR", "180")))
+# Limite POR MINUTO da API-Football (plano grátis = 10/min). Usamos 9 pra ter
+# folga e NUNCA estourar — protege contra rajada no cold-start (vários jogos a
+# finalizar de uma vez). O que passar fica pro próximo ciclo (idempotente).
+API_FOOTBALL_MINUTE_LIMIT = max(1, int(os.getenv("API_FOOTBALL_MINUTE_LIMIT", "9")))
+# Limite POR CICLO da TheSportsDB (grátis, 30/min). Cada jogo conferido custa até
+# ~4 chamadas (busca dia ±1 + timeline), então 6 jogos/ciclo = ~24 < 30. Seguro.
+THESPORTSDB_CYCLE_LIMIT = max(1, int(os.getenv("THESPORTSDB_CYCLE_LIMIT", "6")))
 # Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há
 WORLD_CUP_LIVE_INTERVAL = max(45, int(os.getenv("WORLD_CUP_LIVE_INTERVAL_SECONDS", "75")))
 WORLD_CUP_IDLE_INTERVAL = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600")))
@@ -2050,11 +2061,22 @@ def api_football_get(url: str, db: Session, status: dict[str, Any]) -> dict[str,
     """GET na API-Football com ROTAÇÃO de chaves: usa a que tem mais cota hoje,
     lê a folga real dos headers e guarda por chave (com a data UTC). Devolve o
     payload ou None (erro/sem cota em status)."""
+    # Trava por minuto (plano grátis = 10/min): conta as chamadas no minuto UTC
+    # atual e recusa antes de estourar. O excedente fica pro próximo ciclo.
+    minute_key = f"{datetime.utcnow():%Y%m%d%H%M}"
+    raw_min = get_app_setting(db, "api_football_minute_window") or ""
+    cur_min, _, cnt = raw_min.partition(":")
+    used_this_minute = int(cnt) if cur_min == minute_key and cnt.isdigit() else 0
+    if used_this_minute >= API_FOOTBALL_MINUTE_LIMIT:
+        status["skipped"] = f"limite de {API_FOOTBALL_MINUTE_LIMIT}/min atingido — segue no próximo ciclo"
+        status["minute_throttled"] = True
+        return None
     picked = api_football_pick_key(db)
     if not picked:
         status["skipped"] = "todas as chaves da API-Football no limite de reserva"
         return None
     index, key = picked
+    set_app_setting(db, "api_football_minute_window", f"{minute_key}:{used_this_minute + 1}")
     request = urllib.request.Request(url, headers={"x-apisports-key": key, "User-Agent": "ConversysFut/1.0"})
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
@@ -2108,6 +2130,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         "per_game_cap": 0,
         "live_gap_seconds": 0,
         "ai_reconciles": 0,
+        "tsd_calls": 0,
         "skipped": None,
         "error": None,
     }
@@ -2134,14 +2157,20 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         .filter(models.WorldCupGame.status != "finished")
         .count()
     )
-    usable = max(0, (status["daily_remaining"] or 0) - API_FOOTBALL_DAILY_RESERVE)
-    # USA O MÁXIMO: divide a cota do dia igualmente entre os jogos que faltam.
+    # RESERVA DINÂMICA: garante 1 chamada de FIM por jogo ainda ativo do dia (a
+    # finalização é a que não pode faltar) + folga de descoberta. O resto é live.
+    remaining = status["daily_remaining"] or 0
+    finalize_reserve = min(remaining, max(API_FOOTBALL_DAILY_RESERVE, active_today + 2))
+    usable = max(0, remaining - finalize_reserve)
+    status["reserve"] = finalize_reserve
+    # USA O MÁXIMO: divide a cota de live entre os jogos que faltam.
     per_game_cap = usable // max(1, active_today) if active_today else usable
     status["per_game_cap"] = per_game_cap
     status["active_today"] = active_today
-    # Cadência do live=all espalha a cota do jogo numa janela de ~2h (reserva 1 p/ fim)
-    live_calls = max(1, per_game_cap - 1)
-    live_gap = min(1800, max(75, int(7200 / live_calls)))
+    # Cadência do live=all: 1 chamada cobre TODOS os jogos rolando. Espalha a cota
+    # de live numa janela de ~2h, com piso pra não torrar a cota (placar é grátis).
+    live_calls = max(1, usable)
+    live_gap = min(1800, max(API_FOOTBALL_LIVE_GAP_FLOOR, int(7200 / live_calls)))
     status["live_gap_seconds"] = live_gap
 
     def call(url: str) -> dict[str, Any] | None:
@@ -2193,8 +2222,12 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             game.scorers = merged
             status["scorers_updated"] += 1
         status["finalized"] += 1
-        # 2ª fonte grátis (TheSportsDB) — não gasta cota da paga
-        tsd_names = fetch_thesportsdb_scorers(game) or []
+        # 2ª fonte grátis (TheSportsDB) — não gasta cota da paga, mas tem 30/min:
+        # respeita o teto por ciclo pra nunca estourar.
+        tsd_names = []
+        if status["tsd_calls"] < THESPORTSDB_CYCLE_LIMIT:
+            status["tsd_calls"] += 1
+            tsd_names = fetch_thesportsdb_scorers(game) or []
         of_names = game_scorer_names(game)
         # A IA SEMPRE entra: recebe as 3 fontes e devolve o conjunto definitivo
         # (cacheado por assinatura — só chama de novo quando as fontes mudam).
@@ -2242,9 +2275,11 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         except ValueError:
             gap_ok = True
     if live_now_games and gap_ok and api_football_pick_key(db) is not None:
-        set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
         payload = call(API_FOOTBALL_LIVE_URL)
         if payload:
+            # só conta o gap a partir de uma chamada bem-sucedida (se foi
+            # estrangulada por minuto/cota, tenta de novo no próximo ciclo)
+            set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
             by_teams: dict[tuple[str, str], dict[str, Any]] = {}
             for item in payload.get("response", []):
                 if ((item.get("league") or {}).get("id")) != API_FOOTBALL_LEAGUE_ID:
@@ -2283,10 +2318,13 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         .filter(models.WorldCupGame.status == "finished")
         .filter(or_(models.WorldCupGame.scorers_confirmed.is_(False), models.WorldCupGame.scorers_confirmed.is_(None)))
         .order_by(models.WorldCupGame.kickoff_at.desc())
-        .limit(10)
+        .limit(THESPORTSDB_CYCLE_LIMIT)
         .all()
     )
     for game in to_confirm:
+        if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
+            break  # teto por ciclo (30/min) — segue no próximo
+        status["tsd_calls"] += 1
         tsd_names = fetch_thesportsdb_scorers(game)
         if tsd_names is None:
             continue
