@@ -2159,6 +2159,35 @@ export default function BolaoPage() {
                           }}
                         />
                       </div>
+                      <div className="wc-quota-math">
+                        <span>
+                          {syncStatus.games_sync?.live_source?.daily_remaining ?? "?"} restantes
+                          {" − "}{syncStatus.games_sync?.live_source?.reserve ?? 2} reserva (fim de jogo)
+                          {" ÷ "}{syncStatus.games_sync?.live_source?.active_today ?? 0} jogo(s) ativo(s)
+                          {" = "}
+                          <strong>{syncStatus.games_sync?.live_source?.per_game_cap ?? 0} chamada(s)/jogo</strong>
+                        </span>
+                        <span>
+                          {(syncStatus.games_sync?.live_source?.games_today ?? 0)} jogo(s) hoje · ao vivo a cada{" "}
+                          <strong>
+                            {(() => {
+                              const g = syncStatus.games_sync?.live_source?.live_gap_seconds ?? 0;
+                              return g >= 60 ? `${Math.round(g / 60)} min` : `${g}s`;
+                            })()}
+                          </strong>{" "}
+                          · {syncStatus.games_sync?.live_source?.calls_made ?? 0} chamadas neste ciclo
+                        </span>
+                        <span>
+                          confirmados pela 2ª fonte: {syncStatus.games_sync?.live_source?.confirmed ?? 0} ·
+                          reconciliações IA: {syncStatus.games_sync?.live_source?.ai_reconciles ?? 0} ·
+                          jogos finalizados: {syncStatus.games_sync?.live_source?.finalized ?? 0}
+                        </span>
+                        <small className="muted">
+                          A cota reseta pra {syncStatus.sources.api_football_daily_limit ?? 100} à meia-noite (UTC). Se zerar, placar
+                          (football-data) + TheSportsDB + openfootball + IA seguem entregando o goleador — o fim do jogo nunca depende
+                          só da paga.
+                        </small>
+                      </div>
                       <small>football-data (placar): ilimitada · {syncStatus.games_sync?.secondary?.matched ?? 0} jogos casados</small>
                       {syncStatus.games_sync?.live_source?.skipped && (
                         <small className="muted">{syncStatus.games_sync.live_source.skipped}</small>
@@ -2170,6 +2199,42 @@ export default function BolaoPage() {
                       )}
                     </>
                   )}
+                </div>
+
+                <div className={syncStatus.sources.thesportsdb_configured ? "wc-sync-card ok" : "wc-sync-card muted"}>
+                  <span className="wc-sync-card-head">
+                    <CheckCircle2 size={14} />
+                    <strong>2ª fonte de goleadores — TheSportsDB</strong>
+                    <b className={syncStatus.sources.thesportsdb_configured ? "wc-sync-pill ok" : "wc-sync-pill muted"}>
+                      {syncStatus.sources.thesportsdb_configured ? "Confirmando" : "Não configurada"}
+                    </b>
+                  </span>
+                  <small>
+                    Grátis · 30 req/min · confere se os goleadores batem com a API-Football.{" "}
+                    {syncStatus.games_sync?.live_source?.confirmed ?? 0} confirmados neste ciclo.
+                  </small>
+                  <small className="muted">
+                    Cobertura best-effort: a fonte grátis nem sempre tem todos os jogos da Copa. Quando bate, marca
+                    confirmado; quando falta, a IA reconcilia as fontes que existem.
+                  </small>
+                </div>
+
+                <div className={syncStatus.sources.ai_configured ? "wc-sync-card ok" : "wc-sync-card muted"}>
+                  <span className="wc-sync-card-head">
+                    <Sparkles size={14} />
+                    <strong>Reconciliação — IA (GPT-4o-mini)</strong>
+                    <b className={syncStatus.sources.ai_configured ? "wc-sync-pill ok" : "wc-sync-pill muted"}>
+                      {syncStatus.sources.ai_configured ? "Ativa em todo jogo" : "Não configurada"}
+                    </b>
+                  </span>
+                  <small>
+                    {syncStatus.sources.ai_calls_today ?? 0} chamadas hoje ·{" "}
+                    {syncStatus.games_sync?.live_source?.ai_reconciles ?? 0} reconciliações neste ciclo
+                  </small>
+                  <small className="muted">
+                    No fim de cada jogo a IA cruza as 3 fontes e fixa a lista definitiva de goleadores (resultado cacheado,
+                    então roda 1x por jogo e fica barato).
+                  </small>
                 </div>
 
                 <div className={syncStatus.squad_sync?.ok === false ? "wc-sync-card error" : "wc-sync-card ok"}>

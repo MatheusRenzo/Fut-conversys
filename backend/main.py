@@ -2125,6 +2125,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         .count()
     )
     status["games_today"] = games_today
+    status["reserve"] = API_FOOTBALL_DAILY_RESERVE
     # Quantos jogos do dia ainda NÃO estão finalizados (a cota flui pros que faltam)
     active_today = (
         db.query(models.WorldCupGame)
@@ -2137,6 +2138,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     # USA O MÁXIMO: divide a cota do dia igualmente entre os jogos que faltam.
     per_game_cap = usable // max(1, active_today) if active_today else usable
     status["per_game_cap"] = per_game_cap
+    status["active_today"] = active_today
     # Cadência do live=all espalha a cota do jogo numa janela de ~2h (reserva 1 p/ fim)
     live_calls = max(1, per_game_cap - 1)
     live_gap = min(1800, max(75, int(7200 / live_calls)))

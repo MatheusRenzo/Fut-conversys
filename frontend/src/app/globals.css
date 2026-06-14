@@ -12583,6 +12583,10 @@ img.team-flag {
 /* ===== Painel admin: barra de cota + saúde por jogo ===== */
 .wc-quota-bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,0.1); overflow: hidden; margin: 2px 0; }
 .wc-quota-bar span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #ff5f5f 0%, #ffd75e 35%, #39d98a 70%); }
+.wc-quota-math { display: flex; flex-direction: column; gap: 3px; margin: 6px 0 2px; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); }
+.wc-quota-math > span { font-size: 12px; color: var(--text-soft, #c7d0dd); line-height: 1.5; }
+.wc-quota-math > span strong { color: #fff; }
+.wc-quota-math small.muted { font-size: 11px; line-height: 1.45; }
 .wc-sync-card small.muted { color: var(--muted); opacity: 0.75; }
 
 .wc-health { display: grid; gap: 6px; }

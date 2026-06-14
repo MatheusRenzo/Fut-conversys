@@ -336,6 +336,14 @@ export type WorldCupSyncStatus = {
       calls_today?: number;
       daily_remaining?: number | null;
       daily_limit?: number;
+      games_today?: number;
+      active_today?: number;
+      per_game_cap?: number;
+      live_gap_seconds?: number;
+      mid_checks?: number;
+      confirmed?: number;
+      ai_reconciles?: number;
+      reserve?: number;
       skipped?: string | null;
       error?: string | null;
     };
