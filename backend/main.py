@@ -2552,9 +2552,9 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             break  # teto por ciclo (30/min) — segue no próximo
         status["tsd_calls"] += 1
         set_app_setting(db, f"wc_tsd_tried_{game.id}", datetime.now(timezone.utc).isoformat())
-        tsd_names = fetch_thesportsdb_scorers(game, db)
-        if tsd_names is None:
-            continue
+        # [] (não None): mesmo que a TheSportsDB não tenha o jogo, ainda re-confirmamos
+        # via openfootball — assim TODO jogo recebe ao menos 1 fonte corroborando.
+        tsd_names = fetch_thesportsdb_scorers(game, db) or []
         squad = world_cup_game_squad(db, game)
         of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
         # IA com elenco: monta o conjunto definitivo a partir da 2ª fonte + backup
@@ -2568,14 +2568,15 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         if new_scorers != (game.scorers or ""):
             game.scorers = new_scorers
             status["scorers_updated"] += 1
-        # fontes que corroboram (TheSportsDB + o backup openfootball)
+        # fontes que corroboram (TheSportsDB + backup openfootball). Recalcula sempre
+        # (re-confirma) e atualiza a lista de quais fontes bateram.
         agreeing = [
             name for name, src in (("TheSportsDB", tsd_names), ("openfootball", of_names))
             if scorer_source_corroborates(src, official)
         ]
-        game.scorers_confirmations = max(game.scorers_confirmations or 0, len(agreeing))
-        if agreeing and not game.confirmation_sources:
-            game.confirmation_sources = ", ".join(agreeing)
+        if len(agreeing) >= (game.scorers_confirmations or 0):
+            game.scorers_confirmations = len(agreeing)
+            game.confirmation_sources = ", ".join(agreeing) or game.confirmation_sources
         if len(agreeing) >= 2 and world_cup_scorers_complete(game):
             game.scorers_confirmed = True
             status["confirmed"] += 1
