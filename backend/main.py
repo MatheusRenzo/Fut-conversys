@@ -2739,7 +2739,6 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 mark_tsd_try(game)
                 if tsd_n + 1 >= THESPORTSDB_LIVE_RETRY_MAX:
                     log_game_event(db, game, "SportsDB — passou, aguarda próximo gol", phase="ao_vivo_failover", api="TheSportsDB", ok=False)
-            set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
 
     # ============ C) +10min: re-confirmação grátis (TheSportsDB + openfootball + IA) ============
     reconfirm_due = (
