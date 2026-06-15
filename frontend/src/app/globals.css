@@ -8831,6 +8831,14 @@ img.team-flag {
   white-space: nowrap;
 }
 
+#bolao-ranking {
+  scroll-margin-top: 96px;
+}
+#bolao-ranking [data-rank-user] {
+  scroll-margin-top: 110px;
+  scroll-margin-bottom: 40px;
+}
+
 .wc-ranking-mobile-only {
   display: none;
 }
@@ -12361,7 +12369,7 @@ img.team-flag {
   background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
   cursor: pointer;
   padding: 12px 6px 30px;
-  overflow: hidden;
+  overflow: visible;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
   animation: bolao-podium2-rise 0.5s cubic-bezier(.2,.9,.3,1.3) both;
 }
@@ -12384,12 +12392,7 @@ img.team-flag {
   0%,100% { box-shadow: 0 0 20px rgba(255,205,70,0.22), inset 0 1px 0 rgba(255,255,255,0.15); }
   50% { box-shadow: 0 0 40px rgba(255,205,70,0.45), inset 0 1px 0 rgba(255,255,255,0.2); }
 }
-/* brilho varrendo o 1º lugar */
-.bolao-podium2-step.place-1::after {
-  content: ""; position: absolute; inset: 0;
-  background: linear-gradient(115deg, transparent 38%, rgba(255,240,190,0.28) 50%, transparent 62%);
-  transform: translateX(-120%); animation: wc-hero2-shine 3.6s ease-in-out infinite 1s;
-}
+
 .bolao-podium2-step.place-2 { border-color: rgba(210,220,235,0.45); background: linear-gradient(180deg, rgba(210,220,235,0.1), rgba(210,220,235,0.02)); }
 .bolao-podium2-step.place-3 { border-color: rgba(220,150,90,0.5); background: linear-gradient(180deg, rgba(220,150,90,0.12), rgba(220,150,90,0.02)); }
 
@@ -12444,7 +12447,7 @@ img.team-flag {
 .bolao-podium2-step.place-1 .bolao-podium2-base { color: #ffd75e; background: rgba(255,205,70,0.14); }
 
 @media (prefers-reduced-motion: reduce) {
-  .bolao-podium2-step, .bolao-podium2-step.place-1, .bolao-podium2-crown, .bolao-podium2-step.place-1::after { animation: none; }
+  .bolao-podium2-step, .bolao-podium2-step.place-1, .bolao-podium2-crown { animation: none; }
 }
 
 /* ===== Insight de IA ===== */
@@ -12509,6 +12512,115 @@ img.team-flag {
 .bolao-podium2-step.moved-up { animation: bolao-aura-up 6s ease-out forwards; }
 .bolao-podium2-step.moved-down { animation: bolao-aura-down 6s ease-out forwards; }
 
+/* Ver mais: rodinha leve no card do usuário — sem scroll */
+.bolao-rank-row.rank-glow-modal {
+  position: relative;
+  z-index: 2;
+  overflow: hidden;
+  animation:
+    bolao-rank-magic-float 2.4s cubic-bezier(.48, 0, .22, 1) forwards,
+    bolao-rank-modal-aura 3.2s ease-out forwards;
+}
+.bolao-podium2-step.rank-glow-modal {
+  position: relative;
+  z-index: 4;
+  overflow: visible;
+  transform-style: preserve-3d;
+  animation:
+    bolao-rank-magic-float 2.4s cubic-bezier(.48, 0, .22, 1) forwards,
+    bolao-rank-modal-aura 3.2s ease-out forwards;
+}
+.bolao-podium2-step.rank-glow-modal .bolao-podium2-crown,
+.bolao-podium2-step.rank-glow-gold .bolao-podium2-crown {
+  z-index: 6;
+  animation: none;
+  transform: translateX(-50%);
+}
+.event-modal.wc-modal .bolao-podium2 {
+  overflow: visible;
+}
+@keyframes bolao-rank-modal-aura {
+  0%, 100% { box-shadow: none; background-color: transparent; }
+  22% {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 0 8px rgba(255, 210, 90, 0.06);
+    background-color: rgba(255, 255, 255, 0.02);
+  }
+}
+
+/* 1º lugar: efeito dourado no card — sem faixa horizontal */
+.bolao-rank-row.rank-glow-gold,
+.bolao-podium2-step.rank-glow-gold {
+  position: relative;
+  z-index: 4;
+  overflow: visible;
+  transform-style: preserve-3d;
+  animation:
+    bolao-rank-magic-float 3.4s cubic-bezier(.42, 0, .18, 1) forwards,
+    bolao-rank-gold-aura 5.5s ease-out forwards;
+}
+.bolao-rank-row.rank-glow-gold {
+  overflow: hidden;
+}
+.bolao-rank-sparkles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+.bolao-rank-spark {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: rgba(255, 220, 140, 0.9);
+  box-shadow: 0 0 4px rgba(255, 210, 90, 0.45);
+  opacity: 0;
+  animation: bolao-spark-pop 3.5s ease-out forwards;
+}
+.bolao-rank-spark.s-0 { left: 18%; top: 30%; animation-delay: 0.6s; }
+.bolao-rank-spark.s-1 { right: 20%; top: 34%; animation-delay: 1.1s; }
+.bolao-rank-spark.s-2 { left: 34%; bottom: 26%; animation-delay: 1.6s; }
+.bolao-rank-spark.s-3 { right: 30%; bottom: 28%; animation-delay: 2.1s; }
+@keyframes bolao-spark-pop {
+  0% { opacity: 0; transform: translateY(2px) scale(0.4); }
+  22% { opacity: 0.55; transform: translateY(-1px) scale(1); }
+  55% { opacity: 0.25; transform: translateY(-4px) scale(0.55); }
+  100% { opacity: 0; transform: translateY(-8px) scale(0.1); }
+}
+.wc-hero2-stat.rank-glow-gold {
+  animation: bolao-rank-gold-aura 6.5s ease-out forwards;
+  border-radius: 12px;
+}
+@keyframes bolao-rank-magic-float {
+  0% { transform: perspective(1100px) translateY(0) rotateY(0deg); }
+  28% { transform: perspective(1100px) translateY(-3px) rotateY(0deg); }
+  62% { transform: perspective(1100px) translateY(-2px) rotateY(360deg); }
+  82% { transform: perspective(1100px) translateY(0.5px) rotateY(360deg); }
+  100% { transform: perspective(1100px) translateY(0) rotateY(360deg); }
+}
+@keyframes bolao-rank-gold-aura {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(212, 175, 55, 0);
+    background-color: transparent;
+  }
+  20% {
+    box-shadow: inset 0 0 0 1px rgba(255, 215, 120, 0.38), 0 0 20px rgba(255, 190, 60, 0.18);
+    background-color: rgba(255, 200, 80, 0.07);
+  }
+  50% {
+    box-shadow: inset 0 0 0 1px rgba(255, 215, 120, 0.22), 0 0 12px rgba(255, 190, 60, 0.1);
+    background-color: rgba(255, 200, 80, 0.035);
+  }
+}
+.bolao-rank-row.rank-glow-down,
+.bolao-podium2-step.rank-glow-down {
+  animation: bolao-rank-glow-down 5.2s ease-out forwards;
+}
+@keyframes bolao-rank-glow-down {
+  0%, 100% { box-shadow: none; background: transparent; }
+  16% { box-shadow: inset 2px 0 0 rgba(255, 120, 120, 0.5); background: rgba(255, 95, 95, 0.06); }
+}
+
 .bolao-podium2-move.up { color: #0c2a14; background: linear-gradient(135deg,#7ef29a,#39d98a); }
 .bolao-podium2-move.down { color: #2e0c0c; background: linear-gradient(135deg,#ff9a9a,#ff5f5f); }
 
@@ -12530,29 +12642,70 @@ img.team-flag {
   50% { text-shadow: 0 0 14px rgba(227,28,121,0.7); }
 }
 
-/* Flash "+N pts" — dopamina de ver SEUS pontos subindo ao vivo */
+/* Popup de pontos — centro da tela (mobile discreto, desktop destaque) */
+.bolao-flash-stack {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  padding: 20px;
+}
+.bolao-flash-stack--modal {
+  z-index: 1300;
+}
+.bolao-flash-tag {
+  display: block;
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  margin-bottom: 3px;
+}
 .bolao-points-flash {
-  position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%);
-  z-index: 200; pointer-events: none;
-  display: flex; align-items: center; gap: 8px;
-  padding: 12px 22px; border-radius: 999px;
-  background: linear-gradient(135deg, #39d98a, #22d3ee); color: #06210f;
-  font-weight: 950; font-size: 1.05rem; letter-spacing: 0.02em;
-  box-shadow: 0 12px 40px rgba(57,217,138,0.5), 0 0 0 4px rgba(57,217,138,0.18);
-  animation: bolao-points-flash 2.4s cubic-bezier(.18,.9,.3,1) forwards;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 12px 22px;
+  font-size: 1rem;
+  font-weight: 950;
+  letter-spacing: 0.02em;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #39d98a, #22d3ee);
+  color: #06210f;
+  box-shadow: 0 12px 36px rgba(57, 217, 138, 0.38), 0 0 0 3px rgba(57, 217, 138, 0.14);
+  animation: bolao-points-flash 3s cubic-bezier(.18, .9, .3, 1) forwards;
+  max-width: min(88vw, 300px);
 }
 @keyframes bolao-points-flash {
-  0% { opacity: 0; transform: translate(-50%, 24px) scale(0.7); }
-  14% { opacity: 1; transform: translate(-50%, 0) scale(1.12); }
-  28% { transform: translate(-50%, 0) scale(1); }
-  78% { opacity: 1; transform: translate(-50%, -6px) scale(1); }
-  100% { opacity: 0; transform: translate(-50%, -40px) scale(0.96); }
+  0% { opacity: 0; transform: translateY(20px) scale(0.88); }
+  12% { opacity: 1; transform: translateY(0) scale(1.03); }
+  24% { transform: translateY(0) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-16px) scale(0.96); }
+}
+@media (min-width: 981px) {
+  .bolao-points-flash {
+    min-width: 300px;
+    padding: 18px 32px;
+    font-size: 1.18rem;
+    border-radius: 20px;
+    box-shadow: 0 20px 56px rgba(57, 217, 138, 0.48), 0 0 0 4px rgba(57, 217, 138, 0.16);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .wc-ai-insight-banner, .bolao-move.up, .bolao-move.down,
   .bolao-rank-row.moved-up, .bolao-rank-row.moved-down,
-  .bolao-podium2-move, .bolao-points-flash { animation: none; }
+  .bolao-rank-row.rank-glow-gold, .bolao-podium2-step.rank-glow-gold,
+  .bolao-rank-row.rank-glow-modal, .bolao-podium2-step.rank-glow-modal,
+  .bolao-rank-spark,
+  .wc-hero2-stat.rank-glow-gold,
+  .bolao-podium2-move, .bolao-points-flash, .bolao-flash-stack { animation: none; }
 }
 
 /* ===== Seletor de artilheiro turbinado (nº da camisa + posição) ===== */
@@ -12793,6 +12946,8 @@ img.team-flag {
 }
 .wc-dash-game-card.live { border-color: rgba(227,28,121,0.38); background: rgba(227,28,121,0.06); }
 .wc-dash-game-card.finished { opacity: 0.94; }
+.wc-dash-game-card.confirmed { border-color: rgba(57,217,138,0.32); background: rgba(57,217,138,0.05); }
+.wc-dash-game-card.has-warn { border-color: rgba(255,176,46,0.42); background: rgba(255,176,46,0.06); }
 .wc-dash-game-head { display: flex; flex-direction: column; gap: 6px; }
 .wc-dash-game-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .wc-dash-game-num, .wc-dash-game-time { font-size: 0.62rem; font-weight: 800; color: var(--muted); }

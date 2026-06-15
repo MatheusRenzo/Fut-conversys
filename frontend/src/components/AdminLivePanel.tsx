@@ -42,12 +42,19 @@ const API_LABEL: Record<string, string> = {
   "football-data": "API grátis",
   "API-Football": "API paga",
   "TheSportsDB": "SportsDB",
-  "TheSportsDB+openfootball": "SportsDB",
+  "TheSportsDB+openfootball": "SportsDB+OF",
+  "openfootball+API paga": "OF+API paga",
   "IA merge": "IA",
+  pipeline: "Pipeline",
   calendário: "Sistema",
-  openfootball: "API grátis",
+  openfootball: "openfootball",
   auto: "Sistema",
 };
+
+function formatApiLabel(apiKey: string): string {
+  if (apiKey.startsWith("IA+")) return "IA";
+  return API_LABEL[apiKey] ?? apiKey;
+}
 
 function timeFull(iso: string) {
   return new Date(iso).toLocaleTimeString("pt-BR", {
@@ -151,6 +158,12 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
   if (/api paga — achou/i.test(raw)) {
     return { kind: "CONSULTA GOL", api: "API paga", result: "Achou", detail: pickNames(raw) || "Artilheiro", tone: "ok" };
   }
+  if (/api paga — fixture direto|api paga — jogo encerrou/i.test(raw)) {
+    return {
+      kind: "CONSULTA GOL", api: "API paga", result: "Jogo encerrou",
+      detail: "Fora do ao vivo — confirmação no fim", tone: "milestone",
+    };
+  }
   if (/api paga — não achou/i.test(raw)) {
     return {
       kind: "CONSULTA GOL", api: "API paga", result: "Não achou",
@@ -201,9 +214,58 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
   if (isFim && /api paga — achou/i.test(raw)) {
     return { kind: "CONFIRMAÇÃO", api: "API paga", result: "Achou", detail: pickNames(raw), tone: "ok" };
   }
+  if (/openfootball reconfirmação — achou/i.test(raw)) {
+    return { kind: "RECONFIRMAÇÃO", api: "openfootball", result: "Achou", detail: pickNames(raw), tone: "ok" };
+  }
+  if (/openfootball reconfirmação — não achou/i.test(raw)) {
+    return {
+      kind: "RECONFIRMAÇÃO", api: "openfootball", result: "Não achou",
+      detail: tentativa ? `Tentativa ${tentativa[1]}/${tentativa[2]}` : "Aguarda retry",
+      tone: "retry",
+    };
+  }
+  if (isReconf && /ia — consulta/i.test(raw)) {
+    return { kind: "RECONFIRMAÇÃO", api: "IA", result: "Chamou", detail: "Cruza openfootball + SportsDB + API paga", tone: "ia" };
+  }
+  if (isReconf && /ia — resultado/i.test(raw)) {
+    return { kind: "RECONFIRMAÇÃO", api: "IA", result: "Validou", detail: pickNames(raw), tone: "ok" };
+  }
+  if (/sportsdb reconfirmação — adiada/i.test(raw)) {
+    return { kind: "RECONFIRMAÇÃO", api: "SportsDB", result: "Adiada", detail: "Cota do ciclo", tone: "retry" };
+  }
+  if (/sportsdb reconfirmação — achou/i.test(raw)) {
+    return { kind: "RECONFIRMAÇÃO", api: "SportsDB", result: "Achou", detail: pickNames(raw), tone: "ok" };
+  }
+  if (/sportsdb reconfirmação — não achou/i.test(raw)) {
+    return {
+      kind: "RECONFIRMAÇÃO", api: "SportsDB", result: "Não achou",
+      detail: tentativa ? `Tentativa ${tentativa[1]}/${tentativa[2]}` : "Aguarda retry",
+      tone: "retry",
+    };
+  }
+  if (/reconfirmação — tentativa/i.test(raw)) {
+    const t = raw.match(/\((\d+)\/(\d+)\)/);
+    return {
+      kind: "RECONFIRMAÇÃO", api: "Pipeline", result: "Tentativa",
+      detail: t ? `${t[1]}/${t[2]}` : "—", tone: "call",
+    };
+  }
+  if (/reconfirmação — aguardando|reconfirmação — ia sem|reconfirmação — artilheiros incompletos|reconfirmação — fontes não batem/i.test(raw)) {
+    return { kind: "RECONFIRMAÇÃO", api: "Pipeline", result: "Retry", detail: raw.replace(/^reconfirmação —\s*/i, ""), tone: "retry" };
+  }
+  if (/reconfirmação — resultado/i.test(raw)) {
+    return {
+      kind: "RECONFIRMAÇÃO",
+      api: formatApiLabel(apiKey),
+      result: ev.ok === false ? "Incompleto" : "Confirmado",
+      detail: pickNames(raw) || raw.replace(/^reconfirmação — resultado:?\s*/i, ""),
+      tone: ev.ok === false ? "warn" : "ok",
+    };
+  }
   if (/reconfirmação/i.test(raw)) {
     return {
-      kind: "RECONFIRMAÇÃO", api: "SportsDB + IA",
+      kind: "RECONFIRMAÇÃO",
+      api: formatApiLabel(apiKey),
       result: ev.ok === false ? "Incompleto" : "OK",
       detail: pickNames(raw) || raw.replace(/^reconfirmação[^:]*:?\s*/i, ""),
       tone: ev.ok === false ? "warn" : "ok",
@@ -212,7 +274,7 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
 
   return {
     kind: "—",
-    api: (API_LABEL[apiKey] ?? apiKey) || "—",
+    api: formatApiLabel(apiKey) || "—",
     result: ev.ok === true ? "OK" : ev.ok === false ? "Falhou" : "—",
     detail: raw.slice(0, 60) || "—",
     tone: ev.ok === false ? "err" : "plain",
@@ -243,10 +305,13 @@ function buildConfirmSteps(evs: GameEvent[], game: GameRow, retryMax: number): C
   const fimPaga = lastOf(c, (e) => e.phase === "fim" && e.api === "API-Football" && e.ok === true);
   const fimPagaFail = lastOf(c, (e) => e.phase === "fim" && e.api === "API-Football" && e.ok === false);
   const fimIa = lastOf(c, (e) => e.phase === "fim" && e.api === "IA merge" && e.ok === true);
-  const reconf = lastOf(c, (e) => e.phase === "reconfirmacao" && /reconfirmação/i.test(e.action));
+  const reconfResult = lastOf(c, (e) => e.phase === "reconfirmacao" && /reconfirmação — resultado/i.test(e.action) && e.ok === true);
+  const reconfRetry = lastOf(c, (e) => e.phase === "reconfirmacao" && e.ok === false && /reconfirmação —/i.test(e.action));
+  const reconfOfOk = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "openfootball" && e.ok === true);
+  const reconfOfFail = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "openfootball" && e.ok === false);
   const reconfTsdOk = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "TheSportsDB" && e.ok === true);
   const reconfTsdFail = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "TheSportsDB" && e.ok === false);
-  const reconfIa = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "IA merge");
+  const reconfIa = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "IA merge" && e.ok === true && /resultado/i.test(e.action));
 
   const steps: ConfirmStep[] = [];
 
@@ -287,21 +352,33 @@ function buildConfirmSteps(evs: GameEvent[], game: GameRow, retryMax: number): C
     steps.push({ title: "Confirmação", status: "wait", detail: "Aguardando API paga no fim" });
   }
 
-  if (reconf) {
+  if (reconfResult || game.reconfirmed) {
     const parts: string[] = [];
+    if (reconfOfOk) parts.push(`openfootball: ${pickNames(cleanText(reconfOfOk.action))}`);
+    else if (reconfOfFail) parts.push("openfootball: não achou");
     if (reconfTsdOk) parts.push(`SportsDB: ${pickNames(cleanText(reconfTsdOk.action))}`);
-    if (reconfTsdFail) parts.push("SportsDB: não achou");
-    if (reconfIa?.ok) parts.push(`IA: ${pickNames(cleanText(reconfIa.action))}`);
-    if (reconf.action.includes("divergência")) parts.push("Divergência detectada");
+    else if (reconfTsdFail) parts.push("SportsDB: não achou");
+    if (reconfIa) parts.push(`IA: ${pickNames(cleanText(reconfIa.action))}`);
     steps.push({
       title: "Reconfirmação",
-      status: reconf.ok === false ? "err" : reconfTsdFail && !reconfIa?.ok ? "err" : "ok",
-      when: timeFull(reconf.at),
-      who: "SportsDB + IA",
-      detail: parts.length ? parts.join(" · ") : parseTimelineEvent(reconf, retryMax).detail,
+      status: "ok",
+      when: reconfResult ? timeFull(reconfResult.at) : undefined,
+      who: "openfootball + SportsDB + API paga → IA",
+      detail: parts.length ? parts.join(" · ") : "Artilheiros reconfirmados",
     });
-  } else if (game.status === "finished" && game.scorers_final) {
-    steps.push({ title: "Reconfirmação", status: "wait", detail: "Agendada +10min após o fim" });
+  } else if (reconfRetry || (game.status === "finished" && game.scorers_final)) {
+    const parts: string[] = [];
+    if (reconfOfOk) parts.push(`openfootball: ${pickNames(cleanText(reconfOfOk.action))}`);
+    if (reconfTsdFail) parts.push("SportsDB: aguardando");
+    steps.push({
+      title: "Reconfirmação",
+      status: "wait",
+      when: reconfRetry ? timeFull(reconfRetry.at) : undefined,
+      who: "openfootball + SportsDB + API paga → IA",
+      detail: parts.length
+        ? `${parts.join(" · ")} · ${parseTimelineEvent(reconfRetry ?? reconfOfOk!, retryMax).detail}`
+        : "Agendada +10min após o fim",
+    });
   }
 
   return steps;
@@ -327,7 +404,7 @@ function FlowDiagram({ retryMax, tsdRetryMax }: { retryMax: number; tsdRetryMax:
           <span className="wc-flow-api tsd">SportsDB</span>
           <span className="wc-flow-api ia">IA</span>
         </div>
-        <div className="wc-flow-arrow-v">↓ fim → confirmação API paga + IA → +10min reconf</div>
+        <div className="wc-flow-arrow-v">↓ fim → API paga + IA → +10min reconf (openfootball + SportsDB + API paga → IA)</div>
       </div>
       <p className="wc-flow-note">
         Cota API paga reseta 00:00 UTC. Máx ~10 chamadas/jogo. IA sempre que acha artilheiro (paga ou fallback).
@@ -367,6 +444,17 @@ function goalFlowLabel(flow?: GameRow["goal_flow"]): string | null {
   if (!flow || flow.stage === "done") return null;
   const step = { detected: "API paga", tsd: "SportsDB", ia: "IA" }[flow.stage] ?? flow.stage;
   return `Gol ${flow.score} → ${step}`;
+}
+
+/** Borda do card: vermelho = falha real; laranja = reconf pendente; verde = tudo confirmado */
+function gameCardTone(evs: GameEvent[], game: GameRow, retryMax: number): "ok" | "warn" | "fail" {
+  const steps = buildConfirmSteps(evs, game, retryMax);
+  if (steps.some((s) => s.status === "err")) return "fail";
+  if (game.status === "live" && game.goal_flow && game.goal_flow.stage !== "done") return "warn";
+  if (game.status === "finished" && game.scorers_final && game.reconfirmed) return "ok";
+  if (game.status === "finished" && game.scorers_final && !game.reconfirmed) return "warn";
+  if (steps.some((s) => s.status === "wait")) return "warn";
+  return "ok";
 }
 
 export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePanelProps) {
@@ -446,7 +534,8 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
       const sa = order[a.status as keyof typeof order] ?? 9;
       const sb = order[b.status as keyof typeof order] ?? 9;
       if (sa !== sb) return sa - sb;
-      return new Date(a.kickoff_at ?? 0).getTime() - new Date(b.kickoff_at ?? 0).getTime();
+      // Mais recente primeiro (jogo de hoje no topo)
+      return new Date(b.kickoff_at ?? 0).getTime() - new Date(a.kickoff_at ?? 0).getTime();
     });
   }, [healthMap, syncStatus.games_health, syncStatus.today_games]);
 
@@ -537,10 +626,10 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
               const timelineOpen = openTimeline === key;
               const confirmOpen = openConfirm === key;
               const confirmSteps = buildConfirmSteps(evs, game, retryMax);
-              const hasErr = evs.some((e) => e.ok === false);
+              const cardTone = gameCardTone(evs, game, retryMax);
 
               return (
-                <article className={`wc-dash-game-card ${game.status}${hasErr ? " has-fail" : ""}`} key={String(key)}>
+                <article className={`wc-dash-game-card ${game.status}${cardTone === "fail" ? " has-fail" : cardTone === "warn" ? " has-warn" : cardTone === "ok" && game.status === "finished" && game.scorers_final && game.reconfirmed ? " confirmed" : ""}`} key={String(key)}>
                   <div className="wc-dash-game-head">
                     <div className="wc-dash-game-match">
                       <span><TeamFlag team={game.home_team} /> {teamLabel(game.home_team)}</span>

@@ -188,7 +188,69 @@ type BolaoRankingPanelProps = {
   onSelectEntry?: (entry: WorldCupLeaderboardEntry) => void;
   rankDelta?: Record<number, number>;
   liveMoves?: Record<number, number>;
+  glowUserId?: number;
+  rankGlow?: { delta: number; pulse: number; mode: "main" | "modal" } | null;
+  fxSurface?: "main" | "modal";
 };
+
+function RankGlowSparkles() {
+  return (
+    <span className="bolao-rank-sparkles" aria-hidden="true">
+      {Array.from({ length: 4 }, (_, i) => (
+        <i className={`bolao-rank-spark s-${i}`} key={i} />
+      ))}
+    </span>
+  );
+}
+
+const MODAL_SPIN_MS = 2400;
+const MODAL_POINTS_DELAY_MS = MODAL_SPIN_MS;
+const MAIN_SCROLL_TO_SPIN_MS = 450;
+const MAIN_LEADER_DELAY_MS = 320;
+
+function bolaoFxShownKey(kind: "pts" | "main" | "modal", userId: number, token: string) {
+  return `bolao-fx-${kind}-${userId}-${token}`;
+}
+
+function scrollToRankCard(userId: number) {
+  const padTop = 88;
+  const scrollToY = (y: number) => window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+
+  const ranking = document.getElementById("bolao-ranking");
+  const rankingVisible = ranking && ranking.offsetParent !== null;
+
+  if (rankingVisible && ranking) {
+    const target =
+      (ranking.querySelector(`[data-rank-user="${userId}"]`) as HTMLElement | null)
+      ?? ranking;
+    const rect = target.getBoundingClientRect();
+    const centerOffset = target === ranking ? 12 : (window.innerHeight - rect.height) / 2;
+    scrollToY(rect.top + window.scrollY - padTop - centerOffset);
+    return;
+  }
+
+  const stat = document.getElementById("bolao-my-rank-stat");
+  if (stat) {
+    const rect = stat.getBoundingClientRect();
+    scrollToY(rect.top + window.scrollY - padTop);
+  }
+}
+
+function bolaoFxWasShown(key: string) {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function bolaoFxMarkShown(key: string) {
+  try {
+    localStorage.setItem(key, "1");
+  } catch {
+    /* localStorage indisponível */
+  }
+}
 
 function MoveBadge({ delta }: { delta?: number }) {
   if (delta === undefined) return <span className="bolao-move stagnant" title="Sem mudança" aria-hidden="true">—</span>;
@@ -209,10 +271,15 @@ function BolaoRankingPanel({
   onSelectEntry,
   rankDelta,
   liveMoves,
+  glowUserId,
+  rankGlow,
+  fxSurface = "main",
 }: BolaoRankingPanelProps) {
   const entries = limit ? sortedRanking.slice(0, limit) : sortedRanking;
   const podium = entries.slice(0, 3);
   const listEntries = entries.slice(podium.length);
+  const activeGlow = rankGlow?.mode === fxSurface ? rankGlow : null;
+  const glowDelta = activeGlow?.delta;
 
   return (
     <>
@@ -271,14 +338,24 @@ function BolaoRankingPanel({
             const place = column === 1 ? 1 : column === 0 ? 2 : 3;
             if (!entry) return <span className="bolao-podium2-step empty" key={`empty-${column}`} />;
             const pLive = rankingTab === "geral" ? liveMoves?.[entry.user.id] : undefined;
-            const pMoveClass = pLive && pLive > 0 ? " moved-up" : pLive && pLive < 0 ? " moved-down" : "";
+            const pGlow = rankingTab === "geral" && glowUserId === entry.user.id && glowDelta != null;
+            const pMoveClass = pGlow
+              ? (activeGlow!.mode === "main" && glowDelta > 0
+                ? " rank-glow-gold"
+                : activeGlow!.mode === "modal"
+                  ? " rank-glow-modal"
+                  : "")
+              : pLive && pLive > 0 ? " moved-up" : pLive && pLive < 0 ? " moved-down" : "";
             return (
               <button
                 className={`bolao-podium2-step place-${place}${pMoveClass}`}
-                key={entry.user.id}
+                id={glowUserId === entry.user.id ? `bolao-rank-user-${entry.user.id}` : undefined}
+                data-rank-user={glowUserId === entry.user.id ? entry.user.id : undefined}
+                key={glowUserId === entry.user.id ? `podium-${entry.user.id}-${activeGlow?.pulse ?? 0}` : entry.user.id}
                 onClick={() => onSelectEntry?.(entry)}
                 type="button"
               >
+                {pGlow && (activeGlow?.mode === "main" || activeGlow?.mode === "modal") ? <RankGlowSparkles /> : null}
                 {place === 1 && <span className="bolao-podium2-crown" aria-hidden="true">👑</span>}
                 <span className="bolao-podium2-avatar">
                   <Avatar user={entry.user} size={place === 1 ? "lg" : "md"} />
@@ -300,7 +377,7 @@ function BolaoRankingPanel({
                 {rankingTab === "geral" && (entry.round_gain ?? 0) > 0 ? (
                   <span className="bolao-gain">+{entry.round_gain} na rodada 🔥</span>
                 ) : null}
-                {rankingTab === "geral" && rankDelta?.[entry.user.id] ? (
+                {rankingTab === "geral" && !pGlow && rankDelta?.[entry.user.id] ? (
                   <span className={`bolao-podium2-move ${rankDelta[entry.user.id] > 0 ? "up" : "down"}`}>
                     {rankDelta[entry.user.id] > 0 ? `▲ subiu ${rankDelta[entry.user.id]}` : `▼ caiu ${-rankDelta[entry.user.id]}`}
                   </span>
@@ -319,12 +396,27 @@ function BolaoRankingPanel({
         {listEntries.map((entry, index) => {
           const delta = rankingTab === "geral" ? rankDelta?.[entry.user.id] : undefined;
           const live = rankingTab === "geral" ? liveMoves?.[entry.user.id] : undefined;
-          const moveClass = live && live > 0 ? " moved-up" : live && live < 0 ? " moved-down" : "";
+          const isGlow = rankingTab === "geral" && glowUserId === entry.user.id && glowDelta != null;
+          const moveClass = isGlow
+            ? (activeGlow!.mode === "main" && glowDelta > 0
+              ? " rank-glow-gold"
+              : activeGlow!.mode === "modal"
+                ? " rank-glow-modal"
+                : "")
+            : live && live > 0 ? " moved-up" : live && live < 0 ? " moved-down" : "";
           return (
-          <button className={`bolao-rank-row clickable${moveClass}`} key={entry.user.id} onClick={() => onSelectEntry?.(entry)} type="button">
+          <button
+            className={`bolao-rank-row clickable${moveClass}`}
+            id={glowUserId === entry.user.id ? `bolao-rank-user-${entry.user.id}` : undefined}
+            data-rank-user={glowUserId === entry.user.id ? entry.user.id : undefined}
+            key={glowUserId === entry.user.id ? `row-${entry.user.id}-${activeGlow?.pulse ?? 0}` : entry.user.id}
+            onClick={() => onSelectEntry?.(entry)}
+            type="button"
+          >
+            {isGlow && (activeGlow?.mode === "main" || activeGlow?.mode === "modal") ? <RankGlowSparkles /> : null}
             <span className="bolao-rank-pos">
               <strong>{rankingTab === "geral" ? entry.rank : index + podium.length + 1}º</strong>
-              {rankingTab === "geral" && <MoveBadge delta={rankDelta?.[entry.user.id]} />}
+              {rankingTab === "geral" && !isGlow ? <MoveBadge delta={rankDelta?.[entry.user.id]} /> : null}
             </span>
             <Avatar user={entry.user} size="sm" />
             <span className="bolao-rank-main">
@@ -846,9 +938,155 @@ export default function BolaoPage() {
     [board?.games],
   );
 
-  // Movimentação AO VIVO: compara a posição de cada um entre atualizações e mostra
-  // aura leve (sobe/desce) por alguns segundos — pega QUALQUER mudança, não só do
-  // último jogo. Some sozinho (não é pra sempre).
+  // Efeitos: tela inicial (#1 → scroll+ouro) | ver mais (todos → rodinha sem scroll)
+  const [rankGlow, setRankGlow] = useState<{ delta: number; pulse: number; mode: "main" | "modal" } | null>(null);
+  const [pointsFlash, setPointsFlash] = useState<number | null>(null);
+  const rankGlowTimerRef = useRef<number | null>(null);
+  const pointsFlashTimerRef = useRef<number | null>(null);
+  const rankGlowPulseRef = useRef(0);
+  const mainFxTimerRef = useRef<number | null>(null);
+  const modalFxTimerRef = useRef<number | null>(null);
+  const mainFxScheduledKeyRef = useRef<string | null>(null);
+  const modalFxScheduledKeyRef = useRef<string | null>(null);
+  const rankingModalOpenRef = useRef(rankingModalOpen);
+  rankingModalOpenRef.current = rankingModalOpen;
+
+  const triggerRankGlow = useCallback((delta: number, mode: "main" | "modal") => {
+    rankGlowPulseRef.current += 1;
+    setRankGlow({ delta, pulse: rankGlowPulseRef.current, mode });
+    if (rankGlowTimerRef.current) window.clearTimeout(rankGlowTimerRef.current);
+    rankGlowTimerRef.current = window.setTimeout(() => {
+      setRankGlow(null);
+      rankGlowTimerRef.current = null;
+    }, 6500);
+  }, []);
+
+  // —— Tela inicial: só 2º→1º — scroll rápido → giro dourado (sem popup verde) ——
+  useEffect(() => {
+    if (loading || !profile?.id || rankingModalOpen) return;
+    const mine = board?.leaderboard.find((e) => e.user.id === profile.id);
+    if (!mine) return;
+
+    const movement = mine.movement ?? 0;
+    if (mine.rank !== 1 || movement !== 1) return;
+
+    const finishedGames = board?.games?.filter((g) => g.status === "finished").length ?? 0;
+    const mainToken = `g${finishedGames}-mv1-r1`;
+    const mainKey = bolaoFxShownKey("main", profile.id, mainToken);
+    if (bolaoFxWasShown(mainKey) || mainFxScheduledKeyRef.current === mainKey) return;
+
+    mainFxScheduledKeyRef.current = mainKey;
+    if (mainFxTimerRef.current) window.clearTimeout(mainFxTimerRef.current);
+    mainFxTimerRef.current = window.setTimeout(() => {
+      if (rankingModalOpenRef.current || bolaoFxWasShown(mainKey)) return;
+      scrollToRankCard(profile.id);
+      mainFxTimerRef.current = window.setTimeout(() => {
+        if (rankingModalOpenRef.current || bolaoFxWasShown(mainKey)) return;
+        bolaoFxMarkShown(mainKey);
+        triggerRankGlow(movement, "main");
+      }, MAIN_SCROLL_TO_SPIN_MS);
+    }, MAIN_LEADER_DELAY_MS);
+  }, [loading, profile?.id, board?.leaderboard, board?.games, rankingModalOpen, triggerRankGlow]);
+
+  // Console: __bolaoFxTest.clear() | __bolaoFxTest.leader() | __bolaoFxTest.scroll()
+  useEffect(() => {
+    if (!profile?.id) return;
+    const uid = profile.id;
+    const w = window as Window & {
+      __bolaoFxTest?: {
+        clear: () => void;
+        leader: (movement?: number) => void;
+        scroll: () => void;
+      };
+    };
+    w.__bolaoFxTest = {
+      clear() {
+        Object.keys(localStorage).filter((k) => k.startsWith("bolao-fx-")).forEach((k) => localStorage.removeItem(k));
+        console.log("[bolao] FX limpos. Recarregue com location.reload() para o fluxo real da API.");
+      },
+      leader(movement = 1) {
+        Object.keys(localStorage)
+          .filter((k) => k.startsWith(`bolao-fx-main-${uid}-`) || k.startsWith(`bolao-fx-pts-${uid}-`))
+          .forEach((k) => localStorage.removeItem(k));
+        mainFxScheduledKeyRef.current = null;
+        window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+        window.setTimeout(() => {
+          scrollToRankCard(uid);
+          window.setTimeout(() => {
+            triggerRankGlow(movement, "main");
+            console.log("[bolao] Efeito 1º lugar simulado (scroll + dourado).");
+          }, MAIN_SCROLL_TO_SPIN_MS);
+        }, 200);
+      },
+      scroll() {
+        scrollToRankCard(uid);
+        console.log("[bolao] Scroll até seu card no ranking.");
+      },
+    };
+    return () => {
+      delete w.__bolaoFxTest;
+    };
+  }, [profile?.id, triggerRankGlow]);
+
+  // —— Ver mais: giro no card → ao terminar sobe o verde (+N pts), 1× por usuário/rodada ——
+  useEffect(() => {
+    if (!rankingModalOpen) {
+      modalFxScheduledKeyRef.current = null;
+      return;
+    }
+    if (loading || !profile?.id) return;
+    const mine = board?.leaderboard.find((e) => e.user.id === profile.id);
+    if (!mine) return;
+
+    const roundGain = mine.round_gain ?? 0;
+    if (roundGain <= 0) return;
+
+    const modalToken = `p${mine.points}-g${roundGain}`;
+    const modalKey = bolaoFxShownKey("modal", profile.id, modalToken);
+    const ptsKey = bolaoFxShownKey("pts", profile.id, modalToken);
+    if (bolaoFxWasShown(modalKey) && bolaoFxWasShown(ptsKey)) return;
+    if (modalFxScheduledKeyRef.current === modalToken) return;
+
+    modalFxScheduledKeyRef.current = modalToken;
+    if (modalFxTimerRef.current) window.clearTimeout(modalFxTimerRef.current);
+    modalFxTimerRef.current = window.setTimeout(() => {
+      if (!rankingModalOpenRef.current) return;
+      if (!bolaoFxWasShown(modalKey)) {
+        bolaoFxMarkShown(modalKey);
+        triggerRankGlow(Math.max(1, roundGain), "modal");
+      }
+      if (bolaoFxWasShown(ptsKey)) return;
+      modalFxTimerRef.current = window.setTimeout(() => {
+        if (!rankingModalOpenRef.current || bolaoFxWasShown(ptsKey)) return;
+        bolaoFxMarkShown(ptsKey);
+        if (pointsFlashTimerRef.current) window.clearTimeout(pointsFlashTimerRef.current);
+        setPointsFlash(roundGain);
+        pointsFlashTimerRef.current = window.setTimeout(() => {
+          setPointsFlash(null);
+          pointsFlashTimerRef.current = null;
+        }, 3000);
+      }, MODAL_POINTS_DELAY_MS);
+    }, 380);
+  }, [rankingModalOpen, loading, profile?.id, board?.leaderboard, triggerRankGlow]);
+
+  useEffect(() => {
+    if (rankingModalOpen) return;
+    modalFxScheduledKeyRef.current = null;
+    if (modalFxTimerRef.current) {
+      window.clearTimeout(modalFxTimerRef.current);
+      modalFxTimerRef.current = null;
+    }
+    setPointsFlash(null);
+  }, [rankingModalOpen]);
+
+  useEffect(() => () => {
+    if (rankGlowTimerRef.current) window.clearTimeout(rankGlowTimerRef.current);
+    if (pointsFlashTimerRef.current) window.clearTimeout(pointsFlashTimerRef.current);
+    if (mainFxTimerRef.current) window.clearTimeout(mainFxTimerRef.current);
+    if (modalFxTimerRef.current) window.clearTimeout(modalFxTimerRef.current);
+  }, []);
+
+  // Movimentação AO VIVO: aura leve nas linhas do ranking (sem popup — popup usa saldo visto acima)
   const [liveMovements, setLiveMovements] = useState<Record<number, number>>({});
   const prevRanksRef = useRef<Record<number, number> | null>(null);
   useEffect(() => {
@@ -869,22 +1107,6 @@ export default function BolaoPage() {
     const t = window.setTimeout(() => setLiveMovements({}), 6000);
     return () => window.clearTimeout(t);
   }, [board?.leaderboard]);
-
-  // Flash "+N pts" quando os pontos do próprio usuário sobem ao vivo (dopamina)
-  const [pointsFlash, setPointsFlash] = useState<number | null>(null);
-  const prevPointsRef = useRef<number | null>(null);
-  useEffect(() => {
-    const mine = board?.leaderboard.find((e) => e.user.id === profile?.id);
-    if (!mine) return;
-    const prev = prevPointsRef.current;
-    if (prev !== null && mine.points > prev) {
-      setPointsFlash(mine.points - prev);
-      const t = window.setTimeout(() => setPointsFlash(null), 2400);
-      prevPointsRef.current = mine.points;
-      return () => window.clearTimeout(t);
-    }
-    prevPointsRef.current = mine.points;
-  }, [board?.leaderboard, profile?.id]);
 
   // Quem cravou campeã vs quem não votou — voadores primeiro, ordenados por nome
   const championVoters = useMemo(() => {
@@ -1176,8 +1398,15 @@ export default function BolaoPage() {
 
   return (
     <AppShell hideRightRail user={profile} nextEvent={events[0] ?? null} leaderboard={leaderboard}>
-      {pointsFlash != null && (
-        <div className="bolao-points-flash" role="status">⚡ +{pointsFlash} {pointsFlash === 1 ? "ponto" : "pontos"}!</div>
+      {pointsFlash != null && rankingModalOpen && (
+        <div className="bolao-flash-stack bolao-flash-stack--modal" role="status" aria-live="polite">
+          <div className="bolao-points-flash">
+            <small className="bolao-flash-tag">Pontos</small>
+            <span>
+              🔥 +{pointsFlash} {pointsFlash === 1 ? "ponto" : "pontos"}!
+            </span>
+          </div>
+        </div>
       )}
       <div className="wc-page">
       <section className="wc-hero2">
@@ -1338,7 +1567,7 @@ export default function BolaoPage() {
             <strong>{summary.points}</strong> pts
           </span>
           <i />
-          <span className="wc-hero2-stat">
+          <span className={`wc-hero2-stat${rankGlow?.mode === "main" && rankGlow.delta > 0 && summary.rank === 1 ? " rank-glow-gold" : ""}`} id="bolao-my-rank-stat">
             <Medal size={14} />
             <strong>{summary.rank ? `${summary.rank}º` : "—"}</strong> posição
           </span>
@@ -1364,6 +1593,7 @@ export default function BolaoPage() {
         </div>
         <BolaoRankingPanel
           board={board}
+          glowUserId={profile?.id}
           highlights={highlights}
           compact
           limit={8}
@@ -1371,6 +1601,8 @@ export default function BolaoPage() {
           onShowAll={() => setRankingModalOpen(true)}
           onTabChange={setRankingTab}
           rankDelta={rankDelta}
+          rankGlow={rankGlow}
+          fxSurface="main"
           liveMoves={liveMovements}
           rankingTab={rankingTab}
           sortedRanking={sortedRanking}
@@ -1967,10 +2199,13 @@ export default function BolaoPage() {
 
             <BolaoRankingPanel
               board={board}
+              glowUserId={profile?.id}
               highlights={highlights}
               onSelectEntry={setSelectedEntry}
               onTabChange={setRankingTab}
               rankDelta={rankDelta}
+              rankGlow={rankGlow}
+              fxSurface="modal"
               liveMoves={liveMovements}
               rankingTab={rankingTab}
               sortedRanking={sortedRanking}

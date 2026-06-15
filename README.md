@@ -153,7 +153,7 @@ bash scripts/setup-deploy-mail-secrets.sh
 bash scripts/send-deploy-email-test.sh   # envia preview de teste
 ```
 
-Se `NOTIFY_EMAIL` não existir, o workflow usa `MAIL_USERNAME` como destinatário.
+Se `NOTIFY_EMAIL` não existir no GitHub, o workflow envia para `matheus.gama@conversys.global` (e só depois cai no `MAIL_USERNAME`).
 
 Acesse `http://localhost:3000` (app) e `http://localhost:8000` (API).
 

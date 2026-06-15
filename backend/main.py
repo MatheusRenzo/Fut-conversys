@@ -13,6 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
@@ -129,8 +130,10 @@ API_FOOTBALL_SAFETY_GAP = max(300, int(os.getenv("API_FOOTBALL_SAFETY_GAP", "600
 # demora a publicar o evento). Depois disso espera o próximo gol. ~60s entre tentativas.
 API_FOOTBALL_LIVE_RETRY_MAX = max(2, int(os.getenv("API_FOOTBALL_LIVE_RETRY_MAX", "2")))
 THESPORTSDB_LIVE_RETRY_MAX = max(1, int(os.getenv("THESPORTSDB_LIVE_RETRY_MAX", "2")))
-# Re-confirmação grátis (TheSportsDB + openfootball + IA) roda 1× este tempo após o fim
+# Re-confirmação grátis (TheSportsDB + openfootball + IA) roda após o fim
 WORLD_CUP_RECONFIRM_AFTER = timedelta(minutes=int(os.getenv("WORLD_CUP_RECONFIRM_MINUTES", "10")))
+WORLD_CUP_RECONFIRM_MAX_TRIES = max(1, int(os.getenv("WORLD_CUP_RECONFIRM_MAX_TRIES", "6")))
+WORLD_CUP_RECONFIRM_RETRY_GAP = timedelta(minutes=int(os.getenv("WORLD_CUP_RECONFIRM_RETRY_MINUTES", "3")))
 # Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há. 30s deixa
 # o PLACAR/GOL bem ao vivo (football-data 10/min aguenta de sobra: ~2/min) e faz o
 # gatilho de goleador disparar logo após o gol; a cota paga é protegida à parte.
@@ -1657,6 +1660,54 @@ def fetch_openfootball_world_cup_games() -> list[dict[str, Any]]:
     return sorted(games, key=lambda item: item["match_number"])
 
 
+def openfootball_scorers_for_game(
+    game: models.WorldCupGame,
+    of_games: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    """Artilheiros do jogo na fonte openfootball (grátis), independente do que já está gravado."""
+    if of_games is None:
+        try:
+            of_games = fetch_openfootball_world_cup_games()
+        except Exception:
+            return []
+    item = next((g for g in of_games if g.get("match_number") == game.match_number), None)
+    if not item:
+        home_key = normalize_scorer_name(normalize_world_cup_team(game.home_team))
+        away_key = normalize_scorer_name(normalize_world_cup_team(game.away_team))
+        for g in of_games:
+            gh = normalize_scorer_name(normalize_world_cup_team(g.get("home_team") or ""))
+            ga = normalize_scorer_name(normalize_world_cup_team(g.get("away_team") or ""))
+            if gh == home_key and ga == away_key:
+                item = g
+                break
+    raw = (item or {}).get("scorers") or ""
+    return [n.strip() for n in re.split(r"[,;\n]", raw) if n.strip()]
+
+
+def get_reconfirm_state(db: Session, game_id: int) -> dict[str, Any]:
+    raw = get_app_setting(db, f"wc_reconfirm_{game_id}")
+    try:
+        state = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        state = {}
+    return {
+        "tries": int(state.get("tries") or 0),
+        "last_at": state.get("last_at"),
+    }
+
+
+def set_reconfirm_state(db: Session, game_id: int, tries: int, last_at: str | None) -> None:
+    set_app_setting(
+        db,
+        f"wc_reconfirm_{game_id}",
+        json.dumps({"tries": tries, "last_at": last_at}, ensure_ascii=False),
+    )
+
+
+def clear_reconfirm_state(db: Session, game_id: int) -> None:
+    set_app_setting(db, f"wc_reconfirm_{game_id}", None)
+
+
 def fetch_world_cup_squads() -> dict[str, list[dict[str, Any]]]:
     request = urllib.request.Request(WIKIPEDIA_SQUADS_URL, headers={"User-Agent": "ConversysFut/1.0"})
     try:
@@ -2335,6 +2386,13 @@ def scorer_source_corroborates(source_names: list[str], official: list[str]) -> 
     return all(any(same_scorer(s, o) for o in official) for s in source_names)
 
 
+def scorer_lists_equivalent(a: list[str], b: list[str]) -> bool:
+    """Duas listas descrevem o mesmo conjunto de artilheiros (sem contradição)."""
+    if not a or not b:
+        return False
+    return scorer_source_corroborates(a, b) and scorer_source_corroborates(b, a)
+
+
 def extract_api_football_scorers(fixture: dict[str, Any]) -> list[str]:
     names: list[str] = []
     for event in fixture.get("events") or []:
@@ -2589,8 +2647,9 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                achar. Sem cota? failover na TheSportsDB. Nome normalizado no elenco.
     FIM      → quando a football-data marca FINISHED, a paga roda 1× e pega TODOS
                os goleadores (recupera os que faltaram no meio). É a confirmação final.
-    +10min   → re-confirmação grátis: TheSportsDB + openfootball → IA, compara com a
-               paga e sinaliza o que veio a mais. Roda 1× por jogo.
+    +10min   → re-confirmação: openfootball + TheSportsDB + confirmação da API paga
+               no fim → IA junta tudo e valida. Retry a cada N min se fontes
+               grátis ainda não responderam ou IA não fechar o resultado.
     """
     status: dict[str, Any] = {
         "configured": bool(API_FOOTBALL_KEYS),
@@ -2725,6 +2784,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 {"game": f"{game.home_team} x {game.away_team}", "fora_do_elenco": unmatched, "api": api_names}
             )
         game.scorers_final = True  # paga FT é definitiva (lista distinta = verdade)
+        complete_goal_pipeline(db, game, get_goal_pipeline(db, game))
         conf_txt = f" · ✓ {len(agreeing)} fonte(s)" if agreeing else ""
         gol_txt = f" · goleadores: {game.scorers}" if game.scorers else " · sem goleador"
         log_game_event(db, game, f"Confirmação final — {game.home_score}-{game.away_score}{conf_txt}{gol_txt}", phase="fim", api="API-Football", ok=True)
@@ -2858,9 +2918,30 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                     normalize_scorer_name(normalize_world_cup_team(game.away_team)),
                 ))
                 pipe = {**pipe, "api_tries": int(pipe.get("api_tries") or 0) + 1}
+                if not item and game.api_fixture_id:
+                    fix_payload = call(f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}")
+                    if fix_payload and fix_payload.get("response"):
+                        item = fix_payload["response"][0]
+                        log_game_event(
+                            db, game,
+                            f"{gl}API paga — fixture direto (jogo fora do ao vivo)",
+                            phase="ao_vivo", api="API-Football", ok=True,
+                        )
                 if not item:
                     status["retries"] += 1
-                    log_game_event(db, game, f"{gl}API paga — jogo não encontrado", phase="ao_vivo", api="API-Football", ok=False)
+                    # Fora do endpoint live ≠ erro: jogo já encerrou ou fixture sumiu do ao vivo
+                    if game.status == "finished" or game.api_fixture_id:
+                        log_game_event(
+                            db, game,
+                            f"{gl}API paga — jogo encerrou (fora do ao vivo)",
+                            phase="ao_vivo", api="API-Football", ok=True,
+                        )
+                    else:
+                        log_game_event(
+                            db, game,
+                            f"{gl}API paga — jogo não encontrado",
+                            phase="ao_vivo", api="API-Football", ok=False,
+                        )
                     if pipe["api_tries"] >= API_FOOTBALL_LIVE_RETRY_MAX:
                         pipe["stage"] = "tsd"
                     set_goal_pipeline(db, game.id, pipe)
@@ -2942,69 +3023,178 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         goal_pipeline_pending(get_goal_pipeline(db, g)) for g in live_now_games
     )
 
-    # ============ C) +10min: re-confirmação grátis (TheSportsDB + openfootball + IA) ============
-    reconfirm_due = (
+    # ============ C) +10min: re-confirmação grátis → IA (openfootball + SportsDB + API paga) ============
+    # Retry espaçado até 6× se fontes grátis vazias ou IA/fontes não fecharem o resultado.
+    reconfirm_candidates = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.status == "finished")
         .filter(models.WorldCupGame.finished_at.isnot(None))
         .filter(models.WorldCupGame.finished_at <= now - WORLD_CUP_RECONFIRM_AFTER)
         .filter(or_(models.WorldCupGame.reconfirmed.is_(False), models.WorldCupGame.reconfirmed.is_(None)))
+        .filter(models.WorldCupGame.scorers_final.is_(True))
         .order_by(models.WorldCupGame.finished_at.desc())
         .all()
     )
-    for game in reconfirm_due:
-        if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
-            break
-        status["tsd_calls"] += 1
-        bump_game_poll(db, game.id, "tsd")
-        tsd = fetch_thesportsdb_scorers(game, db) or []
-        squad = world_cup_game_squad(db, game)
-        of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
-        if tsd:
-            log_game_event(db, game, f"SportsDB reconfirmação — achou: {', '.join(tsd)}", phase="reconfirmacao", api="TheSportsDB", ok=True)
-        else:
-            log_game_event(db, game, "SportsDB reconfirmação — não achou", phase="reconfirmacao", api="TheSportsDB", ok=False)
-        # IA reconcilia as DUAS grátis e confirma o resultado (que já tem a paga)
-        reconciled = ai_reconcile_scorers(
-            db, game, {"TheSportsDB": tsd, "openfootball": of_names, "paga_ja_gravada": of_names},
-            status, squad=squad, phase="reconfirmacao", source_label="reconfirmação",
+    of_games_cache: list[dict[str, Any]] | None = None
+    for game in reconfirm_candidates:
+        state = get_reconfirm_state(db, game.id)
+        if state["tries"] >= WORLD_CUP_RECONFIRM_MAX_TRIES:
+            continue
+        if state["last_at"]:
+            try:
+                last_try = datetime.fromisoformat(state["last_at"].replace("Z", "+00:00"))
+                if last_try.tzinfo:
+                    last_try = last_try.replace(tzinfo=None)
+                if now.replace(tzinfo=None) - last_try < WORLD_CUP_RECONFIRM_RETRY_GAP:
+                    continue
+            except ValueError:
+                pass
+
+        attempt = state["tries"] + 1
+        set_reconfirm_state(db, game.id, attempt, now.replace(tzinfo=None).isoformat())
+        log_game_event(
+            db, game,
+            f"Reconfirmação — tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES}",
+            phase="reconfirmacao", api="pipeline",
         )
-        candidate = (reconciled or []) + tsd + of_names
+
+        if of_games_cache is None:
+            try:
+                of_games_cache = fetch_openfootball_world_cup_games()
+            except Exception:
+                of_games_cache = []
+
+        of_names = openfootball_scorers_for_game(game, of_games_cache)
+        if of_names:
+            log_game_event(
+                db, game,
+                f"openfootball reconfirmação — achou: {', '.join(of_names)}",
+                phase="reconfirmacao", api="openfootball", ok=True,
+            )
+        else:
+            log_game_event(
+                db, game,
+                f"openfootball reconfirmação — não achou (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
+                phase="reconfirmacao", api="openfootball", ok=False,
+            )
+
+        squad = world_cup_game_squad(db, game)
+        paid_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+
+        def _reconfirm_sources_label(agreeing: list[str]) -> str:
+            return "+".join(agreeing) if agreeing else "pipeline"
+
+        def _finish_reconfirm(official: list[str], agreeing: list[str], api_label: str | None = None) -> None:
+            prev = [s.strip() for s in (game.confirmation_sources or "").split(",") if s.strip()]
+            for a in agreeing:
+                if a not in prev:
+                    prev.append(a)
+            game.confirmation_sources = ", ".join(prev) or game.confirmation_sources
+            game.scorers_confirmations = max(game.scorers_confirmations or 0, len(prev))
+            game.scorers_confirmed = True
+            game.reconfirmed = True
+            clear_reconfirm_state(db, game.id)
+            status["reconfirmed"] += 1
+            log_game_event(
+                db, game,
+                f"Reconfirmação — resultado: {', '.join(official)}",
+                phase="reconfirmacao",
+                api=api_label or _reconfirm_sources_label(agreeing),
+                ok=True,
+            )
+
+        tsd: list[str] = []
+        if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
+            log_game_event(
+                db, game,
+                f"SportsDB reconfirmação — adiada (cota do ciclo)",
+                phase="reconfirmacao", api="TheSportsDB", ok=False,
+            )
+        else:
+            status["tsd_calls"] += 1
+            bump_game_poll(db, game.id, "tsd")
+            tsd = fetch_thesportsdb_scorers(game, db) or []
+            if tsd:
+                log_game_event(db, game, f"SportsDB reconfirmação — achou: {', '.join(tsd)}", phase="reconfirmacao", api="TheSportsDB", ok=True)
+            else:
+                log_game_event(
+                    db, game,
+                    f"SportsDB reconfirmação — não achou (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
+                    phase="reconfirmacao", api="TheSportsDB", ok=False,
+                )
+
+        if not of_names and not tsd:
+            log_game_event(
+                db, game,
+                f"Reconfirmação — aguardando próxima tentativa (openfootball e SportsDB sem dados)",
+                phase="reconfirmacao", api="pipeline", ok=False,
+            )
+            continue
+
+        if not paid_names:
+            log_game_event(
+                db, game,
+                f"Reconfirmação — aguardando confirmação da API paga no fim do jogo",
+                phase="reconfirmacao", api="pipeline", ok=False,
+            )
+            continue
+
+        sources: dict[str, list[str]] = {
+            "openfootball": of_names,
+            "TheSportsDB": tsd,
+            "API_paga_fim": paid_names,
+        }
+        reconciled = ai_reconcile_scorers(
+            db, game, sources, status, squad=squad, phase="reconfirmacao", source_label="reconfirmação",
+        )
+        if not reconciled:
+            log_game_event(
+                db, game,
+                f"Reconfirmação — IA sem resultado (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
+                phase="reconfirmacao", api="IA merge", ok=False,
+            )
+            continue
+
+        candidate = reconciled + tsd + of_names + paid_names
         official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in candidate) if n], squad)
         new_scorers = ", ".join(official)[:500]
+        chk = SimpleNamespace(home_score=game.home_score, away_score=game.away_score, scorers=new_scorers)
+        if not world_cup_scorers_complete(chk):  # type: ignore[arg-type]
+            log_game_event(
+                db, game,
+                f"Reconfirmação — artilheiros incompletos (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
+                phase="reconfirmacao", api="pipeline", ok=False,
+            )
+            continue
+
         if new_scorers != (game.scorers or ""):
             game.scorers = new_scorers
             status["scorers_updated"] += 1
-        # algo que as grátis trouxeram e a paga não tinha → sinaliza
-        extras = [t for t in tsd if not any(same_scorer(t, o) for o in of_names)]
-        if extras:
-            status["conflicts"].append(
-                {"game": f"{game.home_team} x {game.away_team}", "gratis_trouxe_a_mais": extras}
-            )
+
+        if tsd and of_names:
+            extras = [t for t in tsd if not any(same_scorer(t, o) for o in of_names)]
+            if extras:
+                status["conflicts"].append(
+                    {"game": f"{game.home_team} x {game.away_team}", "gratis_trouxe_a_mais": extras}
+                )
+
         agreeing = [
-            name for name, src in (("TheSportsDB", tsd), ("openfootball", of_names))
-            if scorer_source_corroborates(src, official)
+            name for name, src in (
+                ("openfootball", of_names),
+                ("TheSportsDB", tsd),
+                ("API paga", paid_names),
+            )
+            if src and scorer_source_corroborates(src, official)
         ]
-        prev = [s.strip() for s in (game.confirmation_sources or "").split(",") if s.strip()]
-        for a in agreeing:
-            if a not in prev:
-                prev.append(a)
-        game.confirmation_sources = ", ".join(prev) or game.confirmation_sources
-        game.scorers_confirmations = max(game.scorers_confirmations or 0, len(prev))
-        if len(prev) >= 2 and world_cup_scorers_complete(game):
-            game.scorers_confirmed = True
-        game.reconfirmed = True
-        status["reconfirmed"] += 1
-        ia_names = ", ".join(official) if official else "incompleto"
-        incompleto = not tsd or not of_names or not reconciled
-        nota = " (dado pode estar incompleto — faltou cota ou API não achou tudo)" if incompleto else ""
-        log_game_event(
-            db, game,
-            f"Reconfirmação — resultado: {ia_names}{nota}",
-            phase="reconfirmacao",
-            api="TheSportsDB+openfootball",
-            ok=bool(reconciled),
-        )
+        if len(agreeing) < 2:
+            log_game_event(
+                db, game,
+                f"Reconfirmação — fontes não batem com IA (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
+                phase="reconfirmacao", api="pipeline", ok=False,
+            )
+            continue
+
+        _finish_reconfirm(official, agreeing, "IA+" + _reconfirm_sources_label(agreeing))
 
     # Varredura: jogo encerrado com goleadores completos vira 'final'
     leftover = (
