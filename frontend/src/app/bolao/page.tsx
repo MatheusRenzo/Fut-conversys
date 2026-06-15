@@ -13,8 +13,8 @@ import {
   Lock,
   Medal,
   Pencil,
+  Radio,
   Save,
-  Settings2,
   Sparkles,
   Target,
   Ticket,
@@ -1204,9 +1204,13 @@ export default function BolaoPage() {
               <span>Ranking</span>
             </button>
             {isAdmin && (
-              <button className="wc-hero2-btn" onClick={() => setAdminModalOpen(true)} type="button">
-                <Settings2 size={15} />
-                <span>Gerenciar</span>
+              <button
+                className={`wc-hero2-btn wc-admin-live-btn${hasLiveGame ? " pulsing" : ""}`}
+                onClick={() => setAdminModalOpen(true)}
+                type="button"
+              >
+                <Radio size={15} />
+                <span>Ao vivo</span>
               </button>
             )}
           </div>

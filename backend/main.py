@@ -1822,21 +1822,36 @@ def game_poll_count(db: Session, game_id: int, api: str) -> int:
     return int(raw) if (raw or "").isdigit() else 0
 
 
-def log_game_event(db: Session, game: models.WorldCupGame, action: str) -> None:
-    """Registra um evento do jogo (gol, encerramento, confirmação) num log rolante
-    pro painel: 'o que fez, em qual jogo, quando'."""
+def log_game_event(
+    db: Session,
+    game: models.WorldCupGame,
+    action: str,
+    *,
+    phase: str | None = None,
+    api: str | None = None,
+    ok: bool | None = None,
+) -> None:
+    """Registra evento do jogo pro painel admin. phase: ao_vivo|fim|reconfirmacao|gratuito;
+    api: football-data|API-Football|TheSportsDB|IA merge|calendário; ok: achou/falhou."""
     raw = get_app_setting(db, "wc_game_events")
     try:
         events = json.loads(raw) if raw else []
     except json.JSONDecodeError:
         events = []
-    events.insert(0, {
+    row: dict[str, Any] = {
         "at": datetime.now(timezone.utc).isoformat(),
         "match_number": game.match_number,
         "game": f"{game.home_team} x {game.away_team}",
         "action": action,
-    })
-    set_app_setting(db, "wc_game_events", json.dumps(events[:80], ensure_ascii=False))
+    }
+    if phase:
+        row["phase"] = phase
+    if api:
+        row["api"] = api
+    if ok is not None:
+        row["ok"] = ok
+    events.insert(0, row)
+    set_app_setting(db, "wc_game_events", json.dumps(events[:100], ensure_ascii=False))
 
 
 def refresh_world_cup_live_statuses(db: Session) -> bool:
@@ -1851,7 +1866,7 @@ def refresh_world_cup_live_statuses(db: Session) -> bool:
     for game in games:
         game.status = "live"
         changed = True
-        log_game_event(db, game, "🟢 começou — palpites fechados, sistema ao vivo")
+        log_game_event(db, game, "🟢 começou — palpites fechados", phase="gratuito", api="calendário", ok=True)
     return changed
 
 
@@ -1955,14 +1970,23 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
                 # GOL detectado pela football-data (placar subiu) → registra na timeline;
                 # a busca do autor (API-Football/failover) é disparada no apply_api_football_live
                 if (lh + la) > old_total:
-                    log_game_event(db, game, f"⚽ gol! placar {lh}-{la} (football-data) — buscando autor")
+                    log_game_event(
+                        db, game,
+                        f"⚽ GOL · placar virou {lh}-{la}",
+                        phase="gratuito", api="football-data", ok=True,
+                    )
+                    log_game_event(
+                        db, game,
+                        f"⏱ próxima tentativa API-Football em ~{API_FOOTBALL_GOAL_GAP}s",
+                        phase="ao_vivo", api="API-Football",
+                    )
                 # INTERVALO: football-data manda PAUSED no intervalo
                 was_ht = bool(game.halftime)
                 game.halftime = (remote_status == "PAUSED")
                 if game.halftime and not was_ht:
-                    log_game_event(db, game, "⏸ intervalo")
+                    log_game_event(db, game, "⏸ intervalo", phase="gratuito", api="football-data", ok=True)
                 elif was_ht and not game.halftime:
-                    log_game_event(db, game, "▶ 2º tempo")
+                    log_game_event(db, game, "▶ 2º tempo", phase="gratuito", api="football-data", ok=True)
             continue
         finished_remote = remote_status in ("FINISHED", "AWARDED") and has_score
         if not finished_remote:
@@ -2417,10 +2441,10 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     pending += [g for g in stuck_live if g.id not in seen and g.api_fixture_id] if has_keys else []
 
     for game in pending:
-        log_game_event(db, game, "→ chamada API-Football (fim do jogo — confirmação final)")
+        log_game_event(db, game, "→ chamada API-Football (fim)", phase="fim", api="API-Football")
         payload = call(f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}")
         if payload is None:
-            log_game_event(db, game, "✗ API-Football (fim) — sem cota ou limite de reserva")
+            log_game_event(db, game, "✗ sem cota / limite de reserva", phase="fim", api="API-Football", ok=False)
             break
         bump_game_poll(db, game.id, "af")
         fixtures = payload.get("response") or []
@@ -2445,9 +2469,9 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         api_names = extract_api_football_scorers(fixture)
         of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
         if not api_names:
-            log_game_event(db, game, "✗ API-Football (fim) — respondeu mas sem goleadores no payload")
+            log_game_event(db, game, "✗ respondeu sem goleadores", phase="fim", api="API-Football", ok=False)
         else:
-            log_game_event(db, game, f"✓ API-Football (fim) respondeu — {', '.join(api_names)}")
+            log_game_event(db, game, f"✓ achou: {', '.join(api_names)}", phase="fim", api="API-Football", ok=True)
         # IA definitiva no fim: cruza paga + openfootball + elenco
         reconciled = ai_reconcile_scorers(
             db, game, {"API-Football": api_names, "openfootball": of_names}, status, squad=squad, phase="fim"
@@ -2472,7 +2496,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         game.scorers_final = True  # paga FT é definitiva (lista distinta = verdade)
         conf_txt = f" · ✓ {len(agreeing)} fonte(s)" if agreeing else ""
         gol_txt = f" · goleadores: {game.scorers}" if game.scorers else " · sem goleador"
-        log_game_event(db, game, f"🏁 fim {game.home_score}-{game.away_score} — paga pegou tudo{conf_txt}{gol_txt}")
+        log_game_event(db, game, f"🏁 fim {game.home_score}-{game.away_score}{conf_txt}{gol_txt}", phase="fim", api="API-Football", ok=True)
 
     # Rede de segurança: jogo "ao vivo" há tempo demais → encerra sozinho
     for game in stuck_live:
@@ -2537,13 +2561,17 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             for game in pending_live:
                 sc, n = polled_info(game)
                 if sc != f"{game.home_score or 0}-{game.away_score or 0}":
-                    log_game_event(db, game, "→ chamada API-Football (gol detectado)")
+                    log_game_event(db, game, "→ chamada API-Football", phase="ao_vivo", api="API-Football")
                 elif n > 0:
-                    log_game_event(db, game, f"↻ retry {n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX} API-Football — sem goleador ainda")
+                    log_game_event(
+                        db, game,
+                        f"↻ retry {n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX} — sem goleador",
+                        phase="ao_vivo", api="API-Football", ok=False,
+                    )
             payload = call(API_FOOTBALL_LIVE_URL)
             if payload is None:
                 for game in pending_live:
-                    log_game_event(db, game, "✗ API-Football (ao vivo) — sem cota ou limite de reserva")
+                    log_game_event(db, game, "✗ sem cota — failover TheSportsDB", phase="ao_vivo", api="API-Football", ok=False)
             if payload:
                 set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
                 by_teams: dict[tuple[str, str], dict[str, Any]] = {}
@@ -2563,7 +2591,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                     ))
                     if not item:
                         status["retries"] += 1
-                        log_game_event(db, game, "✗ API-Football respondeu — jogo não achado no live=all")
+                        log_game_event(db, game, "✗ jogo não achado no live=all", phase="ao_vivo", api="API-Football", ok=False)
                         mark_polled(game)  # tentou, não achou ainda → conta retry
                         continue
                     bump_game_poll(db, game.id, "af")
@@ -2577,25 +2605,29 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                     live_scorers = extract_api_football_scorers(item)
                     of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
                     if live_scorers:
-                        log_game_event(db, game, f"✓ API-Football (ao vivo) — {', '.join(live_scorers)}")
+                        log_game_event(db, game, f"✓ achou: {', '.join(live_scorers)}", phase="ao_vivo", api="API-Football", ok=True)
                         new_s = normalize_live(
                             game, live_scorers, {"API-Football": live_scorers, "openfootball": of_names}, phase="ao_vivo"
                         )
                         if new_s != (game.scorers or ""):
                             game.scorers = new_s
                             status["scorers_updated"] += 1
-                            log_game_event(db, game, f"⚽ artilheiro confirmado: {new_s}")
+                            log_game_event(db, game, f"⚽ artilheiro: {new_s}", phase="ao_vivo", api="API-Football", ok=True)
                     else:
                         status["retries"] += 1
                         sc, n = polled_info(game)
-                        log_game_event(db, game, f"✗ API-Football sem goleador (retry {n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX})")
+                        log_game_event(
+                            db, game,
+                            f"✗ sem goleador (retry {n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX})",
+                            phase="ao_vivo", api="API-Football", ok=False,
+                        )
                     status["mid_checks"] += 1
                     mark_polled(game)
         elif gap_ok and not paid_ok:
             # FAILOVER: paga sem cota → goleador ao vivo pela TheSportsDB (grátis)
             status["skipped"] = "paga sem cota — failover TheSportsDB ao vivo"
             for game in pending_live:
-                log_game_event(db, game, "⚠ paga sem cota → failover TheSportsDB")
+                log_game_event(db, game, "⚠ failover TheSportsDB (paga sem cota)", phase="ao_vivo", api="TheSportsDB")
                 if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
                     break
                 status["tsd_calls"] += 1
@@ -2603,17 +2635,17 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 tsd = fetch_thesportsdb_scorers(game, db) or []
                 of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
                 if tsd:
-                    log_game_event(db, game, f"✓ TheSportsDB (failover) — {', '.join(tsd)}")
+                    log_game_event(db, game, f"✓ achou: {', '.join(tsd)}", phase="ao_vivo", api="TheSportsDB", ok=True)
                     new_s = normalize_live(
                         game, tsd, {"TheSportsDB": tsd, "openfootball": of_names}, phase="ao_vivo_failover"
                     )
                     if new_s != (game.scorers or ""):
                         game.scorers = new_s
                         status["scorers_updated"] += 1
-                        log_game_event(db, game, f"⚽ artilheiro confirmado (failover): {new_s}")
+                        log_game_event(db, game, f"⚽ artilheiro: {new_s}", phase="ao_vivo", api="TheSportsDB", ok=True)
                 else:
                     status["retries"] += 1
-                    log_game_event(db, game, "✗ TheSportsDB sem goleador (failover)")
+                    log_game_event(db, game, "✗ sem goleador — segue retry", phase="ao_vivo", api="TheSportsDB", ok=False)
                 mark_polled(game)
             set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
 
@@ -2636,9 +2668,9 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         squad = world_cup_game_squad(db, game)
         of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
         if tsd:
-            log_game_event(db, game, f"✓ TheSportsDB (re-confirmação) — {', '.join(tsd)}")
+            log_game_event(db, game, f"✓ achou: {', '.join(tsd)}", phase="reconfirmacao", api="TheSportsDB", ok=True)
         else:
-            log_game_event(db, game, "✗ TheSportsDB (re-confirmação) — sem goleadores")
+            log_game_event(db, game, "✗ sem goleadores", phase="reconfirmacao", api="TheSportsDB", ok=False)
         # IA reconcilia as DUAS grátis e confirma o resultado (que já tem a paga)
         reconciled = ai_reconcile_scorers(
             db, game, {"TheSportsDB": tsd, "openfootball": of_names, "paga_ja_gravada": of_names},
@@ -2673,8 +2705,11 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         ia_note = f" · IA merge aplicada" if reconciled else " · IA merge falhou"
         log_game_event(
             db, game,
-            f"🔁 re-confirmado (+10min) — {len(prev)} fonte(s){ia_note}"
-            + (f" · TheSportsDB trouxe a mais: {', '.join(extras)}" if extras else ""),
+            f"🔁 re-confirmado — {len(prev)} fonte(s){ia_note}"
+            + (f" · divergência: {', '.join(extras)}" if extras else ""),
+            phase="reconfirmacao",
+            api="TheSportsDB+openfootball",
+            ok=bool(reconciled),
         )
 
     # Varredura: jogo encerrado com goleadores completos vira 'final'
@@ -3006,7 +3041,7 @@ def ai_reconcile_scorers(
     nome oficial e nunca inventa. Cacheado por assinatura (gasta pouquíssimo).
     Devolve a lista reconciliada ou None."""
     if not OPENAI_API_KEY:
-        log_game_event(db, game, f"✗ IA merge ({phase}) — OpenAI não configurada")
+        log_game_event(db, game, f"✗ IA merge ({phase}) — não configurada", phase=phase, api="IA merge", ok=False)
         return None
     total = (game.home_score or 0) + (game.away_score or 0)
     if total == 0:
@@ -3023,11 +3058,11 @@ def ai_reconcile_scorers(
             cached = json.loads(cached_raw)
             if cached.get("sig") == sig and isinstance(cached.get("names"), list):
                 names = cached["names"]
-                log_game_event(db, game, f"🤖 IA merge ({phase}) cache ✓ — {', '.join(names) if names else 'vazio'}")
+                log_game_event(db, game, f"🤖 IA merge ({phase}) cache ✓ — {', '.join(names) if names else 'vazio'}", phase=phase, api="IA merge", ok=True)
                 return names
         except json.JSONDecodeError:
             pass
-    log_game_event(db, game, f"→ chamada IA merge ({phase})")
+    log_game_event(db, game, f"→ chamada IA merge ({phase})", phase=phase, api="IA merge")
     fontes_txt = "; ".join(f"{name}: {', '.join(lst) if lst else '(vazio)'}" for name, lst in sources.items())
     # O elenco pode ser grande; manda um recorte enxuto pra não estourar tokens.
     squad_txt = ", ".join((squad or [])[:60])
@@ -3051,7 +3086,7 @@ def ai_reconcile_scorers(
         temperature=0.1,
     )
     if not text:
-        log_game_event(db, game, f"✗ IA merge ({phase}) — OpenAI sem resposta")
+        log_game_event(db, game, f"✗ IA merge ({phase}) — sem resposta", phase=phase, api="IA merge", ok=False)
         return None
     status["ai_reconciles"] = status.get("ai_reconciles", 0) + 1
     bump_daily_counter(db, "ai_reconcile")  # conta as reconciliações de goleador
@@ -3061,11 +3096,11 @@ def ai_reconcile_scorers(
     except json.JSONDecodeError:
         names = None
     if not isinstance(names, list):
-        log_game_event(db, game, f"✗ IA merge ({phase}) — JSON inválido")
+        log_game_event(db, game, f"✗ IA merge ({phase}) — JSON inválido", phase=phase, api="IA merge", ok=False)
         return None
     names = [re.sub(r"\s+", " ", str(n)).strip() for n in names if str(n).strip()]
     set_app_setting(db, cache_key, json.dumps({"sig": sig, "names": names}, ensure_ascii=False))
-    log_game_event(db, game, f"🤖 IA merge ({phase}) ✓ — {', '.join(names) if names else 'vazio'}")
+    log_game_event(db, game, f"🤖 IA merge ({phase}) ✓ — {', '.join(names) if names else 'vazio'}", phase=phase, api="IA merge", ok=True)
     return names
 
 
@@ -3141,22 +3176,30 @@ def world_cup_ai_insight(db: Session) -> dict[str, Any]:
             pass
 
     home, away = game.home_team, game.away_team
-    partes = [
-        f"{home} x {away}",
-        f"{total} palpites cravados",
-        f"{home_w} apostam no {home}, {away_w} no {away}, {draws} no empate",
-        f"placar mais cravado: {top_score[0]} ({top_score[1]}x)",
-    ]
+    if home_w > away_w and home_w >= draws:
+        tend_result = f"intenção coletiva pende para vitória do {home}"
+    elif away_w > home_w and away_w >= draws:
+        tend_result = f"intenção coletiva pende para vitória do {away}"
+    elif draws > home_w and draws > away_w:
+        tend_result = "intenção coletiva pende para empate"
+    else:
+        tend_result = "intenção dividida no resultado"
+
+    partes = [f"{home} x {away}", tend_result]
     if top_scorer:
-        partes.append(f"artilheiro favorito: {top_scorer[0]} ({top_scorer[1]} palpites)")
+        partes.append(f"artilheiro que mais circula na intenção (não revele quantos): {top_scorer[0]}")
+    if top_score[1] >= max(2, total // 4):
+        partes.append(f"placar que mais aparece na cabeça da galera (não revele quantos): {top_score[0]}")
+
     text = openai_chat(
         system=(
             "Você é um narrador esportivo brasileiro animado de um bolão de Copa. "
-            "Escreva UMA frase curtíssima e empolgante (pt-BR, no MÁXIMO 110 caracteres) sobre a "
-            "tendência dos palpites pro próximo jogo. Direto e com energia. "
-            "Não revele nomes de quem palpitou. Não invente números. Sem hashtags."
+            "Escreva UMA frase curtíssima (pt-BR, MÁXIMO 110 caracteres) sobre a INTENÇÃO "
+            "dos palpites: qual time a galera quer ver ganhando e qual artilheiro está na conversa. "
+            "PROIBIDO: números, porcentagens, contagem de palpites, nomes de quem apostou, hashtags. "
+            "Fale como tendência/vibe, não como estatística."
         ),
-        user="Tendência dos palpites: " + "; ".join(partes) + ".",
+        user="Intenção dos palpites: " + "; ".join(partes) + ".",
         max_tokens=70,
         db=db,
         temperature=0.7,

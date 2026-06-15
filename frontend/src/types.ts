@@ -432,6 +432,9 @@ export type WorldCupSyncStatus = {
     match_number?: number | null;
     game: string;
     action: string;
+    phase?: string | null;
+    api?: string | null;
+    ok?: boolean | null;
   }>;
   today_games?: Array<{
     match_number?: number | null;
