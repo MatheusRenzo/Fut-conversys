@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Activity, Bot, ChevronDown, Clock3, Database, Goal, Radio, Zap } from "lucide-react";
+import { ChevronDown, Clock3, Goal, Radio, Zap } from "lucide-react";
 import { TeamFlag } from "@/components/TeamFlag";
 import { teamLabel } from "@/lib/teams";
 import type { WorldCupSyncStatus } from "@/types";
@@ -83,200 +83,118 @@ function cleanText(s: string) {
 }
 
 function pickNames(raw: string) {
-  const m = raw.match(/(?:achou|artilheiro|confirmou|cache)[:\s—-]+(.+)/i);
-  return m?.[1]?.split("·")[0]?.trim() ?? "";
+  const m = raw.match(/(?:achou|resultado|artilheiro|confirmou)[:\s]+(.+)/i);
+  return m?.[1]?.split("(")[0]?.split("·")[0]?.trim() ?? "";
+}
+
+/** Remove spam de logs legados (failover em loop, aguardando 60s, etc.) */
+function compactTimeline(evs: GameEvent[], retryMax: number): GameEvent[] {
+  const out: GameEvent[] = [];
+  let lastSig = "";
+  for (const ev of chrono(evs)) {
+    const raw = cleanText(ev.action);
+    if (/aguardando consulta|próxima tentativa|failover thesportsdb.*sem cota/i.test(raw)) continue;
+    if (/segue retry$/i.test(raw)) continue;
+    const d = parseTimelineEvent(ev, retryMax);
+    if (d.kind === "REGISTRO" && d.tone === "plain") continue;
+    const sig = `${d.kind}|${d.api}|${d.result}|${d.detail}`;
+    if (sig === lastSig) continue;
+    lastSig = sig;
+    out.push(ev);
+  }
+  return out;
 }
 
 function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
   const raw = cleanText(ev.action);
   const apiKey = ev.api ?? "";
-  const api = API_LABEL[apiKey] ?? (apiKey || "—");
   const isFim = ev.phase === "fim";
   const isReconf = ev.phase === "reconfirmacao";
-  const retryMatch = raw.match(/retry\s*(\d+)\s*\/\s*(\d+)/i);
+  const tentativa = raw.match(/\((\d+)\/(\d+)\)/);
 
-  if (raw.toLowerCase().includes("começou") || apiKey === "calendário") {
-    return { kind: "INÍCIO", api: "Sistema", result: "OK", detail: "Jogo começou, palpites fechados", tone: "milestone" };
+  if (/início|começou/i.test(raw) || apiKey === "calendário") {
+    return { kind: "INÍCIO", api: "Sistema", result: "OK", detail: "Jogo começou", tone: "milestone" };
   }
-
-  if (/gol|placar virou/i.test(raw)) {
+  if (/gol detectado|placar virou|gol ·/i.test(raw)) {
     const score = raw.match(/(\d+-\d+)/)?.[1];
     return { kind: "GOL", api: "API grátis", result: "Detectado", detail: score ? `Placar ${score}` : "Novo gol", tone: "gol" };
   }
-
-  if (/^intervalo$/i.test(raw) || (raw.toLowerCase().includes("intervalo") && !raw.includes("2"))) {
+  if (/^intervalo$/i.test(raw)) {
     return { kind: "INTERVALO", api: "API grátis", result: "—", detail: "Intervalo", tone: "milestone" };
   }
-
-  if (raw.includes("2º tempo") || raw.toLowerCase().includes("2o tempo")) {
+  if (/2º tempo/i.test(raw)) {
     return { kind: "2º TEMPO", api: "API grátis", result: "—", detail: "Volta do intervalo", tone: "milestone" };
   }
-
-  if (/próxima tentativa|aguardando consulta/i.test(raw)) {
-    const sec = raw.match(/(\d+)\s*s/)?.[1];
+  if (/api paga — consulta/i.test(raw)) {
+    return { kind: "CONSULTA GOL", api: "API paga", result: "Chamou", detail: "Busca artilheiro", tone: "call" };
+  }
+  if (/api paga — achou/i.test(raw)) {
+    return { kind: "CONSULTA GOL", api: "API paga", result: "Achou", detail: pickNames(raw) || "Artilheiro", tone: "ok" };
+  }
+  if (/api paga — não achou/i.test(raw)) {
     return {
-      kind: "AGUARDA",
-      api: "API paga",
-      result: "Aguardando",
-      detail: sec ? `Consulta em ~${sec}s` : "Consulta em breve",
-      tone: "wait",
+      kind: "CONSULTA GOL", api: "API paga", result: "Não achou",
+      detail: tentativa ? `Tentativa ${tentativa[1]}/${tentativa[2]}` : "Sem artilheiro",
+      tone: "retry",
     };
   }
-
-  if (retryMatch || raw.toLowerCase().includes("retry") || raw.includes("re-tentando")) {
-    const n = retryMatch ? Number(retryMatch[1]) : undefined;
-    const max = retryMatch ? Number(retryMatch[2]) : retryMax;
-    const passed = n !== undefined && n >= max;
+  if (/api paga — sem cota/i.test(raw)) {
+    return { kind: "CONSULTA GOL", api: "API paga", result: "Sem cota", detail: "Vai para SportsDB", tone: "warn" };
+  }
+  if (/api paga — erro/i.test(raw)) {
+    return { kind: "CONSULTA GOL", api: "API paga", result: "Erro", detail: "Erro na resposta", tone: "err" };
+  }
+  if (/sportsdb fallback — motivo/i.test(raw)) {
+    const motivo = raw.match(/motivo:\s*(.+)/i)?.[1] ?? "";
+    return { kind: "FALLBACK", api: "SportsDB", result: "Chamou", detail: motivo, tone: "call" };
+  }
+  if (/sportsdb — achou/i.test(raw)) {
+    return { kind: "FALLBACK", api: "SportsDB", result: "Achou", detail: pickNames(raw), tone: "ok" };
+  }
+  if (/sportsdb — não achou/i.test(raw)) {
     return {
-      kind: "RETRY",
-      api: "API paga",
-      result: passed ? "Passou" : "Não achou",
-      detail: passed ? `Esgotou ${max} tentativas` : `Tentativa ${n ?? "?"}/${max} sem artilheiro`,
-      tone: passed ? "skip" : "retry",
+      kind: "FALLBACK", api: "SportsDB", result: "Não achou",
+      detail: tentativa ? `Tentativa ${tentativa[1]}/${tentativa[2]}` : "—",
+      tone: "retry",
     };
   }
-
-  if (/^→\s*chamada|consulta api paga/i.test(raw)) {
-    const confirm = isFim || raw.includes("fim") || raw.includes("confirmação");
-    return {
-      kind: confirm ? "CONFIRMAÇÃO" : "CONSULTA GOL",
-      api: "API paga",
-      result: "Chamou",
-      detail: confirm ? "Confirma artilheiros no fim" : "Busca quem marcou o gol",
-      tone: "call",
-    };
+  if (/sportsdb — passou/i.test(raw)) {
+    return { kind: "FALLBACK", api: "SportsDB", result: "Passou", detail: "Aguarda próximo gol", tone: "skip" };
   }
-
-  if (apiKey === "API-Football" || /api.paga|api-football/i.test(raw)) {
-    if (ev.ok === true && /achou|artilheiro|fim\s+\d/i.test(raw)) {
-      const names = pickNames(raw);
-      const confirm = isFim || raw.includes("fim ");
-      return {
-        kind: confirm ? "CONFIRMAÇÃO" : "CONSULTA GOL",
-        api: "API paga",
-        result: "Achou",
-        detail: names || "Artilheiro confirmado",
-        tone: "ok",
-      };
-    }
-    if (ev.ok === false) {
-      if (/sem cota|limite/i.test(raw)) {
-        return { kind: "CONSULTA GOL", api: "API paga", result: "Sem cota", detail: "Vai tentar SportsDB", tone: "warn" };
-      }
-      if (/sem goleador|não achou|não achado/i.test(raw)) {
-        const n = retryMatch ? Number(retryMatch[1]) : undefined;
-        const max = retryMatch ? Number(retryMatch[2]) : retryMax;
-        if (n !== undefined && n >= max) {
-          return { kind: "RETRY", api: "API paga", result: "Passou", detail: `Esgotou ${max} tentativas`, tone: "skip" };
-        }
-        return {
-          kind: isFim ? "CONFIRMAÇÃO" : "CONSULTA GOL",
-          api: "API paga",
-          result: "Não achou",
-          detail: n ? `Tentativa ${n}/${max}` : "Sem artilheiro",
-          tone: "err",
-        };
-      }
-      return {
-        kind: isFim ? "CONFIRMAÇÃO" : "CONSULTA GOL",
-        api: "API paga",
-        result: "Não achou",
-        detail: raw,
-        tone: "err",
-      };
-    }
+  if (/ia — consulta/i.test(raw)) {
+    const src = raw.match(/\(([^)]+)\)/)?.[1] ?? "";
+    return { kind: "IA", api: "IA", result: "Chamou", detail: src || "Cruza fontes", tone: "ia" };
   }
-
-  if (/sem cota.*sportsdb|passando para sportsdb/i.test(raw)) {
-    return { kind: "SEM COTA", api: "API paga", result: "Fallback", detail: "Passando para SportsDB", tone: "warn" };
+  if (/ia — resultado/i.test(raw)) {
+    return { kind: "IA", api: "IA", result: "Salvou", detail: pickNames(raw) || "—", tone: "ok" };
   }
-
-  if (/limite por minuto/i.test(raw)) {
-    return { kind: "AGUARDA", api: "API paga", result: "Aguardando", detail: "Limite por minuto", tone: "wait" };
+  if (/ia —/i.test(raw) && ev.ok === false) {
+    return { kind: "IA", api: "IA", result: "Falhou", detail: raw.replace(/^ia —\s*/i, ""), tone: "err" };
   }
-
-  if (/passou.*próximo gol/i.test(raw)) {
-    return { kind: "PASSOU", api: "SportsDB", result: "Passou", detail: "Aguarda próximo gol", tone: "skip" };
-  }
-
-  if (/sportsdb fallback.*tentativa/i.test(raw)) {
-    const m = raw.match(/tentativa\s*(\d+)\s*\/\s*(\d+)/i);
-    return {
-      kind: "FALLBACK",
-      api: "SportsDB",
-      result: "Chamou",
-      detail: m ? `Tentativa ${m[1]}/${m[2]}` : "Consulta artilheiro",
-      tone: "call",
-    };
-  }
-
-  if (apiKey === "TheSportsDB" || /thesportsdb|sportsdb/i.test(raw)) {
-    if (ev.ok === true && /achou/i.test(raw)) {
-      return {
-        kind: isReconf ? "RECONFIRMAÇÃO" : "FALLBACK",
-        api: "SportsDB",
-        result: "Achou",
-        detail: pickNames(raw) || "Artilheiro encontrado",
-        tone: "ok",
-      };
-    }
-    if (ev.ok === false) {
-      return {
-        kind: isReconf ? "RECONFIRMAÇÃO" : "FALLBACK",
-        api: "SportsDB",
-        result: isReconf ? "Não achou" : "Passou",
-        detail: isReconf ? "Sem artilheiro na reconfirmação" : "Não achou, segue sem artilheiro",
-        tone: isReconf ? "err" : "skip",
-      };
-    }
-  }
-
-  if (apiKey === "IA merge" || /ia merge|ia —/i.test(raw)) {
-    if (ev.cached) {
-      return { kind: "IA", api: "IA", result: "Cache", detail: pickNames(raw) || "Mesma resposta de antes", tone: "ia-cache" };
-    }
-    if (/^→\s*chamada|consulta ia/i.test(raw)) {
-      return { kind: "IA", api: "IA", result: "Chamou", detail: "Cruza fontes e elenco", tone: "ia" };
-    }
-    if (ev.ok === true) {
-      return { kind: "IA", api: "IA", result: "Achou", detail: pickNames(raw) || "Artilheiros definidos", tone: "ok" };
-    }
-    if (ev.ok === false) {
-      return { kind: "IA", api: "IA", result: "Não achou", detail: raw || "Falhou", tone: "err" };
-    }
-  }
-
-  if (isReconf || /re-confirmado|reconfirmação/i.test(raw)) {
-    return {
-      kind: "RECONFIRMAÇÃO",
-      api: "SportsDB + IA",
-      result: ev.ok === false ? "Falhou" : "OK",
-      detail: raw.replace(/re-confirmado/i, "Reconfirmado").replace(/divergência/i, "Divergência"),
-      tone: ev.ok === false ? "err" : "ok",
-    };
-  }
-
-  if (/encerrado|finaliz/i.test(raw) || (isFim && apiKey === "football-data")) {
+  if (/finalização|encerrado/i.test(raw) && !isReconf) {
     const score = raw.match(/(\d+-\d+)/)?.[1];
-    return {
-      kind: "FINALIZAÇÃO",
-      api: "API grátis",
-      result: "OK",
-      detail: score ? `Placar final ${score}` : "Jogo encerrou",
-      tone: "milestone",
-    };
+    return { kind: "FINALIZAÇÃO", api: "API grátis", result: "OK", detail: score ? `Placar ${score}` : "Jogo encerrou", tone: "milestone" };
   }
-
-  if (/encerrado por tempo/i.test(raw)) {
-    const score = raw.match(/(\d+-\d+)/)?.[1];
-    return { kind: "FINALIZAÇÃO", api: "Sistema", result: "Auto", detail: score ? `Placar ${score}` : "Encerrado por tempo", tone: "milestone" };
+  if (/confirmação final|consulta api paga — confirmação/i.test(raw)) {
+    return { kind: "CONFIRMAÇÃO", api: "API paga", result: "Chamou", detail: "Confirma no fim", tone: "call" };
+  }
+  if (isFim && /api paga — achou/i.test(raw)) {
+    return { kind: "CONFIRMAÇÃO", api: "API paga", result: "Achou", detail: pickNames(raw), tone: "ok" };
+  }
+  if (/reconfirmação/i.test(raw)) {
+    return {
+      kind: "RECONFIRMAÇÃO", api: "SportsDB + IA",
+      result: ev.ok === false ? "Incompleto" : "OK",
+      detail: pickNames(raw) || raw.replace(/^reconfirmação[^:]*:?\s*/i, ""),
+      tone: ev.ok === false ? "warn" : "ok",
+    };
   }
 
   return {
-    kind: "REGISTRO",
-    api,
+    kind: "—",
+    api: (API_LABEL[apiKey] ?? apiKey) || "—",
     result: ev.ok === true ? "OK" : ev.ok === false ? "Falhou" : "—",
-    detail: raw || "—",
+    detail: raw.slice(0, 60) || "—",
     tone: ev.ok === false ? "err" : "plain",
   };
 }
@@ -305,7 +223,7 @@ function buildConfirmSteps(evs: GameEvent[], game: GameRow, retryMax: number): C
   const fimPaga = lastOf(c, (e) => e.phase === "fim" && e.api === "API-Football" && e.ok === true);
   const fimPagaFail = lastOf(c, (e) => e.phase === "fim" && e.api === "API-Football" && e.ok === false);
   const fimIa = lastOf(c, (e) => e.phase === "fim" && e.api === "IA merge" && e.ok === true);
-  const reconf = lastOf(c, (e) => e.phase === "reconfirmacao" && /re-confirmado|reconfirmação/i.test(e.action));
+  const reconf = lastOf(c, (e) => e.phase === "reconfirmacao" && /reconfirmação/i.test(e.action));
   const reconfTsdOk = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "TheSportsDB" && e.ok === true);
   const reconfTsdFail = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "TheSportsDB" && e.ok === false);
   const reconfIa = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "IA merge");
@@ -327,13 +245,13 @@ function buildConfirmSteps(evs: GameEvent[], game: GameRow, retryMax: number): C
   }
 
   if (fimPaga) {
-    const iaNames = fimIa ? pickNames(cleanText(fimIa.action)) : "";
+    const fimIaNames = fimIa ? pickNames(cleanText(fimIa.action)) : "";
     steps.push({
       title: "Confirmação",
       status: "ok",
       when: timeFull(fimPaga.at),
       who: "API paga + IA",
-      detail: [pickNames(cleanText(fimPaga.action)), iaNames ? `IA: ${iaNames}` : fimIa?.cached ? "IA (cache)" : ""]
+      detail: [pickNames(cleanText(fimPaga.action)), fimIaNames ? `IA: ${fimIaNames}` : ""]
         .filter(Boolean)
         .join(" · "),
     });
@@ -353,7 +271,7 @@ function buildConfirmSteps(evs: GameEvent[], game: GameRow, retryMax: number): C
     const parts: string[] = [];
     if (reconfTsdOk) parts.push(`SportsDB: ${pickNames(cleanText(reconfTsdOk.action))}`);
     if (reconfTsdFail) parts.push("SportsDB: não achou");
-    if (reconfIa?.ok) parts.push(reconfIa.cached ? "IA (cache)" : `IA: ${pickNames(cleanText(reconfIa.action))}`);
+    if (reconfIa?.ok) parts.push(`IA: ${pickNames(cleanText(reconfIa.action))}`);
     if (reconf.action.includes("divergência")) parts.push("Divergência detectada");
     steps.push({
       title: "Reconfirmação",
@@ -369,40 +287,30 @@ function buildConfirmSteps(evs: GameEvent[], game: GameRow, retryMax: number): C
   return steps;
 }
 
-function FlowDiagram({ retryMax, tsdRetryMax, goalGap }: { retryMax: number; tsdRetryMax: number; goalGap: number }) {
+function FlowDiagram({ retryMax, tsdRetryMax }: { retryMax: number; tsdRetryMax: number }) {
   return (
     <div className="wc-flow-diagram">
       <div className="wc-flow-steps">
         <div className="wc-flow-step">
-          <span className="wc-flow-kind">Início / Intervalo / Fim</span>
+          <span className="wc-flow-kind">Início / Gol / Intervalo / Fim</span>
           <span className="wc-flow-api free">API grátis</span>
         </div>
-        <div className="wc-flow-arrow-v">↓ gol</div>
+        <div className="wc-flow-arrow-v">↓ gol detectado</div>
         <div className="wc-flow-step">
           <span className="wc-flow-kind">Consulta artilheiro</span>
           <span className="wc-flow-api paid">API paga</span>
-        </div>
-      <div className="wc-flow-arrow-v">↓ não achou (até {retryMax}x) ou sem cota</div>
-      <div className="wc-flow-step">
-        <span className="wc-flow-kind">Fallback SportsDB</span>
-        <span className="wc-flow-api tsd">SportsDB</span>
-        <span className="wc-flow-api ia">IA</span>
-      </div>
-      <div className="wc-flow-arrow-v">↓ não achou (até {tsdRetryMax}x) → passou</div>
-        <div className="wc-flow-step">
-          <span className="wc-flow-kind">Confirmação final</span>
-          <span className="wc-flow-api paid">API paga</span>
           <span className="wc-flow-api ia">IA</span>
         </div>
-        <div className="wc-flow-arrow-v">↓ +10 min</div>
+        <div className="wc-flow-arrow-v">↓ não achou ({retryMax}x) ou sem cota</div>
         <div className="wc-flow-step">
-          <span className="wc-flow-kind">Reconfirmação</span>
+          <span className="wc-flow-kind">Fallback</span>
           <span className="wc-flow-api tsd">SportsDB</span>
           <span className="wc-flow-api ia">IA</span>
         </div>
+        <div className="wc-flow-arrow-v">↓ fim → confirmação API paga + IA → +10min reconf</div>
       </div>
       <p className="wc-flow-note">
-        Gol → espera ~{goalGap}s → API paga ({retryMax}x) → SportsDB ({tsdRetryMax}x) → IA merge. Cache de IA não gasta chamada nova.
+        Cota API paga reseta 00:00 UTC. Máx ~10 chamadas/jogo. IA sempre que acha artilheiro (paga ou fallback).
       </p>
     </div>
   );
@@ -436,9 +344,7 @@ function ConfirmStepCard({ step }: { step: ConfirmStep }) {
 }
 
 function iaStats(evs: GameEvent[]) {
-  const real = evs.filter((e) => e.api === "IA merge" && /^→\s*chamada|consulta ia/i.test(e.action)).length;
-  const cache = evs.filter((e) => e.api === "IA merge" && e.cached).length;
-  return { real, cache };
+  return evs.filter((e) => e.api === "IA merge" && /ia —/i.test(e.action)).length;
 }
 
 export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePanelProps) {
@@ -448,7 +354,6 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
   const cadence = syncStatus.cadence;
   const fast = Boolean(cadence?.live_now ?? syncStatus.live_now);
   const loopSec = cadence?.loop_seconds ?? syncStatus.interval_seconds ?? (fast ? 30 : 600);
-  const goalGap = cadence?.live_poll_gap_seconds ?? 60;
   const retryMax = cadence?.live_retry_max ?? 2;
   const tsdRetryMax = cadence?.tsd_live_retry_max ?? 2;
 
@@ -531,9 +436,8 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
     return map;
   }, [syncStatus.game_events]);
 
-  const iaToday = syncStatus.requests_today?.ai_reconcile?.calls ?? 0;
-  const iaInsightToday = syncStatus.requests_today?.ai_insight?.calls ?? 0;
-  const tsdToday = syncStatus.requests_today?.thesportsdb?.calls ?? 0;
+  const apiPaid = syncStatus.requests_today?.api_football;
+  const apiRem = apiPaid?.remaining ?? syncStatus.sources?.api_football_daily_remaining;
   const activeGames = games.filter((g) => g.status === "live" || g.status === "finished");
 
   return (
@@ -554,26 +458,26 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
           </strong>
           <span className="wc-dash-hero-sub">
             Próximo ciclo {inLabel(cadence?.last_sync_at ?? syncStatus.last_sync, loopSec, currentTime)}
-            {cadence?.goal_pending && ` · gol pendente · paga em ~${goalGap}s`}
+            {cadence?.goal_pending && " · artilheiro pendente"}
           </span>
         </div>
         <div className="wc-dash-hero-stats">
           <div className="wc-dash-stat">
-            <span className="wc-dash-stat-k"><Activity size={11} /> Ao vivo</span>
-            <strong>{syncStatus.totals.live_games ?? 0}</strong>
+            <span className="wc-dash-stat-k">API paga</span>
+            <strong>{apiRem ?? "—"} rest.</strong>
           </div>
           <div className="wc-dash-stat">
-            <span className="wc-dash-stat-k"><Database size={11} /> SportsDB</span>
-            <strong>{tsdToday}</strong>
+            <span className="wc-dash-stat-k">Ciclo</span>
+            <strong>{fast ? "30s" : "10min"}</strong>
           </div>
           <div className="wc-dash-stat">
-            <span className="wc-dash-stat-k"><Bot size={11} /> IA chamadas</span>
-            <strong>{iaToday}</strong>
+            <span className="wc-dash-stat-k">Pendente</span>
+            <strong>{cadence?.goal_pending ? "Sim" : "Não"}</strong>
           </div>
         </div>
       </div>
 
-      <FlowDiagram retryMax={retryMax} tsdRetryMax={tsdRetryMax} goalGap={goalGap} />
+      <FlowDiagram retryMax={retryMax} tsdRetryMax={tsdRetryMax} />
 
       {activeGames.length > 0 && (
         <section className="wc-dash-games">
@@ -582,10 +486,10 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
             {activeGames.map((game) => {
               const key = eventKey(game);
               const evs = eventsByGame.get(game.match_number ?? `${game.home_team} x ${game.away_team}`) ?? [];
-              const chronological = chrono(evs);
+              const chronological = compactTimeline(evs, retryMax);
               const timelineOpen = openTimeline === key;
               const confirmOpen = openConfirm === key;
-              const ia = iaStats(evs);
+              const iaCount = iaStats(evs);
               const confirmSteps = buildConfirmSteps(evs, game, retryMax);
               const hasErr = evs.some((e) => e.ok === false);
 
@@ -604,7 +508,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
                       </span>
                       <span className="wc-dash-chip paid">Paga {game.polls?.api_football ?? 0}x</span>
                       <span className="wc-dash-chip tsd">SportsDB {game.polls?.thesportsdb ?? 0}x</span>
-                      <span className="wc-dash-chip ia">IA {ia.real} cham. / {ia.cache} cache</span>
+                      {iaCount > 0 && <span className="wc-dash-chip ia">IA {iaCount}x</span>}
                     </div>
                     {game.scorers && (
                       <div className="wc-dash-game-scorers"><Goal size={12} /> {game.scorers}</div>
@@ -670,7 +574,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
 
       {syncStatus.requests_today && (
         <section className="wc-dash-apis">
-          <div className="wc-dash-section-title detail">Cotas hoje · IA resenha: {iaInsightToday}</div>
+          <div className="wc-dash-section-title detail">Cotas hoje (reset 00:00 UTC)</div>
           <div className="wc-dash-apis-grid">
             {Object.entries(syncStatus.requests_today).map(([key, r]) => (
               <div className="wc-api-card" key={key}>
