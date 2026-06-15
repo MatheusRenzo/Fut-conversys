@@ -12690,6 +12690,79 @@ img.team-flag {
 .wc-dash-pulse.on { color: #ffb3d4; background: rgba(227,28,121,0.2); animation: wcPulse 1.6s ease-in-out infinite; }
 @keyframes wcPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 .wc-dash-hero-sub { font-size: 0.72rem; color: var(--text-soft, #c7d0dd); }
+.wc-dash-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 1rem; color: #fff; }
+.wc-dash-mode-badge {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 0.68rem; font-weight: 900;
+  padding: 3px 9px; border-radius: 999px; letter-spacing: 0.03em;
+}
+.wc-dash-mode-badge.fast { background: rgba(227,28,121,0.22); color: #ffb3d4; }
+.wc-dash-mode-badge.slow { background: rgba(43,108,255,0.18); color: #aec4ff; }
+.wc-dash { display: flex; flex-direction: column; gap: 14px; max-height: min(72vh, 640px); overflow-y: auto; padding-right: 2px; }
+.wc-dash-games, .wc-dash-game-list { display: flex; flex-direction: column; gap: 8px; }
+.wc-dash-game-card {
+  border-radius: 14px; padding: 10px 12px; background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 6px;
+}
+.wc-dash-game-card.live { border-color: rgba(227,28,121,0.38); background: rgba(227,28,121,0.06); }
+.wc-dash-game-card.finished { opacity: 0.94; }
+.wc-dash-game-head { display: flex; flex-direction: column; gap: 6px; }
+.wc-dash-game-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wc-dash-game-num, .wc-dash-game-time { font-size: 0.62rem; font-weight: 800; color: var(--muted); }
+.wc-dash-game-match {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 6px;
+  font-size: 0.78rem; font-weight: 700; color: #e8eefc;
+}
+.wc-dash-game-match span:first-child { text-align: right; }
+.wc-dash-game-score { font-size: 1rem; font-weight: 950; color: #fff; font-variant-numeric: tabular-nums; }
+.wc-dash-game-scorers { display: flex; align-items: center; gap: 5px; font-size: 0.68rem; color: var(--brand-green); font-weight: 700; }
+.wc-dash-game-hint { font-size: 0.66rem; color: var(--muted); }
+.wc-dash-game-hint.muted { font-style: italic; }
+.wc-dash-drop {
+  width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.2); cursor: pointer;
+  font: inherit; color: inherit; text-align: left;
+}
+.wc-dash-drop span { font-size: 0.72rem; font-weight: 900; color: #fff; }
+.wc-dash-drop small { font-size: 0.62rem; color: var(--muted); margin-right: auto; }
+.wc-dash-drop-chevron { margin-left: auto; transition: transform 0.15s ease; color: var(--muted); }
+.wc-dash-drop.open .wc-dash-drop-chevron { transform: rotate(180deg); }
+.wc-dash-drop.confirm { border-color: rgba(57,217,138,0.2); }
+.wc-dash-drop-body {
+  display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; margin-top: -2px;
+  border-radius: 0 0 10px 10px; background: rgba(0,0,0,0.28); border: 1px solid rgba(255,255,255,0.06); border-top: 0;
+}
+.wc-dash-drop-body.confirm { border-color: rgba(57,217,138,0.15); }
+.wc-dash-event { display: grid; grid-template-columns: 44px 1fr; gap: 8px; font-size: 0.68rem; padding: 3px 0; }
+.wc-dash-event-time { font-weight: 800; color: var(--muted); font-variant-numeric: tabular-nums; }
+.wc-dash-event-text { color: #e8eefc; line-height: 1.4; }
+.wc-dash-polls, .wc-dash-empty { font-size: 0.64rem; color: var(--muted); margin: 4px 0 0; }
+.wc-dash-confirm-step { display: grid; grid-template-columns: 110px 1fr; gap: 8px; font-size: 0.68rem; padding: 3px 0; }
+.wc-dash-confirm-step .lbl { color: var(--muted); font-weight: 800; }
+.wc-dash-confirm-step .ok { color: var(--brand-green); font-weight: 700; }
+.wc-dash-confirm-step .wait { color: #ffc879; font-weight: 700; }
+.wc-dash-confirm-step .muted { color: var(--muted); }
+.wc-dash-confirm-sources { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.wc-dash-src-chip {
+  font-size: 0.58rem; font-weight: 900; padding: 2px 7px; border-radius: 999px;
+  background: rgba(57,217,138,0.14); color: var(--brand-green);
+}
+.wc-admin-modal { max-width: 520px; width: min(100%, 520px); max-height: 92vh; overflow: hidden; display: flex; flex-direction: column; }
+.wc-admin-modal .modal-head { flex-shrink: 0; }
+.wc-admin-modal .wc-champion-form { flex-shrink: 0; margin-top: 8px; }
+@media (max-width: 560px) {
+  .wc-admin-backdrop { align-items: flex-end; padding: 0; }
+  .wc-admin-modal {
+    width: 100%; max-width: 100%; max-height: 94vh; border-radius: 18px 18px 0 0;
+    margin: 0; animation: wcAdminSlideUp 0.22s ease;
+  }
+  .wc-dash { max-height: calc(94vh - 140px); }
+  .wc-dash-confirm-step { grid-template-columns: 1fr; gap: 2px; }
+  .wc-dash-game-match { font-size: 0.72rem; }
+}
+@keyframes wcAdminSlideUp {
+  from { transform: translateY(100%); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
 .wc-dash-hero-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
 .wc-dash-stat {
   display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 11px;

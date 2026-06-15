@@ -1946,13 +1946,23 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
         if remote_status in ("IN_PLAY", "PAUSED") and has_score:
             lh, la = int(item["home_score"]), int(item["away_score"])
             if game.status in ("scheduled", "live") or game.status is None:
+                old_total = (game.home_score or 0) + (game.away_score or 0)
                 if game.home_score != lh or game.away_score != la or game.status != "live":
                     game.home_score = lh
                     game.away_score = la
                     game.status = "live"
                     status["filled"] += 1
+                # GOL detectado pela football-data (placar subiu) → registra na timeline;
+                # a busca do autor (API-Football/failover) é disparada no apply_api_football_live
+                if (lh + la) > old_total:
+                    log_game_event(db, game, f"⚽ gol! placar {lh}-{la} (football-data) — buscando autor")
                 # INTERVALO: football-data manda PAUSED no intervalo
+                was_ht = bool(game.halftime)
                 game.halftime = (remote_status == "PAUSED")
+                if game.halftime and not was_ht:
+                    log_game_event(db, game, "⏸ intervalo")
+                elif was_ht and not game.halftime:
+                    log_game_event(db, game, "▶ 2º tempo")
             continue
         finished_remote = remote_status in ("FINISHED", "AWARDED") and has_score
         if not finished_remote:
@@ -2401,6 +2411,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     pending += [g for g in stuck_live if g.id not in seen and g.api_fixture_id] if has_keys else []
 
     for game in pending:
+        log_game_event(db, game, "→ chamada API-Football (fim do jogo — confirmação final)")
         payload = call(f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}")
         if payload is None:
             break
@@ -2512,6 +2523,12 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         paid_ok = has_keys and api_football_total_remaining(db) > API_FOOTBALL_DAILY_RESERVE + 1 and api_football_pick_key(db) is not None
         if gap_ok and paid_ok:
             # PAGA: 1 chamada cobre todos os jogos rolando
+            for game in pending_live:
+                sc, n = polled_info(game)
+                if sc != f"{game.home_score or 0}-{game.away_score or 0}":
+                    log_game_event(db, game, "→ chamada API-Football (gol detectado)")
+                elif n > 0:
+                    log_game_event(db, game, f"↻ retry {n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX} API-Football — sem goleador ainda")
             payload = call(API_FOOTBALL_LIVE_URL)
             if payload:
                 set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
@@ -2532,6 +2549,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                     ))
                     if not item:
                         status["retries"] += 1
+                        log_game_event(db, game, "✗ API-Football respondeu — jogo não achado no live=all")
                         mark_polled(game)  # tentou, não achou ainda → conta retry
                         continue
                     bump_game_poll(db, game.id, "af")
@@ -2549,15 +2567,18 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                         if new_s != (game.scorers or ""):
                             game.scorers = new_s
                             status["scorers_updated"] += 1
-                            log_game_event(db, game, f"⚽ AO VIVO {game.home_score}-{game.away_score} · {new_s}")
+                            log_game_event(db, game, f"⚽ goleador: {new_s} (API-Football respondeu)")
                     else:
                         status["retries"] += 1
+                        sc, n = polled_info(game)
+                        log_game_event(db, game, f"✗ API-Football sem goleador (retry {n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX})")
                     status["mid_checks"] += 1
                     mark_polled(game)
         elif gap_ok and not paid_ok:
             # FAILOVER: paga sem cota → goleador ao vivo pela TheSportsDB (grátis)
             status["skipped"] = "paga sem cota — failover TheSportsDB ao vivo"
             for game in pending_live:
+                log_game_event(db, game, "⚠ paga sem cota → failover TheSportsDB")
                 if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
                     break
                 status["tsd_calls"] += 1
@@ -2569,9 +2590,10 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                     if new_s != (game.scorers or ""):
                         game.scorers = new_s
                         status["scorers_updated"] += 1
-                        log_game_event(db, game, f"⚽ AO VIVO (failover TheSportsDB) {game.home_score}-{game.away_score} · {new_s}")
+                        log_game_event(db, game, f"⚽ goleador: {new_s} (failover TheSportsDB — paga sem cota)")
                 else:
                     status["retries"] += 1
+                    log_game_event(db, game, "✗ TheSportsDB sem goleador (failover)")
                 mark_polled(game)
             set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
 

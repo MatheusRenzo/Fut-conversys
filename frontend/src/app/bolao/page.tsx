@@ -23,6 +23,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { AdminLivePanel } from "@/components/AdminLivePanel";
 import { AppShell } from "@/components/AppShell";
 import { Avatar } from "@/components/Avatar";
 import { TeamFlag } from "@/components/TeamFlag";
@@ -138,34 +139,6 @@ function countdownParts(targetIso: string, now: number) {
 
 function pad(value: number) {
   return String(value).padStart(2, "0");
-}
-
-// "há 12s" / "há 3min" / "há 2h" a partir de um ISO
-function agoLabel(iso: string | null | undefined, now: number) {
-  if (!iso) return "—";
-  const diff = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 1000));
-  if (diff < 60) return `há ${diff}s`;
-  if (diff < 3600) return `há ${Math.floor(diff / 60)}min`;
-  return `há ${Math.floor(diff / 3600)}h`;
-}
-
-// contagem regressiva "em 8s" / "em 2min" para a próxima atualização
-function inLabel(lastIso: string | null | undefined, gapSeconds: number | undefined, now: number) {
-  if (!gapSeconds) return "—";
-  const base = lastIso ? new Date(lastIso).getTime() : now;
-  const remaining = Math.max(0, Math.round((base + gapSeconds * 1000 - now) / 1000));
-  if (remaining <= 0) return "no próximo ciclo";
-  if (remaining < 60) return `em ${remaining}s`;
-  return `em ${Math.floor(remaining / 60)}min ${pad(remaining % 60)}s`;
-}
-
-function timeHM(iso: string | null | undefined) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "America/Sao_Paulo",
-  });
 }
 
 function minutesUntilBetClose(game: WorldCupGame, now: number) {
@@ -777,7 +750,6 @@ export default function BolaoPage() {
   const [resultDraft, setResultDraft] = useState<ResultDraft>({ home: "0", away: "0", scorers: "" });
   const [savingResult, setSavingResult] = useState(false);
   const [adminModalOpen, setAdminModalOpen] = useState(false);
-  const [expandedAdminGame, setExpandedAdminGame] = useState<number | null>(null);
   const [rankingModalOpen, setRankingModalOpen] = useState(false);
   const [myBetsModalOpen, setMyBetsModalOpen] = useState(false);
   const [championQuery, setChampionQuery] = useState("");
@@ -859,8 +831,7 @@ export default function BolaoPage() {
           if (active) setSyncStatusError(nextError instanceof Error ? nextError.message : "Não foi possível carregar o status");
         });
     load();
-    // re-busca a cada 10s enquanto o painel está aberto (dashboard ao vivo)
-    const poll = window.setInterval(load, 10_000);
+    const poll = window.setInterval(load, 15_000);
     return () => {
       active = false;
       window.clearInterval(poll);
@@ -2077,184 +2048,20 @@ export default function BolaoPage() {
       )}
 
       {adminModalOpen && (
-        <div className="event-modal-backdrop" onClick={() => setAdminModalOpen(false)}>
-          <div className="event-modal glass-panel wc-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="event-modal-backdrop wc-admin-backdrop" onClick={() => setAdminModalOpen(false)}>
+          <div className="event-modal glass-panel wc-modal wc-admin-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
                 <span className="eyebrow">Admin</span>
-                <h2>Gerenciar bolão</h2>
+                <h2>Painel ao vivo</h2>
               </div>
               <button className="modal-close" onClick={() => setAdminModalOpen(false)} type="button">
                 <X size={18} />
               </button>
             </div>
 
-            {syncStatusError && <p className="bolao-feedback error">{syncStatusError}</p>}
             {syncStatus ? (
-              <div className="wc-tech">
-                {(() => {
-                  const cad = syncStatus.cadence;
-                  const lastOk = syncStatus.games_sync?.ok !== false;
-                  const health = syncStatus.games_health ?? [];
-                  const pendentes = health.filter((g) => g.status === "finished" && !g.scorers_final);
-                  const verdictOk = lastOk && pendentes.length === 0;
-                  return (
-                    <div className={verdictOk ? "wc-tech-verdict ok" : "wc-tech-verdict warn"}>
-                      <strong>{verdictOk ? "✓ RODANDO CERTINHO" : "⚠ VERIFICAR"}</strong>
-                      <span>
-                        {syncStatus.live_now ? "AO VIVO" : "EM ESPERA"} · última sync{" "}
-                        {agoLabel(cad?.last_sync_at ?? syncStatus.last_sync, currentTime)} · próxima{" "}
-                        {inLabel(cad?.last_sync_at ?? syncStatus.last_sync, cad?.loop_seconds, currentTime)}
-                        {!lastOk && " · ÚLTIMO CICLO FALHOU"}
-                        {pendentes.length > 0 && ` · ${pendentes.length} jogo(s) sem goleador completo`}
-                      </span>
-                    </div>
-                  );
-                })()}
-
-                {/* ===== FLUXO / ETAPAS (as novas regras) ===== */}
-                <div className="wc-tech-block">
-                  <div className="wc-tech-h">Como funciona — etapas (já valendo)</div>
-                  <div className="wc-tech-flow">
-                    <div><span className="n">1</span> Placar · <b>intervalo</b> · fim → <b>football-data</b> (grátis, a cada {syncStatus.cadence?.loop_seconds ?? 30}s)</div>
-                    <div><span className="n">2</span> Gol detectado → <b>API-Football</b> pega o nome na hora (só no gol, com retry) · sem cota? <b>failover TheSportsDB</b></div>
-                    <div><span className="n">3</span> Fim do jogo → <b>API-Football</b> roda 1× e pega <b>todos</b> os goleadores (confirmação final)</div>
-                    <div><span className="n">4</span> +10 min → <b>TheSportsDB + openfootball + IA</b> re-confirmam e marcam quantas fontes batem</div>
-                    <div className="rule">Regra de ouro: a lista de goleadores só cresce (nunca perde) · todo nome é casado com o elenco oficial · limites nunca estouram.</div>
-                  </div>
-                </div>
-
-                {/* ===== FONTES & LIMITES — uso hoje ===== */}
-                {syncStatus.requests_today && (
-                  <div className="wc-tech-block">
-                    <div className="wc-tech-h">Fontes & limites — uso hoje</div>
-                    {Object.entries(syncStatus.requests_today).map(([key, r]) => {
-                      const names: Record<string, string> = {
-                        football_data: "football-data", api_football: "API-Football",
-                        thesportsdb: "TheSportsDB", ai_reconcile: "IA · confirma goleador", ai_insight: "IA · resenha do card",
-                      };
-                      const role: Record<string, string> = {
-                        football_data: "placar · intervalo · fim", api_football: "nome do goleador (paga)",
-                        thesportsdb: "2ª confirmação + failover", ai_reconcile: "≈2 por jogo (cacheada)", ai_insight: "card de palpite",
-                      };
-                      const limit = r.daily_cap
-                        ? `${r.limit_per_min ?? "?"}/min · ${r.daily_cap}/dia`
-                        : r.limit_per_min ? `${r.limit_per_min}/min` : "ilimitada";
-                      return (
-                        <div className="wc-tech-row" key={key}>
-                          <span className="k">{names[key] ?? key}</span>
-                          <span className="d">{role[key]}</span>
-                          <span className="v">{r.calls}{r.daily_cap ? `/${r.daily_cap}` : ""}{r.remaining != null ? ` · sobra ${r.remaining}` : ""}</span>
-                          <span className="lim">{limit}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* ===== AO VIVO AGORA ===== */}
-                {(syncStatus.games_health ?? []).some((g) => g.status === "live") && (
-                  <div className="wc-tech-block">
-                    <div className="wc-tech-h">🔴 Ao vivo agora — toque pra ver o histórico</div>
-                    {(syncStatus.games_health ?? []).filter((g) => g.status === "live").map((g, i) => {
-                      const af = g.polls?.api_football ?? 0;
-                      const tsd = g.polls?.thesportsdb ?? 0;
-                      const complete = (g.goals ?? 0) === 0 || g.scorers_complete;
-                      const open = expandedAdminGame === (g.match_number ?? -i - 1);
-                      const evs = (syncStatus.game_events ?? []).filter((e) => e.match_number === g.match_number);
-                      return (
-                        <div className="wc-tech-live" key={i}>
-                          <button className="wc-tech-live-top wc-tech-clickable" type="button"
-                            onClick={() => setExpandedAdminGame(open ? null : (g.match_number ?? -i - 1))}>
-                            <span className="lv">● RODANDO</span>
-                            {g.halftime && <span className="ht">⏸ INTERVALO</span>}
-                            <span className="mt">{g.match_number ? `#${g.match_number} ` : ""}{g.matchup}</span>
-                            <span className="sc">{g.score ?? "0-0"}</span>
-                            <span className="exp">{open ? "▾" : "▸"}</span>
-                          </button>
-                          <div className="wc-tech-live-sc">
-                            {(g.goals ?? 0) === 0 ? (
-                              <span className="no">sem gol ainda</span>
-                            ) : complete ? (
-                              <span className="ok">✓ artilheiro: {g.scorers || "—"} (paga trouxe após o gol · API-Football ×{af})</span>
-                            ) : (
-                              <span className="wait">⏳ buscando artilheiro do gol… (retry · API-Football ×{af})</span>
-                            )}
-                          </div>
-                          {open && (
-                            <div className="wc-tech-detail">
-                              <div className="hist">chamadas de API neste jogo: API-Football ×{af} · TheSportsDB ×{tsd}</div>
-                              {evs.length ? evs.map((ev, j) => (
-                                <div className="wc-tech-logrow" key={j}><span className="t">{timeHM(ev.at)}</span><span className="a">{ev.action}</span></div>
-                              )) : <div className="hist muted">sem eventos registrados ainda</div>}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* ===== ENCERRADOS (todos corretos) ===== */}
-                {(syncStatus.games_health ?? []).some((g) => g.status === "finished") && (
-                  <div className="wc-tech-block">
-                    <div className="wc-tech-h">Encerrados — confirmados (toque pra ver o histórico)</div>
-                    {(syncStatus.games_health ?? []).filter((g) => g.status === "finished").map((g, i) => {
-                      const srcs = (g.confirmation_sources ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-                      const ok = g.scorers_final;
-                      const af = g.polls?.api_football ?? 0;
-                      const tsd = g.polls?.thesportsdb ?? 0;
-                      const open = expandedAdminGame === (g.match_number ?? -1000 - i);
-                      const evs = (syncStatus.game_events ?? []).filter((e) => e.match_number === g.match_number);
-                      return (
-                        <div key={i}>
-                          <button className="wc-tech-fin wc-tech-clickable" type="button"
-                            onClick={() => setExpandedAdminGame(open ? null : (g.match_number ?? -1000 - i))}>
-                            <span className={ok ? "tag ok" : "tag wait"}>{ok ? "✓ CORRETO" : "…"}</span>
-                            <span className="mt">{g.match_number ? `#${g.match_number} ` : ""}{g.matchup} <b>{g.score}</b></span>
-                            <span className="gl">{g.scorers || "sem goleador"}</span>
-                            <span className="src">
-                              fim: {g.end_source ?? "?"} · {srcs.length ? `${srcs.length} fonte(s): ${srcs.join(" + ")}` : "—"}
-                              {g.reconfirmed ? " · re-confirmado✓" : " · re-confirma +10min"} {open ? "▾" : "▸"}
-                            </span>
-                          </button>
-                          {open && (
-                            <div className="wc-tech-detail">
-                              <div className="hist">
-                                etapas: finalizou {ok ? "✓" : "…"} · confirmou {srcs[0] ? `✓ ${srcs[0]}` : "…"} · re-confirmou {srcs[1] ? `✓ ${srcs[1]}` : "…"} · 3ª {srcs[2] ? `✓ ${srcs[2]}` : "…"}
-                              </div>
-                              <div className="hist">chamadas de API neste jogo: API-Football ×{af} · TheSportsDB ×{tsd}</div>
-                              {evs.length ? evs.map((ev, j) => (
-                                <div className="wc-tech-logrow" key={j}><span className="t">{timeHM(ev.at)}</span><span className="a">{ev.action}</span></div>
-                              )) : <div className="hist muted">sem eventos no log (jogo antigo)</div>}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    <div className="wc-tech-foot">
-                      Fim = football-data · goleadores = API-Football (1× no fim) · re-confirmação = TheSportsDB +
-                      openfootball + IA, 10min depois.
-                    </div>
-                  </div>
-                )}
-
-                {/* LOG GERAL — o que fez e quando (todos os jogos) */}
-                {(syncStatus.game_events?.length ?? 0) > 0 && (
-                  <div className="wc-tech-block">
-                    <div className="wc-tech-h">Log geral — o que rodou e quando</div>
-                    <div className="wc-tech-log">
-                      {(syncStatus.game_events ?? []).slice(0, 16).map((ev, i) => (
-                        <div className="wc-tech-logrow" key={i}>
-                          <span className="t">{timeHM(ev.at)}</span>
-                          <span className="g">{ev.match_number ? `#${ev.match_number}` : ""}</span>
-                          <span className="a">{ev.action}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <AdminLivePanel currentTime={currentTime} error={syncStatusError} syncStatus={syncStatus} />
             ) : (
               !syncStatusError && <p className="bolao-sync-info">Carregando status das fontes...</p>
             )}
