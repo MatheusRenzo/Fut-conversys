@@ -12735,6 +12735,7 @@ img.team-flag {
 .wc-dash-tl-row.tone-retry .wc-dash-tl-dot, .wc-dash-tl-row.tone-warn .wc-dash-tl-dot { background: #ffb02e; }
 .wc-dash-tl-row.tone-err .wc-dash-tl-dot { background: #ff6b6b; }
 .wc-dash-tl-row.tone-ht .wc-dash-tl-dot { background: #7eb8ff; }
+.wc-dash-tl-row.tone-end .wc-dash-tl-dot { background: #b6c1d4; }
 .wc-dash-tl-row.tone-ia .wc-dash-tl-dot { background: #a78bfa; }
 .wc-dash-tl-row.tone-ia .wc-dash-tl-text { color: #d4c4ff; }
 .wc-dash-tl-row.tone-err { background: rgba(255,80,80,0.08); border-radius: 6px; margin: 0 -4px; padding-left: 4px; padding-right: 4px; }
