@@ -6,6 +6,11 @@ on:
       - main
   workflow_dispatch:
 
+# Runner self-hosted no mesmo servidor: evita dois deploy.sh ao mesmo tempo
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy no servidor

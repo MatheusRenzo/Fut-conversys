@@ -3,6 +3,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+LOCK_FILE="/tmp/fut-conversys-deploy.lock"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "ERRO: outro deploy já está em andamento (lock: $LOCK_FILE)."
+  echo "Aguarde o GitHub Actions ou um deploy.sh anterior terminar."
+  exit 1
+fi
+
 echo "=== Fut-Conversys — Deploy de Produção ==="
 
 if [ ! -f .env ]; then
