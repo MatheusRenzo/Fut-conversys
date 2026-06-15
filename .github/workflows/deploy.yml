@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -22,10 +23,43 @@ jobs:
       - name: Rebuild e restart dos containers
         id: deploy
         working-directory: /home/matheusdev/Fut-conversys
-        run: bash deploy.sh
+        run: |
+          set +e
+          bash deploy.sh 2>&1 | tee deploy.log
+          code=${PIPESTATUS[0]}
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Resolver destinatário do e-mail
+        id: mailto
+        if: always()
+        run: |
+          TO="${{ secrets.NOTIFY_EMAIL }}"
+          if [ -z "$TO" ]; then TO="${{ secrets.MAIL_USERNAME }}"; fi
+          echo "to=$TO" >> "$GITHUB_OUTPUT"
+
+      - name: Montar HTML do e-mail
+        if: always()
+        working-directory: /home/matheusdev/Fut-conversys
+        env:
+          DEPLOY_STATUS: ${{ steps.deploy.outcome == 'success' && 'success' || 'failure' }}
+          COMMIT_SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          APP_URL: https://fut.conversys.global:9443/bolao
+          ERROR_LOG_FILE: deploy.log
+          OUTPUT_FILE: deploy-email.html
+        run: |
+          MSG=$(git log -1 --pretty=%B | head -1)
+          export COMMIT_MESSAGE="${MSG:-Deploy manual}"
+          export COMMIT_SHORT="$(git rev-parse --short HEAD)"
+          export TIMESTAMP="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          python3 .github/scripts/build-deploy-email.py
 
       - name: Notificar sucesso por e-mail
-        if: success()
+        if: success() && steps.mailto.outputs.to != ''
         continue-on-error: true
         uses: dawidd6/action-send-mail@v6
         with:
@@ -33,22 +67,14 @@ jobs:
           server_port: 587
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "✅ Deploy concluído — Fut Conversys"
-          to: ${{ secrets.NOTIFY_EMAIL }}
-          from: "GitHub Actions <${{ secrets.MAIL_USERNAME }}>"
-          body: |
-            Deploy realizado com sucesso no servidor conversysfut.
-
-            Repositório : ${{ github.repository }}
-            Branch      : ${{ github.ref_name }}
-            Commit      : ${{ github.sha }}
-            Autor       : ${{ github.actor }}
-            Hora        : ${{ github.event.head_commit.timestamp }}
-
-            Acesse: https://fut.conversys.global:9443
+          subject: "✅ Deploy bolão — Fut Conversys"
+          to: ${{ steps.mailto.outputs.to }}
+          from: "Fut Conversys Deploy <${{ secrets.MAIL_USERNAME }}>"
+          html_body: file:///home/matheusdev/Fut-conversys/deploy-email.html
+          convert_markdown: false
 
       - name: Notificar falha por e-mail
-        if: failure()
+        if: failure() && steps.mailto.outputs.to != ''
         continue-on-error: true
         uses: dawidd6/action-send-mail@v6
         with:
@@ -56,15 +82,8 @@ jobs:
           server_port: 587
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "❌ FALHA no deploy — Fut Conversys"
-          to: ${{ secrets.NOTIFY_EMAIL }}
-          from: "GitHub Actions <${{ secrets.MAIL_USERNAME }}>"
-          body: |
-            O deploy FALHOU no servidor conversysfut.
-
-            Repositório : ${{ github.repository }}
-            Branch      : ${{ github.ref_name }}
-            Commit      : ${{ github.sha }}
-            Autor       : ${{ github.actor }}
-
-            Veja os logs em: https://github.com/${{ github.repository }}/actions
+          subject: "❌ Falha deploy bolão — Fut Conversys"
+          to: ${{ steps.mailto.outputs.to }}
+          from: "Fut Conversys Deploy <${{ secrets.MAIL_USERNAME }}>"
+          html_body: file:///home/matheusdev/Fut-conversys/deploy-email.html
+          convert_markdown: false

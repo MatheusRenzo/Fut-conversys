@@ -132,6 +132,29 @@ Ou suba tudo com Docker:
 docker compose up -d --build
 ```
 
+### E-mail de deploy (GitHub Actions)
+
+O workflow `.github/workflows/deploy.yml` envia um HTML no estilo Fut Conversys após cada deploy na `main`.
+
+Secrets necessários no repositório (`Settings → Secrets`):
+
+| Secret | Descrição |
+|--------|-----------|
+| `MAIL_USERNAME` | Gmail usado para enviar |
+| `MAIL_PASSWORD` | Senha de app do Gmail |
+| `NOTIFY_EMAIL` | Quem recebe (ex.: `admin@conversys.global`) |
+
+Atalho local (com `gh` autenticado):
+
+```bash
+cp .github/deploy-mail.env.example .github/deploy-mail.env
+# edite o arquivo
+bash scripts/setup-deploy-mail-secrets.sh
+bash scripts/send-deploy-email-test.sh   # envia preview de teste
+```
+
+Se `NOTIFY_EMAIL` não existir, o workflow usa `MAIL_USERNAME` como destinatário.
+
 Acesse `http://localhost:3000` (app) e `http://localhost:8000` (API).
 
 ## ⚙️ Configuração (.env)
