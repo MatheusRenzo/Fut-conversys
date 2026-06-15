@@ -466,6 +466,8 @@ export type WorldCupSyncStatus = {
     last_sync_at?: string | null;
     last_live_poll_at?: string | null;
     live_poll_gap_seconds?: number;
+    live_retry_max?: number;
+    tsd_live_retry_max?: number;
     goal_pending?: boolean;
     last_scorer_update_at?: string | null;
   };

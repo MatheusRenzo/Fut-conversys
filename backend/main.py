@@ -127,7 +127,8 @@ API_FOOTBALL_GOAL_GAP = max(40, int(os.getenv("API_FOOTBALL_GOAL_GAP", "60")))
 API_FOOTBALL_SAFETY_GAP = max(300, int(os.getenv("API_FOOTBALL_SAFETY_GAP", "600")))
 # Quantas vezes re-tenta a paga no MESMO gol novo até achar o goleador (ela às vezes
 # demora a publicar o evento). Depois disso espera o próximo gol. ~60s entre tentativas.
-API_FOOTBALL_LIVE_RETRY_MAX = max(2, int(os.getenv("API_FOOTBALL_LIVE_RETRY_MAX", "6")))
+API_FOOTBALL_LIVE_RETRY_MAX = max(2, int(os.getenv("API_FOOTBALL_LIVE_RETRY_MAX", "2")))
+THESPORTSDB_LIVE_RETRY_MAX = max(1, int(os.getenv("THESPORTSDB_LIVE_RETRY_MAX", "2")))
 # Re-confirmação grátis (TheSportsDB + openfootball + IA) roda 1× este tempo após o fim
 WORLD_CUP_RECONFIRM_AFTER = timedelta(minutes=int(os.getenv("WORLD_CUP_RECONFIRM_MINUTES", "10")))
 # Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há. 30s deixa
@@ -1869,7 +1870,7 @@ def refresh_world_cup_live_statuses(db: Session) -> bool:
     for game in games:
         game.status = "live"
         changed = True
-        log_game_event(db, game, "🟢 começou — palpites fechados", phase="gratuito", api="calendário", ok=True)
+        log_game_event(db, game, "Início do jogo — palpites fechados", phase="gratuito", api="calendário", ok=True)
     return changed
 
 
@@ -1975,21 +1976,23 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
                 if (lh + la) > old_total:
                     log_game_event(
                         db, game,
-                        f"⚽ GOL · placar virou {lh}-{la}",
+                        f"Gol detectado — placar {lh}-{la}",
                         phase="gratuito", api="football-data", ok=True,
                     )
+                    set_app_setting(db, f"wc_goal_at_{game.id}", datetime.now(timezone.utc).isoformat())
+                    set_app_setting(db, f"wc_live_polled_{game.id}", f"{lh}-{la}:0:0")
                     log_game_event(
                         db, game,
-                        f"⏱ próxima tentativa API-Football em ~{API_FOOTBALL_GOAL_GAP}s",
+                        f"Aguardando consulta API paga (~{API_FOOTBALL_GOAL_GAP}s)",
                         phase="ao_vivo", api="API-Football",
                     )
                 # INTERVALO: football-data manda PAUSED no intervalo
                 was_ht = bool(game.halftime)
                 game.halftime = (remote_status == "PAUSED")
                 if game.halftime and not was_ht:
-                    log_game_event(db, game, "⏸ intervalo", phase="gratuito", api="football-data", ok=True)
+                    log_game_event(db, game, "Intervalo", phase="gratuito", api="football-data", ok=True)
                 elif was_ht and not game.halftime:
-                    log_game_event(db, game, "▶ 2º tempo", phase="gratuito", api="football-data", ok=True)
+                    log_game_event(db, game, "2º tempo", phase="gratuito", api="football-data", ok=True)
             continue
         finished_remote = remote_status in ("FINISHED", "AWARDED") and has_score
         if not finished_remote:
@@ -2022,7 +2025,7 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
             status["filled"] += 1
             if not was_finished:
                 game.finished_at = datetime.utcnow()  # marca o relógio pra re-confirmação de 10min
-                log_game_event(db, game, f"🏁 encerrado {official_h}-{official_a} (football-data, oficial)", phase="fim", api="football-data", ok=True)
+                log_game_event(db, game, f"Finalização — placar {official_h}-{official_a} (API grátis)", phase="fim", api="football-data", ok=True)
     return status
 
 
@@ -2198,10 +2201,15 @@ def discover_api_fixture_ids(db: Session, status: dict[str, Any]) -> None:
 def api_football_key_remaining(db: Session, index: int) -> int | None:
     """Cota restante HOJE (UTC) de uma chave; None se desconhecida (assume cheia)."""
     raw = get_app_setting(db, f"api_football_remaining_{index}")
+    today = f"{datetime.utcnow():%Y%m%d}"
     if raw and ":" in raw:
         day_part, _, val = raw.partition(":")
-        if day_part == f"{datetime.utcnow():%Y%m%d}" and val.lstrip("-").isdigit():
-            return int(val)
+        if day_part == today and val.lstrip("-").isdigit():
+            rem = int(val)
+            # Cache zerado mas poucas chamadas hoje → revalida na próxima req real
+            if rem <= 0 and daily_counter(db, "api_football") <= API_FOOTBALL_DAILY_RESERVE + 2:
+                return None
+            return rem
     return None
 
 
@@ -2444,10 +2452,10 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     pending += [g for g in stuck_live if g.id not in seen and g.api_fixture_id] if has_keys else []
 
     for game in pending:
-        log_game_event(db, game, "→ chamada API-Football (fim)", phase="fim", api="API-Football")
+        log_game_event(db, game, "Consulta API paga — confirmação final", phase="fim", api="API-Football")
         payload = call(f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}")
         if payload is None:
-            log_game_event(db, game, "✗ sem cota / limite de reserva", phase="fim", api="API-Football", ok=False)
+            log_game_event(db, game, "API paga — sem cota no fim", phase="fim", api="API-Football", ok=False)
             break
         bump_game_poll(db, game.id, "af")
         fixtures = payload.get("response") or []
@@ -2472,9 +2480,9 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         api_names = extract_api_football_scorers(fixture)
         of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
         if not api_names:
-            log_game_event(db, game, "✗ respondeu sem goleadores", phase="fim", api="API-Football", ok=False)
+            log_game_event(db, game, "API paga — não achou artilheiros", phase="fim", api="API-Football", ok=False)
         else:
-            log_game_event(db, game, f"✓ achou: {', '.join(api_names)}", phase="fim", api="API-Football", ok=True)
+            log_game_event(db, game, f"API paga — achou: {', '.join(api_names)}", phase="fim", api="API-Football", ok=True)
         # IA definitiva no fim: cruza paga + openfootball + elenco
         reconciled = ai_reconcile_scorers(
             db, game, {"API-Football": api_names, "openfootball": of_names}, status, squad=squad, phase="fim"
@@ -2499,7 +2507,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         game.scorers_final = True  # paga FT é definitiva (lista distinta = verdade)
         conf_txt = f" · ✓ {len(agreeing)} fonte(s)" if agreeing else ""
         gol_txt = f" · goleadores: {game.scorers}" if game.scorers else " · sem goleador"
-        log_game_event(db, game, f"🏁 fim {game.home_score}-{game.away_score}{conf_txt}{gol_txt}", phase="fim", api="API-Football", ok=True)
+        log_game_event(db, game, f"Confirmação final — {game.home_score}-{game.away_score}{conf_txt}{gol_txt}", phase="fim", api="API-Football", ok=True)
 
     # Rede de segurança: jogo "ao vivo" há tempo demais → encerra sozinho
     for game in stuck_live:
@@ -2510,7 +2518,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 game.finished_at = now
             if not game.end_source:
                 game.end_source = "auto:tempo"
-                log_game_event(db, game, f"⏱ encerrado por tempo {game.home_score}-{game.away_score}", phase="fim", api="auto", ok=True)
+                log_game_event(db, game, f"Finalização automática — {game.home_score}-{game.away_score}", phase="fim", api="auto", ok=True)
             status["finalized"] += 1
 
     # ============ B) AO VIVO: paga só no GOL NOVO (retry até achar) ============
@@ -2523,133 +2531,214 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
 
     def polled_info(g):
         raw = get_app_setting(db, f"wc_live_polled_{g.id}") or ""
-        score, _, n = raw.partition(":")
-        return score, (int(n) if n.isdigit() else 0)
+        parts = raw.split(":")
+        score = parts[0] if parts else ""
+        if parts and parts[-1] == "done":
+            return score, 999, 999
+        api_n = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        tsd_n = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+        # formato legado "1-0:3" → só retries da API paga
+        if len(parts) == 2 and parts[1].isdigit():
+            tsd_n = 0
+        return score, api_n, tsd_n
 
-    def has_new_goal(g):
-        if world_cup_scorers_complete(g):
-            return False
-        cur = f"{g.home_score or 0}-{g.away_score or 0}"
-        sc, n = polled_info(g)
-        if sc != cur:
-            return True  # GOL NOVO (placar mudou desde a última busca)
-        return n < API_FOOTBALL_LIVE_RETRY_MAX  # mesmo placar: ainda re-tentando achar o nome
+    def current_score(g):
+        return f"{g.home_score or 0}-{g.away_score or 0}"
 
-    def mark_polled(g):
-        cur = f"{g.home_score or 0}-{g.away_score or 0}"
-        sc, n = polled_info(g)
+    def goal_wait_ok(g):
+        raw = get_app_setting(db, f"wc_goal_at_{g.id}")
+        if not raw:
+            return True
+        try:
+            t = datetime.fromisoformat(raw)
+            if t.tzinfo:
+                t = t.astimezone(timezone.utc).replace(tzinfo=None)
+            return (now - t).total_seconds() >= API_FOOTBALL_GOAL_GAP
+        except ValueError:
+            return True
+
+    def mark_api_try(g):
+        cur = current_score(g)
+        sc, api_n, tsd_n = polled_info(g)
         if world_cup_scorers_complete(g):
             set_app_setting(db, f"wc_live_polled_{g.id}", f"{cur}:done")
         else:
-            set_app_setting(db, f"wc_live_polled_{g.id}", f"{cur}:{(n + 1) if sc == cur else 1}")
+            new_api = (api_n + 1) if sc == cur else 1
+            set_app_setting(db, f"wc_live_polled_{g.id}", f"{cur}:{new_api}:{tsd_n}")
 
-    pending_live = [g for g in live_now_games if has_new_goal(g)]
-    status["goal_pending"] = bool(pending_live)
+    def mark_tsd_try(g):
+        cur = current_score(g)
+        sc, api_n, tsd_n = polled_info(g)
+        new_tsd = (tsd_n + 1) if sc == cur else 1
+        set_app_setting(db, f"wc_live_polled_{g.id}", f"{cur}:{api_n}:{new_tsd}")
 
-    if pending_live:
-        # anti-rajada: no mín 60s entre chamadas ao vivo (respeita rate limit)
-        last_live_raw = get_app_setting(db, "api_football_last_live_at")
-        gap_ok = True
-        if last_live_raw:
-            try:
-                t = datetime.fromisoformat(last_live_raw)
-                if t.tzinfo:
-                    t = t.astimezone(timezone.utc).replace(tzinfo=None)
-                gap_ok = (now - t).total_seconds() >= API_FOOTBALL_GOAL_GAP
-            except ValueError:
-                gap_ok = True
-        paid_ok = has_keys and api_football_total_remaining(db) > API_FOOTBALL_DAILY_RESERVE + 1 and api_football_pick_key(db) is not None
-        if gap_ok and paid_ok:
-            # PAGA: 1 chamada cobre todos os jogos rolando
-            for game in pending_live:
-                sc, n = polled_info(game)
-                if sc != f"{game.home_score or 0}-{game.away_score or 0}":
-                    log_game_event(db, game, "→ chamada API-Football", phase="ao_vivo", api="API-Football")
-                elif n > 0:
-                    log_game_event(
-                        db, game,
-                        f"↻ retry {n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX} — sem goleador",
-                        phase="ao_vivo", api="API-Football", ok=False,
-                    )
-            payload = call(API_FOOTBALL_LIVE_URL)
-            if payload is None:
-                for game in pending_live:
-                    log_game_event(db, game, "✗ sem cota — failover TheSportsDB", phase="ao_vivo", api="API-Football", ok=False)
-            if payload:
-                set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
-                by_teams: dict[tuple[str, str], dict[str, Any]] = {}
-                for item in payload.get("response", []):
-                    if ((item.get("league") or {}).get("id")) != API_FOOTBALL_LEAGUE_ID:
-                        continue
-                    teams = item.get("teams") or {}
-                    hk = normalize_scorer_name(normalize_world_cup_team(((teams.get("home") or {}).get("name")) or ""))
-                    ak = normalize_scorer_name(normalize_world_cup_team(((teams.get("away") or {}).get("name")) or ""))
-                    if hk and ak:
-                        by_teams[(hk, ak)] = item
-                status["live_games"] = len(by_teams)
-                for game in pending_live:
-                    item = by_teams.get((
-                        normalize_scorer_name(normalize_world_cup_team(game.home_team)),
-                        normalize_scorer_name(normalize_world_cup_team(game.away_team)),
-                    ))
-                    if not item:
-                        status["retries"] += 1
-                        log_game_event(db, game, "✗ jogo não achado no live=all", phase="ao_vivo", api="API-Football", ok=False)
-                        mark_polled(game)  # tentou, não achou ainda → conta retry
-                        continue
-                    bump_game_poll(db, game.id, "af")
-                    fid = ((item.get("fixture") or {}).get("id"))
-                    if fid and not game.api_fixture_id:
-                        game.api_fixture_id = int(fid)
-                    goals = item.get("goals") or {}
-                    if goals.get("home") is not None and goals.get("away") is not None:
-                        game.home_score = int(goals["home"])
-                        game.away_score = int(goals["away"])
-                    live_scorers = extract_api_football_scorers(item)
-                    of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
-                    if live_scorers:
-                        log_game_event(db, game, f"✓ achou: {', '.join(live_scorers)}", phase="ao_vivo", api="API-Football", ok=True)
-                        new_s = normalize_live(
-                            game, live_scorers, {"API-Football": live_scorers, "openfootball": of_names}, phase="ao_vivo"
-                        )
-                        if new_s != (game.scorers or ""):
-                            game.scorers = new_s
-                            status["scorers_updated"] += 1
-                            log_game_event(db, game, f"⚽ artilheiro: {new_s}", phase="ao_vivo", api="API-Football", ok=True)
-                    else:
-                        status["retries"] += 1
-                        sc, n = polled_info(game)
-                        log_game_event(
-                            db, game,
-                            f"✗ sem goleador (retry {n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX})",
-                            phase="ao_vivo", api="API-Football", ok=False,
-                        )
-                    status["mid_checks"] += 1
-                    mark_polled(game)
-        elif gap_ok and not paid_ok:
-            # FAILOVER: paga sem cota → goleador ao vivo pela TheSportsDB (grátis)
-            status["skipped"] = "paga sem cota — failover TheSportsDB ao vivo"
-            for game in pending_live:
-                log_game_event(db, game, "⚠ failover TheSportsDB (paga sem cota)", phase="ao_vivo", api="TheSportsDB")
-                if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
-                    break
-                status["tsd_calls"] += 1
-                bump_game_poll(db, game.id, "tsd")
-                tsd = fetch_thesportsdb_scorers(game, db) or []
+    def mark_scorer_found(g):
+        set_app_setting(db, f"wc_live_polled_{g.id}", f"{current_score(g)}:done")
+
+    paid_ok = has_keys and api_football_total_remaining(db) > API_FOOTBALL_DAILY_RESERVE + 1 and api_football_pick_key(db) is not None
+
+    def api_pending(g):
+        if world_cup_scorers_complete(g):
+            return False
+        if not goal_wait_ok(g):
+            return False
+        cur = current_score(g)
+        sc, api_n, _ = polled_info(g)
+        if not paid_ok:
+            return False
+        if sc != cur:
+            return True
+        return api_n < API_FOOTBALL_LIVE_RETRY_MAX
+
+    def tsd_pending(g):
+        if world_cup_scorers_complete(g):
+            return False
+        if not goal_wait_ok(g):
+            return False
+        cur = current_score(g)
+        sc, api_n, tsd_n = polled_info(g)
+        if tsd_n >= THESPORTSDB_LIVE_RETRY_MAX:
+            return False
+        if paid_ok and sc != cur:
+            return False
+        if paid_ok and api_n < API_FOOTBALL_LIVE_RETRY_MAX:
+            return False
+        return True
+
+    api_games = [g for g in live_now_games if api_pending(g)]
+    tsd_games = [g for g in live_now_games if tsd_pending(g)]
+    waiting_goal = [
+        g for g in live_now_games
+        if not world_cup_scorers_complete(g) and not goal_wait_ok(g)
+    ]
+    status["goal_pending"] = bool(waiting_goal or api_games or tsd_games)
+
+    last_live_raw = get_app_setting(db, "api_football_last_live_at")
+    gap_ok = True
+    if last_live_raw:
+        try:
+            t = datetime.fromisoformat(last_live_raw)
+            if t.tzinfo:
+                t = t.astimezone(timezone.utc).replace(tzinfo=None)
+            gap_ok = (now - t).total_seconds() >= API_FOOTBALL_GOAL_GAP
+        except ValueError:
+            gap_ok = True
+
+    if api_games and gap_ok and paid_ok:
+        for game in api_games:
+            sc, api_n, _ = polled_info(game)
+            if sc != current_score(game):
+                log_game_event(db, game, "Consulta API paga — artilheiro do gol", phase="ao_vivo", api="API-Football")
+            else:
+                log_game_event(
+                    db, game,
+                    f"Retry API paga {api_n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX} — sem artilheiro",
+                    phase="ao_vivo", api="API-Football", ok=False,
+                )
+        payload = call(API_FOOTBALL_LIVE_URL)
+        api_no_quota = False
+        if payload is None:
+            api_no_quota = api_football_pick_key(db) is None
+            for game in api_games:
+                if api_no_quota:
+                    log_game_event(db, game, "Sem cota — passando para SportsDB", phase="ao_vivo", api="API-Football", ok=False)
+                    cur = current_score(game)
+                    _, _, tsd_n = polled_info(game)
+                    set_app_setting(db, f"wc_live_polled_{game.id}", f"{cur}:{API_FOOTBALL_LIVE_RETRY_MAX}:{tsd_n}")
+                else:
+                    log_game_event(db, game, "API paga — limite por minuto, aguarda", phase="ao_vivo", api="API-Football", ok=False)
+        if payload:
+            set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
+            by_teams: dict[tuple[str, str], dict[str, Any]] = {}
+            for item in payload.get("response", []):
+                if ((item.get("league") or {}).get("id")) != API_FOOTBALL_LEAGUE_ID:
+                    continue
+                teams = item.get("teams") or {}
+                hk = normalize_scorer_name(normalize_world_cup_team(((teams.get("home") or {}).get("name")) or ""))
+                ak = normalize_scorer_name(normalize_world_cup_team(((teams.get("away") or {}).get("name")) or ""))
+                if hk and ak:
+                    by_teams[(hk, ak)] = item
+            status["live_games"] = len(by_teams)
+            for game in api_games:
+                item = by_teams.get((
+                    normalize_scorer_name(normalize_world_cup_team(game.home_team)),
+                    normalize_scorer_name(normalize_world_cup_team(game.away_team)),
+                ))
+                if not item:
+                    status["retries"] += 1
+                    log_game_event(db, game, "API paga — jogo não encontrado", phase="ao_vivo", api="API-Football", ok=False)
+                    mark_api_try(game)
+                    continue
+                bump_game_poll(db, game.id, "af")
+                fid = ((item.get("fixture") or {}).get("id"))
+                if fid and not game.api_fixture_id:
+                    game.api_fixture_id = int(fid)
+                goals = item.get("goals") or {}
+                if goals.get("home") is not None and goals.get("away") is not None:
+                    game.home_score = int(goals["home"])
+                    game.away_score = int(goals["away"])
+                live_scorers = extract_api_football_scorers(item)
                 of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
-                if tsd:
-                    log_game_event(db, game, f"✓ achou: {', '.join(tsd)}", phase="ao_vivo", api="TheSportsDB", ok=True)
+                if live_scorers:
+                    log_game_event(db, game, f"API paga — achou: {', '.join(live_scorers)}", phase="ao_vivo", api="API-Football", ok=True)
                     new_s = normalize_live(
-                        game, tsd, {"TheSportsDB": tsd, "openfootball": of_names}, phase="ao_vivo_failover"
+                        game, live_scorers, {"API-Football": live_scorers, "openfootball": of_names}, phase="ao_vivo"
                     )
                     if new_s != (game.scorers or ""):
                         game.scorers = new_s
                         status["scorers_updated"] += 1
-                        log_game_event(db, game, f"⚽ artilheiro: {new_s}", phase="ao_vivo", api="TheSportsDB", ok=True)
+                    mark_scorer_found(game)
                 else:
                     status["retries"] += 1
-                    log_game_event(db, game, "✗ sem goleador — segue retry", phase="ao_vivo", api="TheSportsDB", ok=False)
-                mark_polled(game)
+                    _, api_n, _ = polled_info(game)
+                    log_game_event(
+                        db, game,
+                        f"API paga — não achou artilheiro (tentativa {api_n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX})",
+                        phase="ao_vivo", api="API-Football", ok=False,
+                    )
+                    mark_api_try(game)
+                status["mid_checks"] += 1
+
+    tsd_games = [g for g in live_now_games if tsd_pending(g)]
+
+    if tsd_games and gap_ok and not paid_ok:
+        for game in tsd_games:
+            if polled_info(game)[2] == 0:
+                log_game_event(db, game, "Sem cota — passando para SportsDB", phase="ao_vivo", api="API-Football", ok=False)
+
+    if tsd_games and gap_ok:
+        for game in tsd_games:
+            _, _, tsd_n = polled_info(game)
+            log_game_event(
+                db, game,
+                f"SportsDB fallback — tentativa {tsd_n + 1}/{THESPORTSDB_LIVE_RETRY_MAX}",
+                phase="ao_vivo_failover", api="TheSportsDB",
+            )
+            if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
+                break
+            status["tsd_calls"] += 1
+            bump_game_poll(db, game.id, "tsd")
+            tsd = fetch_thesportsdb_scorers(game, db) or []
+            of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+            if tsd:
+                log_game_event(db, game, f"SportsDB — achou: {', '.join(tsd)}", phase="ao_vivo_failover", api="TheSportsDB", ok=True)
+                new_s = normalize_live(
+                    game, tsd, {"TheSportsDB": tsd, "openfootball": of_names}, phase="ao_vivo_failover"
+                )
+                if new_s != (game.scorers or ""):
+                    game.scorers = new_s
+                    status["scorers_updated"] += 1
+                mark_scorer_found(game)
+            else:
+                status["retries"] += 1
+                log_game_event(
+                    db, game,
+                    f"SportsDB — não achou (tentativa {tsd_n + 1}/{THESPORTSDB_LIVE_RETRY_MAX})",
+                    phase="ao_vivo_failover", api="TheSportsDB", ok=False,
+                )
+                mark_tsd_try(game)
+                if tsd_n + 1 >= THESPORTSDB_LIVE_RETRY_MAX:
+                    log_game_event(db, game, "SportsDB — passou, aguarda próximo gol", phase="ao_vivo_failover", api="TheSportsDB", ok=False)
             set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
 
     # ============ C) +10min: re-confirmação grátis (TheSportsDB + openfootball + IA) ============
@@ -2671,9 +2760,9 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         squad = world_cup_game_squad(db, game)
         of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
         if tsd:
-            log_game_event(db, game, f"✓ achou: {', '.join(tsd)}", phase="reconfirmacao", api="TheSportsDB", ok=True)
+            log_game_event(db, game, f"SportsDB reconfirmação — achou: {', '.join(tsd)}", phase="reconfirmacao", api="TheSportsDB", ok=True)
         else:
-            log_game_event(db, game, "✗ sem goleadores", phase="reconfirmacao", api="TheSportsDB", ok=False)
+            log_game_event(db, game, "SportsDB reconfirmação — não achou", phase="reconfirmacao", api="TheSportsDB", ok=False)
         # IA reconcilia as DUAS grátis e confirma o resultado (que já tem a paga)
         reconciled = ai_reconcile_scorers(
             db, game, {"TheSportsDB": tsd, "openfootball": of_names, "paga_ja_gravada": of_names},
@@ -2708,7 +2797,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         ia_note = f" · IA merge aplicada" if reconciled else " · IA merge falhou"
         log_game_event(
             db, game,
-            f"🔁 re-confirmado — {len(prev)} fonte(s){ia_note}"
+            f"Reconfirmação (+10min) — {len(prev)} fonte(s){ia_note}"
             + (f" · divergência: {', '.join(extras)}" if extras else ""),
             phase="reconfirmacao",
             api="TheSportsDB+openfootball",
@@ -2800,7 +2889,7 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
             if not game.finished_at:
                 game.finished_at = datetime.utcnow()
             if not was_finished:
-                log_game_event(db, game, f"🏁 encerrado {home_score}-{away_score} (openfootball)", phase="fim", api="openfootball", ok=True)
+                log_game_event(db, game, f"Finalização — placar {home_score}-{away_score} (openfootball)", phase="fim", api="openfootball", ok=True)
         if scorers:
             # União: o openfootball traz nomes oficiais, mas não pode apagar
             # goleadores que o feed ao vivo já tinha capturado
@@ -4103,6 +4192,8 @@ def world_cup_sync_status(
         "last_sync_at": last_sync_at,
         "last_live_poll_at": last_live_poll_at,
         "live_poll_gap_seconds": live_source_now.get("live_gap_seconds") or API_FOOTBALL_SAFETY_GAP,
+        "live_retry_max": API_FOOTBALL_LIVE_RETRY_MAX,
+        "tsd_live_retry_max": THESPORTSDB_LIVE_RETRY_MAX,
         "goal_pending": bool(live_source_now.get("goal_pending")),
         "last_scorer_update_at": last_scorer_update,
     }

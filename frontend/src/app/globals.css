@@ -12933,6 +12933,69 @@ img.team-flag {
 .wc-confirm-detail { font-size: 0.66rem; color: #e8eefc; margin: 0; line-height: 1.4; }
 .wc-confirm-step-card.s-err .wc-confirm-detail { color: #ffb0b0; }
 .wc-confirm-step-card.s-wait .wc-confirm-detail { color: #ffc879; }
+
+/* Timeline v3 — linguagem simples */
+.timeline-v3 { padding: 6px 4px !important; }
+.wc-tl-v3-head, .wc-tl-v3 {
+  display: grid;
+  grid-template-columns: 52px 88px 72px 64px 1fr;
+  gap: 6px; align-items: center;
+}
+.wc-tl-v3-head {
+  font-size: 0.55rem; font-weight: 900; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 0 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.wc-tl-v3-list { display: flex; flex-direction: column; gap: 3px; }
+.wc-tl-v3 {
+  padding: 7px 4px; border-radius: 8px; font-size: 0.64rem;
+  border: 1px solid transparent;
+}
+.wc-tl-v3-time { font-weight: 900; color: #fff; font-variant-numeric: tabular-nums; }
+.wc-tl-v3-kind { font-weight: 950; letter-spacing: 0.02em; }
+.wc-tl-v3-api { font-weight: 800; color: var(--muted); }
+.wc-tl-v3-result { font-weight: 900; }
+.wc-tl-v3-detail { color: #c8d4ea; line-height: 1.35; }
+.wc-tl-v3.tone-ok, .wc-tl-v3.tone-gol { background: rgba(57,217,138,0.1); border-color: rgba(57,217,138,0.25); }
+.wc-tl-v3.tone-ok .wc-tl-v3-result, .wc-tl-v3.tone-gol .wc-tl-v3-result { color: var(--brand-green); }
+.wc-tl-v3.tone-err { background: rgba(255,60,60,0.12); border-color: rgba(255,80,80,0.3); }
+.wc-tl-v3.tone-err .wc-tl-v3-result { color: #ff8a8a; }
+.wc-tl-v3.tone-retry, .wc-tl-v3.tone-warn, .wc-tl-v3.tone-wait { background: rgba(255,176,46,0.08); border-color: rgba(255,176,46,0.22); }
+.wc-tl-v3.tone-retry .wc-tl-v3-result, .wc-tl-v3.tone-warn .wc-tl-v3-result, .wc-tl-v3.tone-wait .wc-tl-v3-result { color: #ffc879; }
+.wc-tl-v3.tone-call { background: rgba(43,108,255,0.1); border-color: rgba(43,108,255,0.22); }
+.wc-tl-v3.tone-call .wc-tl-v3-result { color: #aec4ff; }
+.wc-tl-v3.tone-ia, .wc-tl-v3.tone-ia-cache { background: rgba(167,139,250,0.1); border-color: rgba(167,139,250,0.25); }
+.wc-tl-v3.tone-ia .wc-tl-v3-result, .wc-tl-v3.tone-ia-cache .wc-tl-v3-result { color: #d4c4ff; }
+.wc-tl-v3.tone-milestone { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1); }
+.wc-tl-v3.tone-milestone .wc-tl-v3-kind { color: #fff; }
+.wc-tl-v3.tone-skip { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.06); opacity: 0.85; }
+.wc-tl-v3.tone-skip .wc-tl-v3-result { color: var(--muted); }
+.wc-tl-v3-api.a-api-grátis, .wc-tl-v3-api.a-api-gratis { color: #9dffc8; }
+.wc-tl-v3-api.a-api-paga { color: #aec4ff; }
+.wc-tl-v3-api.a-sportsdb { color: #ffc879; }
+.wc-tl-v3-api.a-ia { color: #d4c4ff; }
+.wc-flow-steps { display: flex; flex-direction: column; gap: 4px; }
+.wc-flow-step { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.wc-flow-kind { font-weight: 800; color: #fff; }
+.wc-flow-api { font-size: 0.58rem; font-weight: 900; padding: 2px 7px; border-radius: 999px; }
+.wc-flow-api.free { background: rgba(57,217,138,0.15); color: #9dffc8; }
+.wc-flow-api.paid { background: rgba(43,108,255,0.18); color: #aec4ff; }
+.wc-flow-api.tsd { background: rgba(255,176,46,0.18); color: #ffc879; }
+.wc-flow-api.ia { background: rgba(167,139,250,0.18); color: #d4c4ff; }
+.wc-flow-arrow-v { font-size: 0.58rem; font-weight: 800; color: var(--muted); padding-left: 8px; }
+.wc-dash-chip.paid { background: rgba(43,108,255,0.18); color: #aec4ff; }
+.wc-dash-chip.tsd { background: rgba(255,176,46,0.18); color: #ffc879; }
+@media (max-width: 560px) {
+  .wc-tl-v3-head { display: none; }
+  .wc-tl-v3 {
+    grid-template-columns: 48px 1fr;
+    grid-template-rows: auto auto;
+  }
+  .wc-tl-v3-kind { grid-column: 2; }
+  .wc-tl-v3-api, .wc-tl-v3-result { grid-column: 2; display: inline; }
+  .wc-tl-v3-api::after { content: " · "; color: var(--muted); }
+  .wc-tl-v3-detail { grid-column: 1 / -1; padding-left: 48px; }
+}
 .wc-admin-modal .wc-champion-form { flex-shrink: 0; margin-top: 8px; }
 @media (max-width: 560px) {
   .wc-admin-backdrop { align-items: flex-end; padding: 0; }
