@@ -12698,6 +12698,70 @@ img.team-flag {
 .wc-dash-mode-badge.fast { background: rgba(227,28,121,0.22); color: #ffb3d4; }
 .wc-dash-mode-badge.slow { background: rgba(43,108,255,0.18); color: #aec4ff; }
 .wc-dash { display: flex; flex-direction: column; gap: 14px; max-height: min(72vh, 640px); overflow-y: auto; padding-right: 2px; }
+.wc-dash-verdict {
+  display: flex; flex-direction: column; gap: 2px; border-radius: 10px; padding: 8px 11px;
+  border-left: 3px solid var(--brand-green); background: rgba(57,217,138,0.08);
+}
+.wc-dash-verdict.warn { border-left-color: #ffb02e; background: rgba(255,176,46,0.08); }
+.wc-dash-verdict strong { font-size: 0.78rem; color: var(--brand-green); }
+.wc-dash-verdict.warn strong { color: #ffc879; }
+.wc-dash-verdict span { font-size: 0.68rem; color: var(--muted); line-height: 1.4; }
+.wc-dash-live-now {
+  font-size: 0.68rem; font-weight: 800; padding: 6px 8px; border-radius: 8px; line-height: 1.35;
+}
+.wc-dash-live-now.ok { color: var(--brand-green); background: rgba(57,217,138,0.12); }
+.wc-dash-live-now.wait, .wc-dash-live-now.retry { color: #ffc879; background: rgba(255,176,46,0.12); }
+.wc-dash-live-now.warn { color: #ffb3d4; background: rgba(227,28,121,0.12); }
+.wc-dash-live-now.ht { color: #aec4ff; background: rgba(43,108,255,0.12); }
+.wc-dash-live-now.muted { color: var(--muted); background: rgba(255,255,255,0.04); }
+.wc-dash-game-time.started { color: var(--brand-green); }
+.wc-dash-drop-body.timeline { padding-top: 10px; }
+.wc-dash-timeline { display: flex; flex-direction: column; gap: 0; padding-left: 4px; }
+.wc-dash-tl-row {
+  display: grid; grid-template-columns: 12px 1fr; gap: 10px; padding: 6px 0; position: relative;
+}
+.wc-dash-tl-row:not(:last-child)::before {
+  content: ""; position: absolute; left: 5px; top: 18px; bottom: -6px; width: 2px;
+  background: rgba(255,255,255,0.08);
+}
+.wc-dash-tl-dot {
+  width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; background: #8fa3c8;
+  border: 2px solid rgba(0,0,0,0.3); z-index: 1;
+}
+.wc-dash-tl-row.tone-start .wc-dash-tl-dot { background: var(--brand-green); }
+.wc-dash-tl-row.tone-goal .wc-dash-tl-dot { background: #ff6aa8; }
+.wc-dash-tl-row.tone-call .wc-dash-tl-dot { background: var(--brand-cyan, #22d3ee); }
+.wc-dash-tl-row.tone-ok .wc-dash-tl-dot, .wc-dash-tl-row.tone-reconf .wc-dash-tl-dot { background: var(--brand-green); }
+.wc-dash-tl-row.tone-retry .wc-dash-tl-dot, .wc-dash-tl-row.tone-warn .wc-dash-tl-dot { background: #ffb02e; }
+.wc-dash-tl-row.tone-err .wc-dash-tl-dot { background: #ff6b6b; }
+.wc-dash-tl-row.tone-ht .wc-dash-tl-dot { background: #7eb8ff; }
+.wc-dash-tl-row.tone-end .wc-dash-tl-dot { background: #b6c1d4; }
+.wc-dash-tl-time { font-size: 0.6rem; font-weight: 900; color: var(--muted); font-variant-numeric: tabular-nums; }
+.wc-dash-tl-text { font-size: 0.68rem; color: #e8eefc; line-height: 1.4; display: block; }
+.wc-dash-tl-row.tone-err .wc-dash-tl-text { color: #ff9f9f; }
+.wc-dash-tl-row.tone-ok .wc-dash-tl-text { color: #9dffc8; }
+.wc-dash-confirm-checks {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.wc-dash-confirm-checks > span {
+  font-size: 0.62rem; font-weight: 900; padding: 3px 8px; border-radius: 999px;
+  background: rgba(255,255,255,0.06); color: var(--muted);
+}
+.wc-dash-confirm-checks > span.ok { background: rgba(57,217,138,0.14); color: var(--brand-green); }
+.wc-dash-confirm-checks > span.err { background: rgba(255,107,107,0.14); color: #ff9f9f; }
+.wc-dash-confirm-checks > span.pending { background: rgba(255,176,46,0.12); color: #ffc879; }
+.wc-dash-scheduled-list { display: flex; flex-direction: column; gap: 4px; }
+.wc-dash-scheduled-row {
+  display: grid; grid-template-columns: 44px 1fr; gap: 6px; align-items: baseline;
+  font-size: 0.68rem; padding: 5px 8px; border-radius: 8px; background: rgba(255,255,255,0.03);
+}
+.wc-dash-scheduled-row:nth-child(even) { background: rgba(255,255,255,0.05); }
+.wc-dash-scheduled-hint { grid-column: 1 / -1; font-size: 0.58rem; color: var(--muted); font-style: italic; }
+.wc-dash-log-section .wc-log-row.tone-ok .wc-log-action { color: #9dffc8; }
+.wc-dash-log-section .wc-log-row.tone-err .wc-log-action { color: #ff9f9f; }
+.wc-dash-log-section .wc-log-row.tone-retry .wc-log-action, .wc-dash-log-section .wc-log-row.tone-warn .wc-log-action { color: #ffc879; }
+.wc-api-limit { font-size: 0.58rem; color: #7f8ba0; }
 .wc-dash-games, .wc-dash-game-list { display: flex; flex-direction: column; gap: 8px; }
 .wc-dash-game-card {
   border-radius: 14px; padding: 10px 12px; background: rgba(255,255,255,0.03);

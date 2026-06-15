@@ -19,6 +19,7 @@ type GameRow = {
   kickoff_at?: string | null;
   status: string;
   score?: string | null;
+  goals?: number;
   scorers?: string | null;
   halftime?: boolean;
   scorers_complete?: boolean;
@@ -29,6 +30,8 @@ type GameRow = {
   reconfirmed?: boolean;
   polls?: { api_football: number; thesportsdb: number };
 };
+
+type GameEvent = NonNullable<WorldCupSyncStatus["game_events"]>[number];
 
 function agoLabel(iso: string | null | undefined, now: number) {
   if (!iso) return "—";
@@ -44,7 +47,6 @@ function inLabel(lastIso: string | null | undefined, gapSeconds: number | undefi
   const remaining = Math.max(0, Math.round((base + gapSeconds * 1000 - now) / 1000));
   if (remaining <= 0) return "agora";
   if (remaining < 60) return `em ${remaining}s`;
-  if (remaining < 3600) return `em ${Math.floor(remaining / 60)}min`;
   return `em ${Math.floor(remaining / 60)}min`;
 }
 
@@ -57,12 +59,87 @@ function timeHM(iso: string | null | undefined) {
   });
 }
 
-const API_LABELS: Record<string, { name: string; role: string }> = {
-  football_data: { name: "football-data", role: "placar · intervalo · fim" },
-  api_football: { name: "API-Football", role: "goleador (paga)" },
-  thesportsdb: { name: "TheSportsDB", role: "failover + 2ª confirmação" },
-  ai_reconcile: { name: "IA merge", role: "confirma goleadores" },
-  ai_insight: { name: "IA resenha", role: "card de palpite" },
+function eventKey(game: GameRow) {
+  return game.match_number ?? `${game.home_team} x ${game.away_team}`;
+}
+
+/** Cor/ícone da linha da timeline conforme o log do backend */
+function eventTone(action: string): "start" | "goal" | "call" | "ok" | "retry" | "warn" | "err" | "ht" | "end" | "reconf" | "plain" {
+  if (action.includes("começou")) return "start";
+  if (action.includes("gol!") || action.includes("gol ")) return "goal";
+  if (action.startsWith("→")) return "call";
+  if (action.includes("goleador:") && action.includes("respondeu")) return "ok";
+  if (action.includes("failover") && action.includes("goleador:")) return "ok";
+  if (action.startsWith("↻") || action.includes("retry")) return "retry";
+  if (action.startsWith("⚠") || action.includes("failover")) return "warn";
+  if (action.startsWith("✗")) return "err";
+  if (action.includes("intervalo") || action.includes("2º tempo")) return "ht";
+  if (action.includes("re-confirmado")) return "reconf";
+  if (action.includes("encerrado") || action.includes("fim ")) return "end";
+  return "plain";
+}
+
+/** Status ao vivo no card — o que está acontecendo AGORA */
+function liveNowStatus(game: GameRow, evs: GameEvent[]) {
+  const af = game.polls?.api_football ?? 0;
+  const tsd = game.polls?.thesportsdb ?? 0;
+  const goals = game.goals ?? 0;
+  const latest = evs[0]?.action ?? "";
+
+  if (game.status === "finished") {
+    if (game.scorers_final && game.reconfirmed) {
+      return { cls: "ok", text: `✓ Encerrado · re-confirmado · ${game.scorers || "sem goleador"}` };
+    }
+    if (game.scorers_final) {
+      return { cls: "ok", text: `✓ Encerrado · API-Football confirmou · aguarda +10min` };
+    }
+    return { cls: "wait", text: `🏁 Encerrado · aguardando API-Football (fim) ×${af}` };
+  }
+
+  if (game.status !== "live") return null;
+
+  if (game.halftime) {
+    return { cls: "ht", text: "⏸ Intervalo · football-data (PAUSED)" };
+  }
+
+  if (goals === 0) {
+    return { cls: "muted", text: "0-0 · football-data monitora (sem cota paga)" };
+  }
+
+  if (game.scorers_complete && game.scorers) {
+    const via = latest.includes("TheSportsDB") ? "TheSportsDB (failover)" : "API-Football";
+    return { cls: "ok", text: `✓ Goleadores: ${game.scorers} · ${via} ×${latest.includes("TheSportsDB") ? tsd : af}` };
+  }
+
+  if (latest.includes("paga sem cota") || latest.includes("failover TheSportsDB")) {
+    if (latest.includes("sem goleador")) {
+      return { cls: "retry", text: `⚠ Failover TheSportsDB · sem goleador ainda · retry ×${tsd}` };
+    }
+    return { cls: "warn", text: `⚠ Paga sem cota → failover TheSportsDB ×${tsd}` };
+  }
+
+  if (latest.startsWith("✗") || latest.includes("retry")) {
+    return { cls: "retry", text: `⏳ Buscando goleador… retry API-Football ×${af}` };
+  }
+
+  if (latest.includes("buscando autor") || latest.includes("gol!")) {
+    return { cls: "wait", text: `⚽ Gol detectado (football-data) → chamando API-Football ×${af}` };
+  }
+
+  return { cls: "wait", text: `⏳ Aguardando goleador · API-Football ×${af}` };
+}
+
+function startedAt(evs: GameEvent[]) {
+  const start = [...evs].reverse().find((e) => e.action.includes("começou"));
+  return start ? timeHM(start.at) : null;
+}
+
+const API_LABELS: Record<string, { name: string; role: string; limit?: string }> = {
+  football_data: { name: "football-data", role: "placar · intervalo · fim", limit: "10/min · ilimitada" },
+  api_football: { name: "API-Football", role: "goleador ao vivo + fim (paga)" },
+  thesportsdb: { name: "TheSportsDB", role: "failover ao vivo + re-confirmação", limit: "30/min · ilimitada" },
+  ai_reconcile: { name: "IA merge", role: "confirma/casa goleadores", limit: "≈2/jogo cacheado" },
+  ai_insight: { name: "IA resenha", role: "texto do card de palpite", limit: "1/próximo jogo" },
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -71,10 +148,6 @@ const STATUS_LABEL: Record<string, string> = {
   finished: "Encerrado",
   postponed: "Adiado",
 };
-
-function gameKey(g: GameRow) {
-  return g.match_number ?? `${g.home_team}-${g.away_team}`;
-}
 
 export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePanelProps) {
   const [openTimeline, setOpenTimeline] = useState<number | string | null>(null);
@@ -88,12 +161,13 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
     const map = new Map<number | string, GameRow>();
     for (const g of syncStatus.games_health ?? []) {
       const parts = g.matchup.split(" x ");
-      const row: GameRow = {
+      map.set(g.match_number ?? g.matchup, {
         match_number: g.match_number,
         home_team: parts[0] ?? "",
         away_team: parts[1] ?? "",
         status: g.status,
         score: g.score,
+        goals: g.goals,
         scorers: g.scorers,
         halftime: g.halftime,
         scorers_complete: g.scorers_complete,
@@ -103,8 +177,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         end_source: g.end_source,
         reconfirmed: g.reconfirmed,
         polls: g.polls,
-      };
-      map.set(g.match_number ?? g.matchup, row);
+      });
     }
     return map;
   }, [syncStatus.games_health]);
@@ -112,8 +185,8 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
   const games = useMemo(() => {
     const today = syncStatus.today_games ?? [];
     const merged: GameRow[] = today.map((g) => {
-      const key = g.match_number ?? `${g.home_team} x ${g.away_team}`;
-      const health = healthMap.get(g.match_number ?? key);
+      const hk = g.match_number ?? `${g.home_team} x ${g.away_team}`;
+      const health = healthMap.get(g.match_number ?? hk);
       return {
         match_number: g.match_number,
         home_team: g.home_team,
@@ -121,6 +194,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         kickoff_at: g.kickoff_at,
         status: g.status,
         score: g.score ?? health?.score,
+        goals: health?.goals,
         scorers: g.scorers ?? health?.scorers,
         halftime: g.halftime ?? health?.halftime,
         scorers_complete: g.scorers_complete ?? health?.scorers_complete,
@@ -133,10 +207,9 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
       };
     });
 
-    // jogos ao vivo/encerrados de ontem que ainda aparecem no health mas não em today
     for (const g of syncStatus.games_health ?? []) {
       const key = g.match_number ?? g.matchup;
-      if (merged.some((m) => (m.match_number ?? `${m.home_team}-${m.away_team}`) === key)) continue;
+      if (merged.some((m) => eventKey(m) === key || m.match_number === g.match_number)) continue;
       const parts = g.matchup.split(" x ");
       merged.push({
         match_number: g.match_number,
@@ -144,6 +217,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         away_team: parts[1] ?? "",
         status: g.status,
         score: g.score,
+        goals: g.goals,
         scorers: g.scorers,
         halftime: g.halftime,
         scorers_complete: g.scorers_complete,
@@ -166,7 +240,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
   }, [healthMap, syncStatus.games_health, syncStatus.today_games]);
 
   const eventsByGame = useMemo(() => {
-    const map = new Map<number | string, typeof syncStatus.game_events>();
+    const map = new Map<number | string, GameEvent[]>();
     for (const ev of syncStatus.game_events ?? []) {
       const key = ev.match_number ?? ev.game;
       const list = map.get(key) ?? [];
@@ -177,10 +251,25 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
   }, [syncStatus.game_events]);
 
   const lastOk = syncStatus.games_sync?.ok !== false;
+  const pendentes = (syncStatus.games_health ?? []).filter((g) => g.status === "finished" && !g.scorers_final);
+  const verdictOk = lastOk && pendentes.length === 0;
+
+  const activeGames = games.filter((g) => g.status === "live" || g.status === "finished");
+  const scheduledGames = games.filter((g) => g.status === "scheduled");
 
   return (
     <div className="wc-dash">
       {error && <p className="bolao-feedback error">{error}</p>}
+
+      {/* Veredito */}
+      <div className={verdictOk ? "wc-dash-verdict ok" : "wc-dash-verdict warn"}>
+        <strong>{verdictOk ? "✓ Rodando certinho" : "⚠ Verificar"}</strong>
+        <span>
+          {fast ? "janela ao vivo ativa" : "modo ocioso"} · sync {agoLabel(cadence?.last_sync_at ?? syncStatus.last_sync, currentTime)}
+          {!lastOk && " · último ciclo falhou"}
+          {pendentes.length > 0 && ` · ${pendentes.length} jogo(s) sem confirmação final`}
+        </span>
+      </div>
 
       {/* Placar ao vivo — modo + cadência */}
       <div className={`wc-dash-hero${fast ? " live" : ""}`}>
@@ -193,13 +282,12 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
             Modo: {fast ? "RÁPIDO" : "LENTO"}
             <span className={`wc-dash-mode-badge${fast ? " fast" : " slow"}`}>
               {fast ? <Zap size={12} /> : <Clock3 size={12} />}
-              1 req a cada {loopSec >= 60 ? `${Math.round(loopSec / 60)}min` : `${loopSec}s`}
+              1 req a cada {fast ? "30s" : "10min"}
             </span>
           </strong>
           <span className="wc-dash-hero-sub">
-            Última sync {agoLabel(cadence?.last_sync_at ?? syncStatus.last_sync, currentTime)} · próxima{" "}
-            {inLabel(cadence?.last_sync_at ?? syncStatus.last_sync, loopSec, currentTime)}
-            {!lastOk && " · ⚠ último ciclo falhou"}
+            Próximo ciclo {inLabel(cadence?.last_sync_at ?? syncStatus.last_sync, loopSec, currentTime)}
+            {cadence?.goal_pending && " · gol pendente (disparando paga)"}
           </span>
         </div>
         <div className="wc-dash-hero-stats">
@@ -208,11 +296,11 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
             <strong>{syncStatus.totals.live_games ?? 0}</strong>
           </div>
           <div className="wc-dash-stat">
-            <span className="wc-dash-stat-k"><Goal size={11} /> Encerrados</span>
-            <strong>{syncStatus.totals.finished_games}</strong>
+            <span className="wc-dash-stat-k"><Goal size={11} /> Hoje</span>
+            <strong>{games.length}</strong>
           </div>
           <div className="wc-dash-stat">
-            <span className="wc-dash-stat-k"><Zap size={11} /> Cota paga</span>
+            <span className="wc-dash-stat-k"><Zap size={11} /> Paga hoje</span>
             <strong>
               {syncStatus.requests_today?.api_football?.calls ?? 0}
               {syncStatus.requests_today?.api_football?.daily_cap
@@ -223,126 +311,142 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         </div>
       </div>
 
-      {/* Cards por jogo */}
-      {games.length > 0 && (
+      {/* Cards — ao vivo + encerrados */}
+      {activeGames.length > 0 && (
         <section className="wc-dash-games">
-          <div className="wc-dash-section-title">Jogos — timeline & confirmação</div>
+          <div className="wc-dash-section-title">Ao vivo & encerrados</div>
           <div className="wc-dash-game-list">
-            {games.map((game) => {
-              const key = gameKey(game);
+            {activeGames.map((game) => {
+              const key = eventKey(game);
               const evs = eventsByGame.get(game.match_number ?? `${game.home_team} x ${game.away_team}`) ?? [];
               const timelineOpen = openTimeline === key;
               const confirmOpen = openConfirm === key;
               const srcs = (game.confirmation_sources ?? "").split(",").map((s) => s.trim()).filter(Boolean);
               const af = game.polls?.api_football ?? 0;
               const tsd = game.polls?.thesportsdb ?? 0;
+              const nowStatus = liveNowStatus(game, evs);
+              const kick = startedAt(evs);
 
               return (
                 <article className={`wc-dash-game-card ${game.status}`} key={String(key)}>
                   <div className="wc-dash-game-head">
                     <div className="wc-dash-game-meta">
                       <span className={`wc-today-badge ${game.status}`}>
-                        {game.status === "live" && <span className="wc-live-dot small" />}
+                        {game.status === "live" && !game.halftime && <span className="wc-live-dot small" />}
                         {game.halftime && game.status === "live" ? "Intervalo" : STATUS_LABEL[game.status] ?? game.status}
                       </span>
-                      {game.match_number && <span className="wc-dash-game-num">#{game.match_number}</span>}
-                      {game.kickoff_at && <span className="wc-dash-game-time">{timeHM(game.kickoff_at)}</span>}
+                      {game.match_number != null && <span className="wc-dash-game-num">#{game.match_number}</span>}
+                      {game.kickoff_at && (
+                        <span className="wc-dash-game-time" title="Horário do jogo">
+                          jogo {timeHM(game.kickoff_at)}
+                        </span>
+                      )}
+                      {kick && (
+                        <span className="wc-dash-game-time started" title="Sistema marcou ao vivo">
+                          iniciou {kick}
+                        </span>
+                      )}
                     </div>
                     <div className="wc-dash-game-match">
                       <span><TeamFlag team={game.home_team} /> {teamLabel(game.home_team)}</span>
-                      <strong className="wc-dash-game-score">{game.score ?? "–"}</strong>
+                      <strong className="wc-dash-game-score">{game.score ?? "0-0"}</strong>
                       <span>{teamLabel(game.away_team)} <TeamFlag team={game.away_team} /></span>
                     </div>
-                    {game.scorers && (
-                      <div className="wc-dash-game-scorers"><Goal size={12} /> {game.scorers}</div>
-                    )}
-                    {game.status === "live" && !game.scorers && (
-                      <div className="wc-dash-game-hint muted">Sem gol ainda · football-data monitora</div>
+                    {nowStatus && (
+                      <div className={`wc-dash-live-now ${nowStatus.cls}`}>{nowStatus.text}</div>
                     )}
                   </div>
 
+                  {/* Dropdown 1: Timeline */}
                   <button
                     className={`wc-dash-drop${timelineOpen ? " open" : ""}`}
                     onClick={() => setOpenTimeline(timelineOpen ? null : key)}
                     type="button"
                   >
                     <span>Timeline</span>
-                    <small>{evs.length} evento{evs.length !== 1 ? "s" : ""}</small>
+                    <small>gol · chamada · retry · intervalo · fim</small>
                     <ChevronDown size={15} className="wc-dash-drop-chevron" />
                   </button>
                   {timelineOpen && (
-                    <div className="wc-dash-drop-body">
+                    <div className="wc-dash-drop-body timeline">
                       {evs.length > 0 ? (
-                        [...evs].reverse().map((ev, i) => (
-                          <div className="wc-dash-event" key={i}>
-                            <span className="wc-dash-event-time">{timeHM(ev.at)}</span>
-                            <span className="wc-dash-event-text">{ev.action}</span>
-                          </div>
-                        ))
+                        <div className="wc-dash-timeline">
+                          {[...evs].reverse().map((ev, i) => (
+                            <div className={`wc-dash-tl-row tone-${eventTone(ev.action)}`} key={i}>
+                              <span className="wc-dash-tl-dot" aria-hidden="true" />
+                              <div className="wc-dash-tl-content">
+                                <span className="wc-dash-tl-time">{timeHM(ev.at)}</span>
+                                <span className="wc-dash-tl-text">{ev.action}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       ) : (
-                        <p className="wc-dash-empty">Nenhum evento registrado ainda.</p>
+                        <p className="wc-dash-empty">Nenhum evento ainda — começa no horário ou quando football-data confirma IN_PLAY.</p>
                       )}
-                      {(af > 0 || tsd > 0) && (
-                        <p className="wc-dash-polls">
-                          Chamadas neste jogo: API-Football ×{af} · TheSportsDB ×{tsd}
-                        </p>
-                      )}
+                      <p className="wc-dash-polls">
+                        Neste jogo: API-Football ×{af} · TheSportsDB ×{tsd}
+                      </p>
                     </div>
                   )}
 
-                  {(game.status === "finished" || game.status === "live") && (
-                    <>
-                      <button
-                        className={`wc-dash-drop confirm${confirmOpen ? " open" : ""}`}
-                        onClick={() => setOpenConfirm(confirmOpen ? null : key)}
-                        type="button"
-                      >
-                        <span>Confirmação</span>
-                        <small>
-                          {game.end_source ? `fim: ${game.end_source}` : "aguardando"}
-                          {game.reconfirmed ? " · re-confirmado" : game.status === "finished" ? " · +10min pendente" : ""}
-                        </small>
-                        <ChevronDown size={15} className="wc-dash-drop-chevron" />
-                      </button>
-                      {confirmOpen && (
-                        <div className="wc-dash-drop-body confirm">
-                          <div className="wc-dash-confirm-step">
-                            <span className="lbl">Finalizou</span>
-                            <span className={game.end_source ? "ok" : "wait"}>
-                              {game.end_source ?? "—"}
-                            </span>
-                          </div>
-                          <div className="wc-dash-confirm-step">
-                            <span className="lbl">API paga (fim)</span>
-                            <span className={game.scorers_final ? "ok" : game.status === "live" ? "muted" : "wait"}>
-                              {game.scorers_final
-                                ? `API-Football ✓ · ${game.scorers || "sem goleador"}`
-                                : game.status === "live"
-                                  ? "aguarda o apito"
-                                  : `API-Football ×${af} — aguardando`}
-                            </span>
-                          </div>
-                          <div className="wc-dash-confirm-step">
-                            <span className="lbl">Re-confirmação (+10min)</span>
-                            <span className={game.reconfirmed ? "ok" : "wait"}>
-                              {game.reconfirmed
-                                ? `${srcs.join(" + ") || "TheSportsDB + openfootball"}${srcs.includes("IA") || syncStatus.sources.ai_configured ? " + IA" : ""}`
-                                : "TheSportsDB + openfootball + IA (agendado)"}
-                            </span>
-                          </div>
-                          {srcs.length > 0 && (
-                            <div className="wc-dash-confirm-sources">
-                              {srcs.map((s) => (
-                                <span className="wc-dash-src-chip" key={s}>{s}</span>
-                              ))}
-                              {game.reconfirmed && syncStatus.sources.ai_configured && (
-                                <span className="wc-dash-src-chip">IA</span>
-                              )}
-                            </div>
-                          )}
+                  {/* Dropdown 2: Confirmação */}
+                  <button
+                    className={`wc-dash-drop confirm${confirmOpen ? " open" : ""}`}
+                    onClick={() => setOpenConfirm(confirmOpen ? null : key)}
+                    type="button"
+                  >
+                    <span>Confirmação</span>
+                    <small>fim · API paga · re-confirmação (+10min)</small>
+                    <ChevronDown size={15} className="wc-dash-drop-chevron" />
+                  </button>
+                  {confirmOpen && (
+                    <div className="wc-dash-drop-body confirm">
+                      <div className="wc-dash-confirm-step">
+                        <span className="lbl">1. Finalizou</span>
+                        <span className={game.end_source ? "ok" : "wait"}>
+                          {game.end_source
+                            ? `${game.end_source} ✓`
+                            : game.status === "live"
+                              ? "aguardando apito (football-data)"
+                              : "—"}
+                        </span>
+                      </div>
+                      <div className="wc-dash-confirm-step">
+                        <span className="lbl">2. API paga (fim)</span>
+                        <span className={game.scorers_final ? "ok" : game.status === "live" ? "muted" : "wait"}>
+                          {game.scorers_final
+                            ? `API-Football ✓ · ${game.scorers || "sem goleador"}`
+                            : game.status === "live"
+                              ? "roda 1× no apito final"
+                              : `API-Football ×${af} — aguardando resposta`}
+                        </span>
+                      </div>
+                      <div className="wc-dash-confirm-step">
+                        <span className="lbl">3. Re-confirmação</span>
+                        <span className={game.reconfirmed ? "ok" : "wait"}>
+                          {game.reconfirmed ? "rodou (+10min)" : "agendada (+10min após o fim)"}
+                        </span>
+                      </div>
+                      <div className="wc-dash-confirm-checks">
+                        <span className={srcs.some((s) => s.toLowerCase().includes("thesports")) ? "ok" : game.reconfirmed ? "err" : "pending"}>
+                          TheSportsDB {srcs.some((s) => s.toLowerCase().includes("thesports")) ? "✓" : game.reconfirmed ? "✗" : "…"}
+                        </span>
+                        <span className={srcs.some((s) => s.toLowerCase().includes("openfootball")) ? "ok" : game.reconfirmed ? "err" : "pending"}>
+                          openfootball {srcs.some((s) => s.toLowerCase().includes("openfootball")) ? "✓" : game.reconfirmed ? "✗" : "…"}
+                        </span>
+                        <span className={game.reconfirmed && syncStatus.sources.ai_configured ? "ok" : game.reconfirmed ? "muted" : "pending"}>
+                          IA merge {game.reconfirmed && syncStatus.sources.ai_configured ? "✓" : game.reconfirmed ? "—" : "…"}
+                        </span>
+                      </div>
+                      {srcs.length > 0 && (
+                        <div className="wc-dash-confirm-sources">
+                          {srcs.map((s) => (
+                            <span className="wc-dash-src-chip" key={s}>{s}</span>
+                          ))}
                         </div>
                       )}
-                    </>
+                    </div>
                   )}
                 </article>
               );
@@ -351,13 +455,50 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         </section>
       )}
 
-      {/* Totais do dia por API */}
+      {scheduledGames.length > 0 && (
+        <section className="wc-dash-games scheduled">
+          <div className="wc-dash-section-title">Agendados hoje ({scheduledGames.length})</div>
+          <div className="wc-dash-scheduled-list">
+            {scheduledGames.map((game) => (
+              <div className="wc-dash-scheduled-row" key={String(eventKey(game))}>
+                <span className="wc-dash-game-time">{game.kickoff_at ? timeHM(game.kickoff_at) : "—"}</span>
+                <span>
+                  {game.match_number != null && `#${game.match_number} `}
+                  {teamLabel(game.home_team)} x {teamLabel(game.away_team)}
+                </span>
+                <span className="wc-dash-scheduled-hint">{fast ? "entra em modo rápido ~5min antes" : "modo lento"}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Log geral */}
+      {(syncStatus.game_events?.length ?? 0) > 0 && (
+        <section className="wc-dash-log-section">
+          <div className="wc-dash-section-title detail">Log geral — últimos eventos</div>
+          <div className="wc-dash-log-list">
+            {(syncStatus.game_events ?? []).slice(0, 20).map((ev, i) => (
+              <div className={`wc-log-row tone-${eventTone(ev.action)}`} key={i}>
+                <span className="wc-log-time">{timeHM(ev.at)}</span>
+                <span className="wc-log-game">{ev.match_number ? `#${ev.match_number}` : ev.game}</span>
+                <span className="wc-log-action">{ev.action}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Cotas do dia — cada API */}
       {syncStatus.requests_today && (
         <section className="wc-dash-apis">
-          <div className="wc-dash-section-title detail">Cotas do dia (UTC)</div>
+          <div className="wc-dash-section-title detail">Cotas do dia — cada API (UTC)</div>
           <div className="wc-dash-apis-grid">
             {Object.entries(syncStatus.requests_today).map(([key, r]) => {
               const meta = API_LABELS[key] ?? { name: key, role: "" };
+              const limitTxt = r.daily_cap
+                ? `${r.limit_per_min ?? "?"}/min · ${r.daily_cap}/dia`
+                : meta.limit ?? (r.limit_per_min ? `${r.limit_per_min}/min` : "ilimitada");
               return (
                 <div className="wc-api-card" key={key}>
                   <div className="wc-api-card-head">
@@ -368,10 +509,8 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
                     </span>
                   </div>
                   <span className="wc-api-label">{meta.role}</span>
-                  {r.remaining != null && <span className="wc-api-rem">sobra {r.remaining}</span>}
-                  {!r.daily_cap && r.limit_per_min && (
-                    <span className="wc-api-free">{r.limit_per_min}/min · ilimitada/dia</span>
-                  )}
+                  <span className="wc-api-limit">{limitTxt}</span>
+                  {r.remaining != null && <span className="wc-api-rem">sobra {r.remaining} hoje</span>}
                 </div>
               );
             })}
