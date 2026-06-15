@@ -2112,18 +2112,45 @@ export default function BolaoPage() {
                   );
                 })()}
 
-                {/* Legenda + cota */}
-                <div className="wc-tech-legend">
-                  <span><b>Placar/intervalo/fim:</b> football-data</span>
-                  <span><b>Goleador ao vivo:</b> API-Football no gol (failover TheSportsDB)</span>
-                  <span><b>Cota paga:</b> {syncStatus.requests_today?.api_football?.remaining ?? "?"}/{syncStatus.requests_today?.api_football?.daily_cap ?? 100}</span>
+                {/* ===== FLUXO / ETAPAS (as novas regras) ===== */}
+                <div className="wc-tech-block">
+                  <div className="wc-tech-h">Como funciona — etapas (já valendo)</div>
+                  <div className="wc-tech-flow">
+                    <div><span className="n">1</span> Placar · <b>intervalo</b> · fim → <b>football-data</b> (grátis, a cada {syncStatus.cadence?.loop_seconds ?? 30}s)</div>
+                    <div><span className="n">2</span> Gol detectado → <b>API-Football</b> pega o nome na hora (só no gol, com retry) · sem cota? <b>failover TheSportsDB</b></div>
+                    <div><span className="n">3</span> Fim do jogo → <b>API-Football</b> roda 1× e pega <b>todos</b> os goleadores (confirmação final)</div>
+                    <div><span className="n">4</span> +10 min → <b>TheSportsDB + openfootball + IA</b> re-confirmam e marcam quantas fontes batem</div>
+                    <div className="rule">Regra de ouro: a lista de goleadores só cresce (nunca perde) · todo nome é casado com o elenco oficial · limites nunca estouram.</div>
+                  </div>
                 </div>
 
-                {/* IA — quantas vezes rodou (confirma ~2/jogo · resenha) */}
-                <div className="wc-tech-legend">
-                  <span><b>IA confirma goleador:</b> {syncStatus.requests_today?.ai_reconcile?.calls ?? 0} hoje (≈2/jogo)</span>
-                  <span><b>IA resenha (card palpite):</b> {syncStatus.requests_today?.ai_insight?.calls ?? 0} hoje</span>
-                </div>
+                {/* ===== FONTES & LIMITES — uso hoje ===== */}
+                {syncStatus.requests_today && (
+                  <div className="wc-tech-block">
+                    <div className="wc-tech-h">Fontes & limites — uso hoje</div>
+                    {Object.entries(syncStatus.requests_today).map(([key, r]) => {
+                      const names: Record<string, string> = {
+                        football_data: "football-data", api_football: "API-Football",
+                        thesportsdb: "TheSportsDB", ai_reconcile: "IA · confirma goleador", ai_insight: "IA · resenha do card",
+                      };
+                      const role: Record<string, string> = {
+                        football_data: "placar · intervalo · fim", api_football: "nome do goleador (paga)",
+                        thesportsdb: "2ª confirmação + failover", ai_reconcile: "≈2 por jogo (cacheada)", ai_insight: "card de palpite",
+                      };
+                      const limit = r.daily_cap
+                        ? `${r.limit_per_min ?? "?"}/min · ${r.daily_cap}/dia`
+                        : r.limit_per_min ? `${r.limit_per_min}/min` : "ilimitada";
+                      return (
+                        <div className="wc-tech-row" key={key}>
+                          <span className="k">{names[key] ?? key}</span>
+                          <span className="d">{role[key]}</span>
+                          <span className="v">{r.calls}{r.daily_cap ? `/${r.daily_cap}` : ""}{r.remaining != null ? ` · sobra ${r.remaining}` : ""}</span>
+                          <span className="lim">{limit}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* ===== AO VIVO AGORA ===== */}
                 {(syncStatus.games_health ?? []).some((g) => g.status === "live") && (
