@@ -2698,9 +2698,19 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
             updated += 1
 
         if home_score is not None and away_score is not None:
+            was_finished = (game.status or "") == "finished"
             game.home_score = home_score
             game.away_score = away_score
             game.status = "finished"
+            game.halftime = False
+            # openfootball também é uma fonte de FIM: registra quem encerrou e quando,
+            # pra agendar a re-confirmação de +10min e mostrar a fonte no painel
+            if not game.end_source:
+                game.end_source = "openfootball"
+            if not game.finished_at:
+                game.finished_at = datetime.utcnow()
+            if not was_finished:
+                log_game_event(db, game, f"🏁 encerrado {home_score}-{away_score} (openfootball)")
         if scorers:
             # União: o openfootball traz nomes oficiais, mas não pode apagar
             # goleadores que o feed ao vivo já tinha capturado
