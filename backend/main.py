@@ -3276,52 +3276,88 @@ def send_email(recipients: list[str], subject: str, html_body: str) -> tuple[boo
 def world_cup_bet_email_html(game: models.WorldCupGame, predictions: list[models.WorldCupPrediction]) -> str:
     """E-mail de transparência no estilo do bolão (dark + acento Conversys): lista
     TODOS os palpites trancados do jogo, pra todo mundo ver que ninguém mexe nada."""
-    kickoff_brt = (game.kickoff_at - timedelta(hours=3)).strftime("%d/%m às %Hh%M") if game.kickoff_at else "a confirmar"
+    kickoff_brt = (game.kickoff_at - timedelta(hours=3)).strftime("%d/%m · %Hh%M") if game.kickoff_at else "a confirmar"
+    mn = f"Jogo #{game.match_number}" if game.match_number else "Jogo"
     rows = []
     for i, p in enumerate(predictions):
         nome = (p.user.name if p.user else None) or "—"
-        placar = f"{p.home_score or 0} <span style='color:#5b6b86'>x</span> {p.away_score or 0}"
-        artil = (p.scorer_guess or "").strip() or "—"
-        bg = "#0f1626" if i % 2 == 0 else "#0b1120"
+        artil = (p.scorer_guess or "").strip()
+        artil_html = (
+            f"<span style='color:#39d98a;font-weight:700;'>⚽ {artil}</span>"
+            if artil else "<span style='color:#5b6b86;'>—</span>"
+        )
+        bg = "#0e1729" if i % 2 == 0 else "#0a1120"
         rows.append(
             f"<tr style='background:{bg};'>"
-            f"<td style='padding:11px 14px;color:#e8eefc;font-weight:700;border-bottom:1px solid #1b2740;'>{nome}</td>"
-            f"<td style='padding:11px 14px;color:#fff;font-weight:800;text-align:center;font-variant-numeric:tabular-nums;border-bottom:1px solid #1b2740;white-space:nowrap;'>{placar}</td>"
-            f"<td style='padding:11px 14px;color:#39d98a;font-weight:700;border-bottom:1px solid #1b2740;'>⚽ {artil}</td>"
+            f"<td style='padding:12px 16px;color:#e8eefc;font-weight:700;font-size:14px;border-bottom:1px solid #16223d;'>{nome}</td>"
+            f"<td style='padding:12px 10px;text-align:center;border-bottom:1px solid #16223d;'>"
+            f"<span style='display:inline-block;background:#13203a;border:1px solid #243a63;border-radius:8px;padding:4px 11px;color:#ffffff;font-weight:800;font-size:14px;white-space:nowrap;'>{p.home_score or 0} <span style='color:#5b6b86;'>×</span> {p.away_score or 0}</span>"
+            f"</td>"
+            f"<td style='padding:12px 16px;font-size:13px;border-bottom:1px solid #16223d;'>{artil_html}</td>"
             f"</tr>"
         )
     rows_html = "".join(rows)
-    app_link = (
-        f"<a href='{PUBLIC_APP_URL}/bolao' style='color:#22d3ee;text-decoration:none;font-weight:700;'>ver no app →</a>"
+    cta = (
+        f"<tr><td align='center' style='background:#0a1120;padding:6px 22px 22px;'>"
+        f"<a href='{PUBLIC_APP_URL}/bolao' style='display:inline-block;background:#2b6cff;color:#ffffff;text-decoration:none;font-weight:800;font-size:14px;padding:12px 26px;border-radius:10px;'>Ver o bolão ao vivo →</a>"
+        f"</td></tr>"
         if PUBLIC_APP_URL else ""
     )
-    return f"""<!doctype html><html><body style="margin:0;background:#070b16;">
-<div style="background:#070b16;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
+    chip = "display:inline-block;background:#13203a;border:1px solid #243a63;border-radius:999px;padding:4px 12px;color:#aebfe0;font-size:12px;font-weight:700;margin:2px 3px;"
+    return f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;background:#06090f;">
+<div style="background:#06090f;padding:24px 12px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:16px;overflow:hidden;border:1px solid #1b2740;">
-      <tr><td style="background:#2b6cff;padding:18px 22px;">
-        <div style="color:#dbe6ff;font-size:12px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">Bolão Fut Conversys · Copa 2026</div>
-        <div style="color:#ffffff;font-size:20px;font-weight:900;margin-top:4px;">🔒 Apostas trancadas</div>
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:18px;overflow:hidden;border:1px solid #1b2740;background:#0a1120;">
+      <!-- barra de acento da marca -->
+      <tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td height="5" style="background:#2b6cff;font-size:0;line-height:0;">&nbsp;</td>
+        <td height="5" style="background:#22d3ee;font-size:0;line-height:0;">&nbsp;</td>
+        <td height="5" style="background:#39d98a;font-size:0;line-height:0;">&nbsp;</td>
+      </tr></table></td></tr>
+
+      <!-- header -->
+      <tr><td style="background:#0d1426;padding:20px 24px 16px;">
+        <div style="color:#6f86c4;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">⚽ Bolão Fut Conversys · Copa 2026</div>
+        <div style="color:#ffffff;font-size:22px;font-weight:900;margin-top:6px;">🔒 Apostas trancadas</div>
+        <div style="color:#8fa3c8;font-size:13px;margin-top:4px;">Transparência total — todo mundo recebe os mesmos palpites no fechamento. Ninguém muda nada depois.</div>
       </td></tr>
-      <tr><td style="background:#0b1120;padding:20px 22px;">
-        <div style="color:#8fa3c8;font-size:13px;">Jogo {('#' + str(game.match_number) + ' · ') if game.match_number else ''}fecha agora · começa {kickoff_brt} (Brasília)</div>
-        <div style="color:#ffffff;font-size:22px;font-weight:900;margin:8px 0 2px;">{game.home_team} <span style="color:#5b6b86;">x</span> {game.away_team}</div>
-        <div style="color:#c7d0dd;font-size:13px;margin-top:6px;">{len(predictions)} palpite(s) registrado(s). Lista enviada automaticamente no fechamento — ninguém muda mais nada. {app_link}</div>
+
+      <!-- hero do jogo -->
+      <tr><td style="background:#0a1120;padding:22px 24px 8px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td width="44%" align="right" style="color:#ffffff;font-size:19px;font-weight:900;">{game.home_team}</td>
+          <td width="12%" align="center"><span style="display:inline-block;background:#2b6cff;color:#fff;font-size:12px;font-weight:900;padding:6px 10px;border-radius:999px;">VS</span></td>
+          <td width="44%" align="left" style="color:#ffffff;font-size:19px;font-weight:900;">{game.away_team}</td>
+        </tr></table>
+        <div style="text-align:center;margin-top:12px;">
+          <span style="{chip}">{mn}</span>
+          <span style="{chip}">🕒 começa {kickoff_brt} (Brasília)</span>
+          <span style="{chip}">🔒 {len(predictions)} palpites</span>
+        </div>
       </td></tr>
-      <tr><td style="background:#0b1120;padding:0 22px 8px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:12px;overflow:hidden;border:1px solid #1b2740;">
-          <tr style="background:#13203a;">
-            <td style="padding:9px 14px;color:#8fa3c8;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">Jogador</td>
-            <td style="padding:9px 14px;color:#8fa3c8;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;text-align:center;">Placar</td>
-            <td style="padding:9px 14px;color:#8fa3c8;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">Artilheiro</td>
+
+      <!-- tabela de palpites -->
+      <tr><td style="background:#0a1120;padding:14px 24px 6px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:12px;overflow:hidden;border:1px solid #16223d;">
+          <tr style="background:#101d36;">
+            <td style="padding:10px 16px;color:#7f93bd;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;background:#101d36;">Jogador</td>
+            <td style="padding:10px 10px;color:#7f93bd;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;text-align:center;background:#101d36;">Placar</td>
+            <td style="padding:10px 16px;color:#7f93bd;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;background:#101d36;">Artilheiro</td>
           </tr>
           {rows_html}
         </table>
       </td></tr>
-      <tr><td style="background:#0b1120;padding:14px 22px 20px;">
+
+      {cta}
+
+      <!-- rodapé -->
+      <tr><td style="background:#0d1426;padding:16px 24px 20px;border-top:1px solid #16223d;">
+        <div style="margin-bottom:8px;">
+          <span style="{chip}">Placar exato · 3</span><span style="{chip}">Vencedor · 1</span><span style="{chip}">Artilheiro · +1</span><span style="{chip}">Campeã · 10</span>
+        </div>
         <div style="color:#5b6b86;font-size:11px;line-height:1.6;">
-          Pontuação: placar exato <b style="color:#8fa3c8;">3</b> · vencedor <b style="color:#8fa3c8;">1</b> · artilheiro <b style="color:#8fa3c8;">+1</b> · campeã <b style="color:#8fa3c8;">10</b>.<br>
-          E-mail automático e transparente do Bolão Fut Conversys — todos recebem os mesmos palpites no momento do fechamento.
+          E-mail automático e transparente do <b style="color:#8fa3c8;">Bolão Fut Conversys</b> — enviado pra todos no momento exato em que a aposta fechou.
         </div>
       </td></tr>
     </table>
