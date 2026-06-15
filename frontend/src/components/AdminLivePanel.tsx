@@ -24,7 +24,7 @@ type GameRow = {
   scorers_final?: boolean;
   end_source?: string | null;
   reconfirmed?: boolean;
-  polls?: { api_football: number; thesportsdb: number };
+  polls?: { gratuito: number; api_football: number; thesportsdb: number; ia: number };
 };
 
 type GameEvent = NonNullable<WorldCupSyncStatus["game_events"]>[number];
@@ -343,10 +343,6 @@ function ConfirmStepCard({ step }: { step: ConfirmStep }) {
   );
 }
 
-function iaStats(evs: GameEvent[]) {
-  return evs.filter((e) => e.api === "IA merge" && /ia —/i.test(e.action)).length;
-}
-
 export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePanelProps) {
   const [openTimeline, setOpenTimeline] = useState<number | string | null>(null);
   const [openConfirm, setOpenConfirm] = useState<number | string | null>(null);
@@ -439,6 +435,8 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
   const apiPaid = syncStatus.requests_today?.api_football;
   const apiRem = apiPaid?.remaining ?? syncStatus.sources?.api_football_daily_remaining;
   const activeGames = games.filter((g) => g.status === "live" || g.status === "finished");
+  const liveGame = games.find((g) => g.status === "live");
+  const livePolls = liveGame?.polls;
 
   return (
     <div className="wc-dash">
@@ -474,6 +472,26 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
             <span className="wc-dash-stat-k">Pendente</span>
             <strong>{cadence?.goal_pending ? "Sim" : "Não"}</strong>
           </div>
+          {livePolls && (
+            <>
+              <div className="wc-dash-stat">
+                <span className="wc-dash-stat-k">Grátis</span>
+                <strong>{livePolls.gratuito ?? 0}x</strong>
+              </div>
+              <div className="wc-dash-stat">
+                <span className="wc-dash-stat-k">Paga</span>
+                <strong>{livePolls.api_football ?? 0}x</strong>
+              </div>
+              <div className="wc-dash-stat">
+                <span className="wc-dash-stat-k">DB</span>
+                <strong>{livePolls.thesportsdb ?? 0}x</strong>
+              </div>
+              <div className="wc-dash-stat">
+                <span className="wc-dash-stat-k">IA</span>
+                <strong>{livePolls.ia ?? 0}x</strong>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -489,7 +507,6 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
               const chronological = compactTimeline(evs, retryMax);
               const timelineOpen = openTimeline === key;
               const confirmOpen = openConfirm === key;
-              const iaCount = iaStats(evs);
               const confirmSteps = buildConfirmSteps(evs, game, retryMax);
               const hasErr = evs.some((e) => e.ok === false);
 
@@ -506,9 +523,10 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
                         {game.status === "live" && <span className="wc-live-dot small" />}
                         {game.halftime ? "Intervalo" : game.status === "live" ? "Ao vivo" : "Encerrado"}
                       </span>
+                      <span className="wc-dash-chip gratis">Grátis {game.polls?.gratuito ?? 0}x</span>
                       <span className="wc-dash-chip paid">Paga {game.polls?.api_football ?? 0}x</span>
-                      <span className="wc-dash-chip tsd">SportsDB {game.polls?.thesportsdb ?? 0}x</span>
-                      {iaCount > 0 && <span className="wc-dash-chip ia">IA {iaCount}x</span>}
+                      <span className="wc-dash-chip tsd">DB {game.polls?.thesportsdb ?? 0}x</span>
+                      <span className="wc-dash-chip ia">IA {game.polls?.ia ?? 0}x</span>
                     </div>
                     {game.scorers && (
                       <div className="wc-dash-game-scorers"><Goal size={12} /> {game.scorers}</div>

@@ -1810,8 +1810,7 @@ def bump_thesportsdb_call(db: Session | None) -> None:
 
 
 def bump_game_poll(db: Session, game_id: int, api: str) -> None:
-    """Conta quantas vezes cada API foi consultada PARA ESTE JOGO (pro painel:
-    'rodou N× na API-Football, M× na TheSportsDB')."""
+    """Conta quantas vezes cada API foi consultada PARA ESTE JOGO (pro painel)."""
     key = f"gpoll_{api}_{game_id}"
     raw = get_app_setting(db, key)
     n = int(raw) if (raw or "").isdigit() else 0
@@ -1821,6 +1820,101 @@ def bump_game_poll(db: Session, game_id: int, api: str) -> None:
 def game_poll_count(db: Session, game_id: int, api: str) -> int:
     raw = get_app_setting(db, f"gpoll_{api}_{game_id}")
     return int(raw) if (raw or "").isdigit() else 0
+
+
+def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[dict[str, Any]]:
+    """Reconstrói timeline limpa do jogo: remove spam, mantém fatos reais, zera contadores velhos."""
+    raw = get_app_setting(db, "wc_game_events")
+    try:
+        all_ev = json.loads(raw) if raw else []
+    except json.JSONDecodeError:
+        all_ev = []
+    old = [e for e in all_ev if e.get("match_number") == game.match_number]
+    others = [e for e in all_ev if e.get("match_number") != game.match_number]
+    mn = game.match_number
+    gname = f"{game.home_team} x {game.away_team}"
+
+    def pick_at(pred, fallback: str | None = None) -> str:
+        for e in sorted(old, key=lambda x: x["at"]):
+            if pred(e):
+                return e["at"]
+        return fallback or datetime.now(timezone.utc).isoformat()
+
+    clean: list[dict[str, Any]] = []
+
+    clean.append({
+        "at": pick_at(lambda e: "começou" in e.get("action", "").lower() or "início" in e.get("action", "").lower()),
+        "match_number": mn, "game": gname,
+        "action": "Início do jogo — palpites fechados",
+        "phase": "gratuito", "api": "calendário", "ok": True,
+    })
+
+    seen_scores: set[str] = set()
+    for e in sorted(old, key=lambda x: x["at"]):
+        act = e.get("action", "")
+        if not re.search(r"gol|placar virou", act, re.I):
+            continue
+        m = re.search(r"(\d+-\d+)", act)
+        if not m or m.group(1) in seen_scores:
+            continue
+        seen_scores.add(m.group(1))
+        clean.append({
+            "at": e["at"], "match_number": mn, "game": gname,
+            "action": f"Gol detectado — placar {m.group(1)}",
+            "phase": "gratuito", "api": "football-data", "ok": True,
+        })
+
+    af = 0
+    ia = 0
+    for e in sorted(old, key=lambda x: x["at"]):
+        act = e.get("action", "")
+        if "API paga — achou" in act or (
+            e.get("api") == "API-Football" and e.get("ok") and "achou" in act.lower()
+        ):
+            t = e["at"]
+            names_m = re.search(r"achou:\s*(.+)", act, re.I)
+            names_s = names_m.group(1).strip() if names_m else (game.scorers or "")
+            clean.append({"at": t, "match_number": mn, "game": gname, "action": "API paga — consulta artilheiro", "phase": "ao_vivo", "api": "API-Football"})
+            clean.append({"at": t, "match_number": mn, "game": gname, "action": f"API paga — achou: {names_s}", "phase": "ao_vivo", "api": "API-Football", "ok": True})
+            af += 1
+
+    for e in sorted(old, key=lambda x: x["at"]):
+        act = e.get("action", "")
+        if not (e.get("api") == "IA merge" and e.get("ok") and re.search(r"resultado|merge|✓", act, re.I)):
+            continue
+        t = e["at"]
+        names_s = game.scorers or ""
+        for pat in (r"resultado:\s*(.+)", r"✓ —\s*(.+)", r"—\s*(.+)"):
+            m = re.search(pat, act)
+            if m:
+                names_s = m.group(1).strip()
+                break
+        t_consulta = pick_at(
+            lambda ev, _t=t: ev.get("at", "") <= _t and ev.get("api") == "IA merge"
+            and re.search(r"consulta|chamada", ev.get("action", ""), re.I),
+            t,
+        )
+        clean.append({"at": t_consulta, "match_number": mn, "game": gname, "action": "IA — consulta (API paga)", "phase": "ao_vivo", "api": "IA merge"})
+        clean.append({"at": t, "match_number": mn, "game": gname, "action": f"IA — resultado: {names_s}", "phase": "ao_vivo", "api": "IA merge", "ok": True})
+        ia += 1
+
+    clean.sort(key=lambda x: x["at"])
+    merged = list(reversed(clean)) + others
+    set_app_setting(db, "wc_game_events", json.dumps(merged[:100], ensure_ascii=False))
+
+    gratis = sum(1 for e in clean if e.get("api") in ("football-data", "calendário"))
+    set_app_setting(db, f"gpoll_af_{game.id}", str(af))
+    set_app_setting(db, f"gpoll_tsd_{game.id}", "0")
+    set_app_setting(db, f"gpoll_ia_{game.id}", str(ia))
+    set_app_setting(db, f"gpoll_gratis_{game.id}", str(gratis))
+
+    cur = f"{game.home_score or 0}-{game.away_score or 0}"
+    if world_cup_scorers_complete(game):
+        set_app_setting(db, f"wc_live_polled_{game.id}", f"{cur}:done")
+    else:
+        set_app_setting(db, f"wc_live_polled_{game.id}", f"{cur}:0:0")
+
+    return list(reversed(clean))
 
 
 def log_game_event(
@@ -1871,6 +1965,7 @@ def refresh_world_cup_live_statuses(db: Session) -> bool:
         game.status = "live"
         changed = True
         log_game_event(db, game, "Início do jogo — palpites fechados", phase="gratuito", api="calendário", ok=True)
+        bump_game_poll(db, game.id, "gratis")
     return changed
 
 
@@ -1979,6 +2074,7 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
                         f"Gol detectado — placar {lh}-{la}",
                         phase="gratuito", api="football-data", ok=True,
                     )
+                    bump_game_poll(db, game.id, "gratis")
                     set_app_setting(db, f"wc_goal_at_{game.id}", datetime.now(timezone.utc).isoformat())
                     set_app_setting(db, f"wc_live_polled_{game.id}", f"{lh}-{la}:0:0")
                 # INTERVALO: football-data manda PAUSED no intervalo
@@ -3098,6 +3194,7 @@ def ai_reconcile_scorers(
     if total == 0:
         return []
     log_game_event(db, game, f"IA — consulta ({source_label})", phase=phase, api="IA merge")
+    bump_game_poll(db, game.id, "ia")
     fontes_txt = "; ".join(f"{name}: {', '.join(lst) if lst else '(vazio)'}" for name, lst in sources.items())
     squad_txt = ", ".join((squad or [])[:60])
     text = openai_chat(
@@ -4200,7 +4297,12 @@ def world_cup_sync_status(
                 "end_source": g.end_source,
                 "halftime": bool(g.halftime),
                 "reconfirmed": bool(g.reconfirmed),
-                "polls": {"api_football": game_poll_count(db, g.id, "af"), "thesportsdb": game_poll_count(db, g.id, "tsd")},
+                "polls": {
+                    "gratuito": game_poll_count(db, g.id, "gratis"),
+                    "api_football": game_poll_count(db, g.id, "af"),
+                    "thesportsdb": game_poll_count(db, g.id, "tsd"),
+                    "ia": game_poll_count(db, g.id, "ia"),
+                },
                 "has_fixture_id": g.api_fixture_id is not None,
                 "predictions": len(g.predictions),
             }
@@ -4247,6 +4349,35 @@ def submit_world_cup_prediction(
     db.commit()
     db.refresh(game)
     return world_cup_game_response(game, user)
+
+
+@app.post("/api/world-cup/games/{game_id}/sanitize-logs")
+def sanitize_world_cup_game_logs(
+    game_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Apenas o admin pode sanitizar logs do jogo")
+
+    game = db.query(models.WorldCupGame).filter(models.WorldCupGame.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Jogo do bolão não encontrado")
+
+    events = rebuild_clean_game_timeline(db, game)
+    db.commit()
+    return {
+        "ok": True,
+        "match_number": game.match_number,
+        "matchup": f"{game.home_team} x {game.away_team}",
+        "events": len(events),
+        "polls": {
+            "gratuito": game_poll_count(db, game.id, "gratis"),
+            "api_football": game_poll_count(db, game.id, "af"),
+            "thesportsdb": game_poll_count(db, game.id, "tsd"),
+            "ia": game_poll_count(db, game.id, "ia"),
+        },
+    }
 
 
 @app.post("/api/world-cup/games/{game_id}/result")
