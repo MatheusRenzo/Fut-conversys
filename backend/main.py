@@ -138,6 +138,7 @@ WORLD_CUP_LIVE_INTERVAL = max(25, int(os.getenv("WORLD_CUP_LIVE_INTERVAL_SECONDS
 WORLD_CUP_IDLE_INTERVAL = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600")))
 # Schedule (openfootball/football-data) revalida no máximo a cada N segundos
 WORLD_CUP_SCHEDULE_MIN_GAP = max(120, int(os.getenv("WORLD_CUP_SCHEDULE_MIN_GAP", "300")))
+BOARD_LIVE_SCORE_GAP = max(10, int(os.getenv("BOARD_LIVE_SCORE_GAP", "12")))
 # Wikipedia usa nomes diferentes do openfootball para algumas seleções
 WIKIPEDIA_TEAM_ALIASES = {
     "United States": "USA",
@@ -2065,6 +2066,25 @@ def refresh_world_cup_live_statuses(db: Session) -> bool:
         changed = True
         log_game_event(db, game, "Início do jogo — palpites fechados", phase="gratuito", api="calendário", ok=True)
     return changed
+
+
+def refresh_live_scores_if_due(db: Session) -> bool:
+    """Atualiza placar/intervalo via football-data quando o board é consultado (throttle)."""
+    if not world_cup_has_live_window(db):
+        return False
+    raw = get_app_setting(db, "world_cup_board_score_refresh_at")
+    if raw:
+        try:
+            last = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if last.tzinfo:
+                last = last.astimezone(timezone.utc).replace(tzinfo=None)
+            if (datetime.utcnow() - last).total_seconds() < BOARD_LIVE_SCORE_GAP:
+                return False
+        except ValueError:
+            pass
+    cross_check_world_cup_results(db)
+    set_app_setting(db, "world_cup_board_score_refresh_at", datetime.now(timezone.utc).isoformat())
+    return True
 
 
 def fetch_football_data_results(db: Session | None = None) -> list[dict[str, Any]]:
@@ -4146,6 +4166,9 @@ def world_cup_board(
     user: models.User = Depends(get_current_user),
 ):
     if refresh_world_cup_live_statuses(db):
+        db.commit()
+    score_changed = refresh_live_scores_if_due(db)
+    if score_changed:
         db.commit()
     games = db.query(models.WorldCupGame).order_by(models.WorldCupGame.kickoff_at.asc()).all()
     return {

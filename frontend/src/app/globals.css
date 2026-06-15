@@ -11642,6 +11642,24 @@ img.team-flag {
   animation: wc-hero2-live 2.4s ease-in-out infinite;
 }
 
+.wc-hero2-stage.live.halftime {
+  border-color: rgba(255, 176, 46, 0.45);
+  background:
+    radial-gradient(ellipse 80% 100% at 50% -30%, rgba(255, 176, 46, 0.12), transparent 60%),
+    rgba(2, 8, 23, 0.55);
+  animation: none;
+}
+
+.wc-hero2-stage.live.halftime .wc-hero2-stage-label {
+  color: #ffc879;
+}
+
+.wc-fcard-status.halftime,
+.wc-game-status.halftime {
+  color: #ffc879;
+  border-color: rgba(255, 176, 46, 0.35);
+}
+
 @keyframes wc-hero2-live {
   0%, 100% { box-shadow: 0 0 0 0 rgba(227, 28, 121, 0.0); }
   50% { box-shadow: 0 0 26px 0 rgba(227, 28, 121, 0.22); }

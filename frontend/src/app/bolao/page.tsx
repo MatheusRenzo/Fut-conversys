@@ -76,6 +76,11 @@ const statusLabels: Record<WorldCupGame["status"], string> = {
   postponed: "Adiado",
 };
 
+function liveGameStatusLabel(game: WorldCupGame): string {
+  if (game.status === "live" && game.halftime) return "Intervalo";
+  return statusLabels[game.status];
+}
+
 const quickFilters: Array<{ key: QuickFilter; label: string }> = [
   { key: "open", label: "Abertos" },
   { key: "live", label: "Ao vivo" },
@@ -669,9 +674,9 @@ function FinishedGameCard({ game, viewerId }: { game: WorldCupGame; viewerId?: n
         <span className="wc-game-stage">
           {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
         </span>
-        <span className={`wc-fcard-status ${game.status}`}>
-          {game.status === "live" && <span className="wc-live-dot small" />}
-          {statusLabels[game.status]}
+        <span className={`wc-fcard-status ${game.status}${game.halftime ? " halftime" : ""}`}>
+          {game.status === "live" && !game.halftime && <span className="wc-live-dot small" />}
+          {liveGameStatusLabel(game)}
         </span>
         <span className="wc-game-date">{formatEventDate(game.kickoff_at)}</span>
       </div>
@@ -898,7 +903,7 @@ export default function BolaoPage() {
     // Atualiza o placar bem mais rápido quando tem jogo rolando (sensação ao vivo)
     const poller = window.setInterval(() => {
       refreshBoard();
-    }, hasLiveGame ? 15_000 : 60_000);
+    }, hasLiveGame ? 10_000 : 60_000);
     return () => {
       window.clearInterval(clock);
       window.clearInterval(poller);
@@ -1241,10 +1246,16 @@ export default function BolaoPage() {
         </div>
 
         {liveGames.length > 0 ? (
-          <div className="wc-hero2-stage live">
+          <div className={`wc-hero2-stage live${liveGames[0].halftime ? " halftime" : ""}`}>
             <span className="wc-hero2-stage-label">
-              <span className="wc-live-dot" />
-              Rolando agora{liveGames.length > 1 ? ` · +${liveGames.length - 1} jogos` : ""}
+              {liveGames[0].halftime ? (
+                <>⏸ Intervalo</>
+              ) : (
+                <>
+                  <span className="wc-live-dot" />
+                  Rolando agora{liveGames.length > 1 ? ` · +${liveGames.length - 1} jogos` : ""}
+                </>
+              )}
             </span>
             <div className="wc-hero2-faceoff">
               <span className="wc-hero2-team">
@@ -1871,8 +1882,8 @@ export default function BolaoPage() {
                         <span className="wc-game-stage">
                           {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
                         </span>
-                        <span className={`wc-game-status ${game.status}`}>
-                          {game.status === "live" && game.halftime ? "⏸ Intervalo" : statusLabels[game.status]}
+                        <span className={`wc-game-status ${game.status}${game.halftime ? " halftime" : ""}`}>
+                          {liveGameStatusLabel(game)}
                         </span>
                       </div>
                       <div className="wc-bet-slip-match">
