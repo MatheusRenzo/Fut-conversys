@@ -2376,19 +2376,25 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             return None
         return api_football_get(url, db, status)
 
-    def normalize_live(game, raw_names, ai_sources):
-        """Encaixa no elenco (instantâneo). Se sobrar nome fora do elenco, a IA
-        resolve (cacheada). Devolve a lista oficial unida ao que já tinha."""
+    def normalize_live(game, raw_names, ai_sources, phase: str = "ao_vivo"):
+        """Sempre passa pela IA merge quando há artilheiro pra confirmar; fallback
+        no snap direto se a IA não responder."""
         squad = world_cup_game_squad(db, game)
-        union = merge_scorers(game.scorers, raw_names)[0].split(", ")
-        official, unmatched = snap_scorers_to_squad([n for n in (s.strip() for s in union) if n], squad)
-        if unmatched:  # nome estranho → manda pra IA normalizar
-            rec = ai_reconcile_scorers(db, game, ai_sources, status, squad=squad)
+        of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+        sources = dict(ai_sources)
+        if of_names:
+            sources["lista_atual"] = of_names
+        total = (game.home_score or 0) + (game.away_score or 0)
+        if total > 0 and (raw_names or of_names):
+            rec = ai_reconcile_scorers(db, game, sources, status, squad=squad, phase=phase)
             if rec:
-                official = snap_scorers_to_squad(
-                    [n for n in (s.strip() for s in (rec + official)) if n], squad
-                )[0]
-        return ", ".join(official)[:500]
+                official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in rec) if n], squad)
+                merged, _ = merge_scorers(game.scorers, official)
+                return merged[:500]
+        union = merge_scorers(game.scorers, raw_names)[0].split(", ")
+        official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in union) if n], squad)
+        merged, _ = merge_scorers(game.scorers, official)
+        return merged[:500]
 
     # ============ A) FIM: paga 1× → TODOS os goleadores (confirmação final) ============
     incomplete_finished = (
@@ -2414,6 +2420,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         log_game_event(db, game, "→ chamada API-Football (fim do jogo — confirmação final)")
         payload = call(f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}")
         if payload is None:
+            log_game_event(db, game, "✗ API-Football (fim) — sem cota ou limite de reserva")
             break
         bump_game_poll(db, game.id, "af")
         fixtures = payload.get("response") or []
@@ -2437,9 +2444,13 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         squad = world_cup_game_squad(db, game)
         api_names = extract_api_football_scorers(fixture)
         of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+        if not api_names:
+            log_game_event(db, game, "✗ API-Football (fim) — respondeu mas sem goleadores no payload")
+        else:
+            log_game_event(db, game, f"✓ API-Football (fim) respondeu — {', '.join(api_names)}")
         # IA definitiva no fim: cruza paga + openfootball + elenco
         reconciled = ai_reconcile_scorers(
-            db, game, {"API-Football": api_names, "openfootball": of_names}, status, squad=squad
+            db, game, {"API-Football": api_names, "openfootball": of_names}, status, squad=squad, phase="fim"
         )
         candidate = (reconciled or []) + api_names + of_names
         official, unmatched = snap_scorers_to_squad([n for n in (s.strip() for s in candidate) if n], squad)
@@ -2530,6 +2541,9 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 elif n > 0:
                     log_game_event(db, game, f"↻ retry {n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX} API-Football — sem goleador ainda")
             payload = call(API_FOOTBALL_LIVE_URL)
+            if payload is None:
+                for game in pending_live:
+                    log_game_event(db, game, "✗ API-Football (ao vivo) — sem cota ou limite de reserva")
             if payload:
                 set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
                 by_teams: dict[tuple[str, str], dict[str, Any]] = {}
@@ -2563,11 +2577,14 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                     live_scorers = extract_api_football_scorers(item)
                     of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
                     if live_scorers:
-                        new_s = normalize_live(game, live_scorers, {"API-Football": live_scorers, "openfootball": of_names})
+                        log_game_event(db, game, f"✓ API-Football (ao vivo) — {', '.join(live_scorers)}")
+                        new_s = normalize_live(
+                            game, live_scorers, {"API-Football": live_scorers, "openfootball": of_names}, phase="ao_vivo"
+                        )
                         if new_s != (game.scorers or ""):
                             game.scorers = new_s
                             status["scorers_updated"] += 1
-                            log_game_event(db, game, f"⚽ goleador: {new_s} (API-Football respondeu)")
+                            log_game_event(db, game, f"⚽ artilheiro confirmado: {new_s}")
                     else:
                         status["retries"] += 1
                         sc, n = polled_info(game)
@@ -2586,11 +2603,14 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 tsd = fetch_thesportsdb_scorers(game, db) or []
                 of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
                 if tsd:
-                    new_s = normalize_live(game, tsd, {"TheSportsDB": tsd, "openfootball": of_names})
+                    log_game_event(db, game, f"✓ TheSportsDB (failover) — {', '.join(tsd)}")
+                    new_s = normalize_live(
+                        game, tsd, {"TheSportsDB": tsd, "openfootball": of_names}, phase="ao_vivo_failover"
+                    )
                     if new_s != (game.scorers or ""):
                         game.scorers = new_s
                         status["scorers_updated"] += 1
-                        log_game_event(db, game, f"⚽ goleador: {new_s} (failover TheSportsDB — paga sem cota)")
+                        log_game_event(db, game, f"⚽ artilheiro confirmado (failover): {new_s}")
                 else:
                     status["retries"] += 1
                     log_game_event(db, game, "✗ TheSportsDB sem goleador (failover)")
@@ -2615,9 +2635,14 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         tsd = fetch_thesportsdb_scorers(game, db) or []
         squad = world_cup_game_squad(db, game)
         of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+        if tsd:
+            log_game_event(db, game, f"✓ TheSportsDB (re-confirmação) — {', '.join(tsd)}")
+        else:
+            log_game_event(db, game, "✗ TheSportsDB (re-confirmação) — sem goleadores")
         # IA reconcilia as DUAS grátis e confirma o resultado (que já tem a paga)
         reconciled = ai_reconcile_scorers(
-            db, game, {"TheSportsDB": tsd, "openfootball": of_names}, status, squad=squad
+            db, game, {"TheSportsDB": tsd, "openfootball": of_names, "paga_ja_gravada": of_names},
+            status, squad=squad, phase="reconfirmacao",
         )
         candidate = (reconciled or []) + tsd + of_names
         official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in candidate) if n], squad)
@@ -2645,7 +2670,12 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             game.scorers_confirmed = True
         game.reconfirmed = True
         status["reconfirmed"] += 1
-        log_game_event(db, game, f"🔁 re-confirmado (+10min) — {len(prev)} fonte(s)" + (f" · a mais: {', '.join(extras)}" if extras else ""))
+        ia_note = f" · IA merge aplicada" if reconciled else " · IA merge falhou"
+        log_game_event(
+            db, game,
+            f"🔁 re-confirmado (+10min) — {len(prev)} fonte(s){ia_note}"
+            + (f" · TheSportsDB trouxe a mais: {', '.join(extras)}" if extras else ""),
+        )
 
     # Varredura: jogo encerrado com goleadores completos vira 'final'
     leftover = (
@@ -2966,6 +2996,7 @@ def ai_reconcile_scorers(
     sources: dict[str, list[str]],
     status: dict[str, Any],
     squad: list[str] | None = None,
+    phase: str = "merge",
 ) -> list[str] | None:
     """IA reconcilia os goleadores das VÁRIAS fontes num conjunto definitivo.
 
@@ -2975,6 +3006,7 @@ def ai_reconcile_scorers(
     nome oficial e nunca inventa. Cacheado por assinatura (gasta pouquíssimo).
     Devolve a lista reconciliada ou None."""
     if not OPENAI_API_KEY:
+        log_game_event(db, game, f"✗ IA merge ({phase}) — OpenAI não configurada")
         return None
     total = (game.home_score or 0) + (game.away_score or 0)
     if total == 0:
@@ -2990,9 +3022,12 @@ def ai_reconcile_scorers(
         try:
             cached = json.loads(cached_raw)
             if cached.get("sig") == sig and isinstance(cached.get("names"), list):
-                return cached["names"]
+                names = cached["names"]
+                log_game_event(db, game, f"🤖 IA merge ({phase}) cache ✓ — {', '.join(names) if names else 'vazio'}")
+                return names
         except json.JSONDecodeError:
             pass
+    log_game_event(db, game, f"→ chamada IA merge ({phase})")
     fontes_txt = "; ".join(f"{name}: {', '.join(lst) if lst else '(vazio)'}" for name, lst in sources.items())
     # O elenco pode ser grande; manda um recorte enxuto pra não estourar tokens.
     squad_txt = ", ".join((squad or [])[:60])
@@ -3016,6 +3051,7 @@ def ai_reconcile_scorers(
         temperature=0.1,
     )
     if not text:
+        log_game_event(db, game, f"✗ IA merge ({phase}) — OpenAI sem resposta")
         return None
     status["ai_reconciles"] = status.get("ai_reconciles", 0) + 1
     bump_daily_counter(db, "ai_reconcile")  # conta as reconciliações de goleador
@@ -3025,9 +3061,11 @@ def ai_reconcile_scorers(
     except json.JSONDecodeError:
         names = None
     if not isinstance(names, list):
+        log_game_event(db, game, f"✗ IA merge ({phase}) — JSON inválido")
         return None
     names = [re.sub(r"\s+", " ", str(n)).strip() for n in names if str(n).strip()]
     set_app_setting(db, cache_key, json.dumps({"sig": sig, "names": names}, ensure_ascii=False))
+    log_game_event(db, game, f"🤖 IA merge ({phase}) ✓ — {', '.join(names) if names else 'vazio'}")
     return names
 
 

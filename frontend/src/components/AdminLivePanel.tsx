@@ -63,16 +63,16 @@ function eventKey(game: GameRow) {
   return game.match_number ?? `${game.home_team} x ${game.away_team}`;
 }
 
-/** Cor/ícone da linha da timeline conforme o log do backend */
-function eventTone(action: string): "start" | "goal" | "call" | "ok" | "retry" | "warn" | "err" | "ht" | "end" | "reconf" | "plain" {
+/** Cor da linha: verde = achou, vermelho = falhou/sem cota, amarelo = retry, azul = IA */
+function eventTone(action: string): "start" | "goal" | "call" | "ok" | "retry" | "warn" | "err" | "ht" | "end" | "reconf" | "ia" | "plain" {
+  if (action.startsWith("✗")) return "err";
+  if (action.includes("✓") || action.includes("confirmado") || action.includes("artilheiro confirmado")) return "ok";
+  if (action.includes("🤖") || action.includes("IA merge")) return "ia";
   if (action.includes("começou")) return "start";
   if (action.includes("gol!") || action.includes("gol ")) return "goal";
   if (action.startsWith("→")) return "call";
-  if (action.includes("goleador:") && action.includes("respondeu")) return "ok";
-  if (action.includes("failover") && action.includes("goleador:")) return "ok";
-  if (action.startsWith("↻") || action.includes("retry")) return "retry";
-  if (action.startsWith("⚠") || action.includes("failover")) return "warn";
-  if (action.startsWith("✗")) return "err";
+  if (action.startsWith("↻") || action.includes("retry") || action.includes("sem goleador ainda")) return "retry";
+  if (action.startsWith("⚠") || action.includes("failover") || action.includes("sem cota")) return "warn";
   if (action.includes("intervalo") || action.includes("2º tempo")) return "ht";
   if (action.includes("re-confirmado")) return "reconf";
   if (action.includes("encerrado") || action.includes("fim ")) return "end";
@@ -118,8 +118,17 @@ function liveNowStatus(game: GameRow, evs: GameEvent[]) {
     return { cls: "warn", text: `⚠ Paga sem cota → failover TheSportsDB ×${tsd}` };
   }
 
-  if (latest.startsWith("✗") || latest.includes("retry")) {
-    return { cls: "retry", text: `⏳ Buscando goleador… retry API-Football ×${af}` };
+  if (latest.startsWith("✗") || latest.includes("retry") || latest.includes("sem goleador")) {
+    const api = latest.includes("TheSportsDB") ? "TheSportsDB" : "API-Football";
+    return { cls: "retry", text: `✗ ${api} não achou goleador · retry ×${latest.includes("TheSportsDB") ? tsd : af}` };
+  }
+
+  if (latest.includes("IA merge") && latest.startsWith("✗")) {
+    return { cls: "err", text: "✗ IA merge falhou — usando melhor dado disponível" };
+  }
+
+  if (latest.includes("sem cota")) {
+    return { cls: "err", text: "✗ API-Football sem cota → tentando failover TheSportsDB" };
   }
 
   if (latest.includes("buscando autor") || latest.includes("gol!")) {
@@ -132,6 +141,10 @@ function liveNowStatus(game: GameRow, evs: GameEvent[]) {
 function startedAt(evs: GameEvent[]) {
   const start = [...evs].reverse().find((e) => e.action.includes("começou"));
   return start ? timeHM(start.at) : null;
+}
+
+function reconciledRan(evs: GameEvent[]) {
+  return evs.some((e) => e.action.includes("IA merge") && (e.action.includes("✓") || e.action.includes("cache")));
 }
 
 const API_LABELS: Record<string, { name: string; role: string; limit?: string }> = {
@@ -435,8 +448,8 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
                         <span className={srcs.some((s) => s.toLowerCase().includes("openfootball")) ? "ok" : game.reconfirmed ? "err" : "pending"}>
                           openfootball {srcs.some((s) => s.toLowerCase().includes("openfootball")) ? "✓" : game.reconfirmed ? "✗" : "…"}
                         </span>
-                        <span className={game.reconfirmed && syncStatus.sources.ai_configured ? "ok" : game.reconfirmed ? "muted" : "pending"}>
-                          IA merge {game.reconfirmed && syncStatus.sources.ai_configured ? "✓" : game.reconfirmed ? "—" : "…"}
+                        <span className={game.reconfirmed && reconciledRan(evs) ? "ok" : game.reconfirmed ? "err" : "pending"}>
+                          IA merge {game.reconfirmed ? (reconciledRan(evs) ? "✓" : "✗") : "…"}
                         </span>
                       </div>
                       {srcs.length > 0 && (

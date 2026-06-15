@@ -12735,7 +12735,12 @@ img.team-flag {
 .wc-dash-tl-row.tone-retry .wc-dash-tl-dot, .wc-dash-tl-row.tone-warn .wc-dash-tl-dot { background: #ffb02e; }
 .wc-dash-tl-row.tone-err .wc-dash-tl-dot { background: #ff6b6b; }
 .wc-dash-tl-row.tone-ht .wc-dash-tl-dot { background: #7eb8ff; }
-.wc-dash-tl-row.tone-end .wc-dash-tl-dot { background: #b6c1d4; }
+.wc-dash-tl-row.tone-ia .wc-dash-tl-dot { background: #a78bfa; }
+.wc-dash-tl-row.tone-ia .wc-dash-tl-text { color: #d4c4ff; }
+.wc-dash-tl-row.tone-err { background: rgba(255,80,80,0.08); border-radius: 6px; margin: 0 -4px; padding-left: 4px; padding-right: 4px; }
+.wc-dash-tl-row.tone-ok { background: rgba(57,217,138,0.06); border-radius: 6px; margin: 0 -4px; padding-left: 4px; padding-right: 4px; }
+.wc-dash-log-section .wc-log-row.tone-ia .wc-log-action { color: #d4c4ff; }
+.wc-dash-live-now.err { color: #ff8a8a; background: rgba(255,80,80,0.14); }
 .wc-dash-tl-time { font-size: 0.6rem; font-weight: 900; color: var(--muted); font-variant-numeric: tabular-nums; }
 .wc-dash-tl-text { font-size: 0.68rem; color: #e8eefc; line-height: 1.4; display: block; }
 .wc-dash-tl-row.tone-err .wc-dash-tl-text { color: #ff9f9f; }

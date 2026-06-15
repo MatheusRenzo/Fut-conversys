@@ -755,8 +755,6 @@ export default function BolaoPage() {
   const [championQuery, setChampionQuery] = useState("");
   const [championDraft, setChampionDraft] = useState("");
   const [savingChampion, setSavingChampion] = useState(false);
-  const [championAnnounceDraft, setChampionAnnounceDraft] = useState("");
-  const [announcingChampion, setAnnouncingChampion] = useState(false);
   const [rankingTab, setRankingTab] = useState<RankingTab>("geral");
   const [selectedEntry, setSelectedEntry] = useState<WorldCupLeaderboardEntry | null>(null);
   // Acordeão dos jogos abertos: null = só o próximo jogo fica expandido; 0 = todos fechados
@@ -1161,26 +1159,6 @@ export default function BolaoPage() {
       setError(nextError instanceof Error ? nextError.message : "Não foi possível salvar o palpite de campeão");
     } finally {
       setSavingChampion(false);
-    }
-  };
-
-  const handleAnnounceChampion = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!championAnnounceDraft.trim()) return;
-    setAnnouncingChampion(true);
-    setError("");
-    setMessage("");
-    try {
-      const response = await api.announceWorldCupChampion(championAnnounceDraft.trim());
-      setBoard((current) =>
-        current ? { ...current, champion: response.champion, leaderboard: response.leaderboard } : current,
-      );
-      setMessage("Campeão definido e pontos distribuídos!");
-      setChampionAnnounceDraft("");
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Não foi possível definir o campeão");
-    } finally {
-      setAnnouncingChampion(false);
     }
   };
 
@@ -2065,20 +2043,6 @@ export default function BolaoPage() {
             ) : (
               !syncStatusError && <p className="bolao-sync-info">Carregando status das fontes...</p>
             )}
-
-            <form className="wc-champion-form" onSubmit={handleAnnounceChampion}>
-              <input
-                className="input-field"
-                list="bolao-teams"
-                onChange={(event) => setChampionAnnounceDraft(event.target.value)}
-                placeholder="Definir campeã da Copa"
-                value={championAnnounceDraft}
-              />
-              <button className="btn-secondary" disabled={announcingChampion || !championAnnounceDraft.trim()} type="submit">
-                <Crown size={15} />
-                <span>{announcingChampion ? "..." : "Definir"}</span>
-              </button>
-            </form>
 
           </div>
         </div>
