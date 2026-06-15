@@ -12830,6 +12830,29 @@ img.team-flag {
 .wc-tech-g2-pipe .ok { color: var(--brand-green); }
 .wc-tech-g2-pipe .no { color: #7f8ba0; }
 .wc-tech-g2-pipe .run { color: #8fa3c8; font-weight: 600; margin-left: auto; }
+
+/* AO VIVO AGORA — card destacado por jogo */
+.wc-tech-live { padding: 8px 10px; border-radius: 10px; margin-bottom: 6px;
+  border: 1px solid rgba(227,28,121,0.3); background: rgba(227,28,121,0.06); }
+.wc-tech-live-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.wc-tech-live-top .lv { color: #ff6aa8; font-weight: 900; animation: wcPulse 1.6s ease-in-out infinite; }
+.wc-tech-live-top .ht { color: #ffc879; font-weight: 900; background: rgba(255,176,46,0.16); padding: 1px 7px; border-radius: 999px; }
+.wc-tech-live-top .mt { color: #fff; font-weight: 700; flex: 1 1 130px; }
+.wc-tech-live-top .sc { color: #fff; font-weight: 950; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.wc-tech-live-sc { padding-top: 5px; font-size: 12px; }
+.wc-tech-live-sc .ok { color: var(--brand-green); font-weight: 700; }
+.wc-tech-live-sc .wait { color: #ffc879; font-weight: 700; }
+.wc-tech-live-sc .no { color: #7f8ba0; }
+
+/* ENCERRADOS — uma linha por jogo, tudo correto */
+.wc-tech-fin { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 5px 4px; }
+.wc-tech-fin:nth-child(even) { background: rgba(255,255,255,0.02); }
+.wc-tech-fin .tag { font-weight: 900; font-size: 10.5px; padding: 1px 7px; border-radius: 999px; }
+.wc-tech-fin .tag.ok { color: var(--brand-green); background: rgba(57,217,138,0.14); }
+.wc-tech-fin .tag.wait { color: #ffc879; background: rgba(255,176,46,0.14); }
+.wc-tech-fin .mt { color: #fff; font-weight: 700; flex: 1 1 150px; }
+.wc-tech-fin .gl { color: var(--brand-green); }
+.wc-tech-fin .src { color: #7f8ba0; width: 100%; }
 @media (max-width: 560px) {
   .wc-tech-row { grid-template-columns: 1fr auto; }
   .wc-tech-row .d { grid-column: 1 / -1; }

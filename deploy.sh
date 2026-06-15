@@ -43,7 +43,7 @@ done
 
 echo ""
 echo "=== Deploy concluído! ==="
-echo "  Interno:  https://<REDACTED-IP>"
+echo "  Interno:  https://${APP_SERVER_IP:-localhost}"
 echo "  Externo:  https://fut.conversys.global:9443  (firewall WAN 9443 → nginx 443)"
 echo ""
 echo "Certificado oficial: ~/conversys-wildcard-cert.tar.gz → ./nginx/install-ssl.sh && docker compose restart nginx"

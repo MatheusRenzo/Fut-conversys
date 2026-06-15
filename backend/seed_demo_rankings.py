@@ -20,9 +20,9 @@ from main import get_app_setting, set_app_setting
 
 DEMO_FLAG = "demo_rankings_seed"
 DEMO_EMAILS = (
-    "redacted@example.com",
-    "redacted@example.com",
-    "redacted@example.com",
+    "demo.ana@example.com",
+    "demo.bruno@example.com",
+    "demo.carla@example.com",
 )
 
 FINISHED_GAMES = (
@@ -35,56 +35,56 @@ FINISHED_GAMES = (
 
 PREDICTIONS = (
     # game_id, email, home, away, scorer_guess
-    (1, "redacted@example.com", 2, 1, "Lozano"),
-    (1, "redacted@example.com", 1, 1, "Lozano"),
-    (1, "redacted@example.com", 2, 0, "Lozano"),
-    (1, "redacted@example.com", 0, 1, "Zwane"),
-    (1, "redacted@example.com", 1, 2, None),
-    (2, "redacted@example.com", 1, 2, "Patrik Schick"),
-    (2, "redacted@example.com", 0, 2, "Patrik Schick"),
-    (2, "redacted@example.com", 1, 2, "Son Heung-min"),
-    (2, "redacted@example.com", 2, 2, None),
-    (2, "redacted@example.com", 1, 2, "Patrik Schick"),
-    (7, "redacted@example.com", 1, 1, "Jonathan David"),
-    (7, "redacted@example.com", 0, 0, None),
-    (7, "redacted@example.com", 2, 1, "Dzeko"),
-    (7, "redacted@example.com", 1, 1, "Jonathan David"),
-    (7, "redacted@example.com", 1, 1, "Jonathan David"),
-    (13, "redacted@example.com", 3, 0, "Vini Jr"),
-    (13, "redacted@example.com", 2, 0, "Rodrygo"),
-    (13, "redacted@example.com", 3, 0, "Vini Jr"),
-    (13, "redacted@example.com", 2, 1, None),
-    (13, "redacted@example.com", 3, 1, "Vini Jr"),
-    (19, "redacted@example.com", 2, 1, "Pulisic"),
-    (19, "redacted@example.com", 1, 1, "Balde"),
-    (19, "redacted@example.com", 2, 0, "Pulisic"),
-    (19, "redacted@example.com", 3, 0, None),
-    (19, "redacted@example.com", 2, 1, "Pulisic"),
+    (1, "matheus.gama@example.com", 2, 1, "Lozano"),
+    (1, "thiago.tosatti@example.com", 1, 1, "Lozano"),
+    (1, "demo.ana@example.com", 2, 0, "Lozano"),
+    (1, "demo.bruno@example.com", 0, 1, "Zwane"),
+    (1, "demo.carla@example.com", 1, 2, None),
+    (2, "matheus.gama@example.com", 1, 2, "Patrik Schick"),
+    (2, "thiago.tosatti@example.com", 0, 2, "Patrik Schick"),
+    (2, "demo.ana@example.com", 1, 2, "Son Heung-min"),
+    (2, "demo.bruno@example.com", 2, 2, None),
+    (2, "demo.carla@example.com", 1, 2, "Patrik Schick"),
+    (7, "matheus.gama@example.com", 1, 1, "Jonathan David"),
+    (7, "thiago.tosatti@example.com", 0, 0, None),
+    (7, "demo.ana@example.com", 2, 1, "Dzeko"),
+    (7, "demo.bruno@example.com", 1, 1, "Jonathan David"),
+    (7, "demo.carla@example.com", 1, 1, "Jonathan David"),
+    (13, "matheus.gama@example.com", 3, 0, "Vini Jr"),
+    (13, "thiago.tosatti@example.com", 2, 0, "Rodrygo"),
+    (13, "demo.ana@example.com", 3, 0, "Vini Jr"),
+    (13, "demo.bruno@example.com", 2, 1, None),
+    (13, "demo.carla@example.com", 3, 1, "Vini Jr"),
+    (19, "matheus.gama@example.com", 2, 1, "Pulisic"),
+    (19, "thiago.tosatti@example.com", 1, 1, "Balde"),
+    (19, "demo.ana@example.com", 2, 0, "Pulisic"),
+    (19, "demo.bruno@example.com", 3, 0, None),
+    (19, "demo.carla@example.com", 2, 1, "Pulisic"),
 )
 
 CHAMPION_PICKS = (
-    ("redacted@example.com", "Brazil"),
-    ("redacted@example.com", "Argentina"),
-    ("redacted@example.com", "France"),
-    ("redacted@example.com", "Spain"),
-    ("redacted@example.com", "Brazil"),
+    ("matheus.gama@example.com", "Brazil"),
+    ("thiago.tosatti@example.com", "Argentina"),
+    ("demo.ana@example.com", "France"),
+    ("demo.bruno@example.com", "Spain"),
+    ("demo.carla@example.com", "Brazil"),
 )
 
 PElADA_GOALS = (
-    ("redacted@example.com", 5),
-    ("redacted@example.com", 3),
-    ("redacted@example.com", 7),
-    ("redacted@example.com", 2),
-    ("redacted@example.com", 4),
+    ("matheus.gama@example.com", 5),
+    ("thiago.tosatti@example.com", 3),
+    ("demo.ana@example.com", 7),
+    ("demo.bruno@example.com", 2),
+    ("demo.carla@example.com", 4),
 )
 
 
 def ensure_demo_users(db) -> dict[str, User]:
     users: dict[str, User] = {}
     seed = [
-        ("demo.ana", "Ana Demo", "redacted@example.com"),
-        ("demo.bruno", "Bruno Demo", "redacted@example.com"),
-        ("demo.carla", "Carla Demo", "redacted@example.com"),
+        ("demo.ana", "Ana Demo", "demo.ana@example.com"),
+        ("demo.bruno", "Bruno Demo", "demo.bruno@example.com"),
+        ("demo.carla", "Carla Demo", "demo.carla@example.com"),
     ]
     password_hash = hash_password("demo123456")
     for username, name, email in seed:

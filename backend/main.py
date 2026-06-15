@@ -27,7 +27,7 @@ import models
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "redacted@example.com")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@example.com")
 VERIFIED_DOMAIN = "conversys.global"
 PASSWORD_ITERATIONS = 260000
 TOKEN_TTL_SECONDS = 60 * 60 * 8
@@ -125,6 +125,11 @@ WORLD_CUP_FORCE_FINISH_AFTER = timedelta(hours=int(os.getenv("WORLD_CUP_FORCE_FI
 # espaçado quando não há (quase não gasta cota).
 API_FOOTBALL_GOAL_GAP = max(40, int(os.getenv("API_FOOTBALL_GOAL_GAP", "60")))
 API_FOOTBALL_SAFETY_GAP = max(300, int(os.getenv("API_FOOTBALL_SAFETY_GAP", "600")))
+# Quantas vezes re-tenta a paga no MESMO gol novo até achar o goleador (ela às vezes
+# demora a publicar o evento). Depois disso espera o próximo gol. ~60s entre tentativas.
+API_FOOTBALL_LIVE_RETRY_MAX = max(2, int(os.getenv("API_FOOTBALL_LIVE_RETRY_MAX", "6")))
+# Re-confirmação grátis (TheSportsDB + openfootball + IA) roda 1× este tempo após o fim
+WORLD_CUP_RECONFIRM_AFTER = timedelta(minutes=int(os.getenv("WORLD_CUP_RECONFIRM_MINUTES", "10")))
 # Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há. 30s deixa
 # o PLACAR/GOL bem ao vivo (football-data 10/min aguenta de sobra: ~2/min) e faz o
 # gatilho de goleador disparar logo após o gol; a cota paga é protegida à parte.
@@ -543,6 +548,9 @@ def ensure_schema() -> None:
             "scorers_confirmations": "INTEGER DEFAULT 0",
             "confirmation_sources": "VARCHAR",
             "end_source": "VARCHAR",
+            "halftime": "BOOLEAN DEFAULT FALSE",
+            "finished_at": "TIMESTAMP",
+            "reconfirmed": "BOOLEAN DEFAULT FALSE",
             "created_at": "TIMESTAMP",
         },
         "world_cup_predictions": {
@@ -1187,6 +1195,7 @@ def world_cup_game_response(game: models.WorldCupGame, user: models.User | None 
         "venue": game.venue,
         "kickoff_at": iso_utc(game.kickoff_at),
         "status": game.status or "scheduled",
+        "halftime": bool(game.halftime),
         "home_score": game.home_score,
         "away_score": game.away_score,
         "scorers": game.scorers,
@@ -1942,6 +1951,8 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
                     game.away_score = la
                     game.status = "live"
                     status["filled"] += 1
+                # INTERVALO: football-data manda PAUSED no intervalo
+                game.halftime = (remote_status == "PAUSED")
             continue
         finished_remote = remote_status in ("FINISHED", "AWARDED") and has_score
         if not finished_remote:
@@ -1966,12 +1977,14 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
             game.home_score = official_h
             game.away_score = official_a
             game.status = "finished"
+            game.halftime = False
             game.end_source = "football-data"  # confirmação oficial de FIM
             # placar mudou → goleadores precisam ser refinalizados pela fonte definitiva
             if scores_differ:
                 game.scorers_final = False
             status["filled"] += 1
             if not was_finished:
+                game.finished_at = datetime.utcnow()  # marca o relógio pra re-confirmação de 10min
                 log_game_event(db, game, f"🏁 encerrado {official_h}-{official_a} (football-data, oficial)")
     return status
 
@@ -2307,14 +2320,16 @@ def api_football_get(url: str, db: Session, status: dict[str, Any]) -> dict[str,
 
 
 def apply_api_football_live(db: Session) -> dict[str, Any]:
-    """Captura de goleadores ENXUTA: a fonte limitada (API-Football) é usada só
-    DUAS vezes por jogo — uma no meio (≈intervalo) e uma quando ele encerra
-    oficialmente (definitiva). O placar/status ao vivo vem da football-data
-    (ilimitada) a cada ciclo, então não gastamos cota com isso.
+    """Goleadores event-driven, exatamente no fluxo definido:
 
-    No fim, confirmamos os goleadores na 2ª fonte grátis (TheSportsDB): se as
-    duas baterem, marca confirmado; se divergirem, registra pro admin.
-    A cota do dia é dividida entre os jogos do dia, com o FIM sempre garantido."""
+    AO VIVO  → o GOL é detectado de graça pela football-data; aí a API-Football
+               (paga) roda SÓ pra pegar o nome (nunca por tempo), com retry até
+               achar. Sem cota? failover na TheSportsDB. Nome normalizado no elenco.
+    FIM      → quando a football-data marca FINISHED, a paga roda 1× e pega TODOS
+               os goleadores (recupera os que faltaram no meio). É a confirmação final.
+    +10min   → re-confirmação grátis: TheSportsDB + openfootball → IA, compara com a
+               paga e sinaliza o que veio a mais. Roda 1× por jogo.
+    """
     status: dict[str, Any] = {
         "configured": bool(API_FOOTBALL_KEYS),
         "ok": False,
@@ -2322,58 +2337,28 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         "mid_checks": 0,
         "finalized": 0,
         "confirmed": 0,
+        "reconfirmed": 0,
+        "retries": 0,
         "conflicts": [],
         "scorers_updated": 0,
         "calls_made": 0,
         "daily_remaining": None,
-        "daily_limit": API_FOOTBALL_DAILY_BUDGET,
+        "daily_limit": API_FOOTBALL_DAILY_BUDGET * max(1, len(API_FOOTBALL_KEYS)),
         "games_today": 0,
+        "active_today": 0,
         "per_game_cap": 0,
-        "live_gap_seconds": 0,
+        "live_gap_seconds": API_FOOTBALL_GOAL_GAP,
+        "reserve": API_FOOTBALL_DAILY_RESERVE,
         "ai_reconciles": 0,
         "tsd_calls": 0,
         "goal_pending": False,
         "skipped": None,
         "error": None,
     }
-    if not API_FOOTBALL_KEYS:
-        return status
-    status["daily_remaining"] = api_football_total_remaining(db)
     now = datetime.utcnow()
-
-    # Jogos de HOJE (UTC) — pra dividir a cota igualmente entre eles
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    games_today = (
-        db.query(models.WorldCupGame)
-        .filter(models.WorldCupGame.kickoff_at >= day_start)
-        .filter(models.WorldCupGame.kickoff_at < day_start + timedelta(days=1))
-        .count()
-    )
-    status["games_today"] = games_today
-    status["reserve"] = API_FOOTBALL_DAILY_RESERVE
-    # Quantos jogos do dia ainda NÃO estão finalizados (a cota flui pros que faltam)
-    active_today = (
-        db.query(models.WorldCupGame)
-        .filter(models.WorldCupGame.kickoff_at >= day_start)
-        .filter(models.WorldCupGame.kickoff_at < day_start + timedelta(days=1))
-        .filter(models.WorldCupGame.status != "finished")
-        .count()
-    )
-    # RESERVA DINÂMICA: garante 1 chamada de FIM por jogo ainda ativo do dia (a
-    # finalização é a que não pode faltar) + folga de descoberta. O resto é live.
-    remaining = status["daily_remaining"] or 0
-    finalize_reserve = min(remaining, max(API_FOOTBALL_DAILY_RESERVE, active_today + 2))
-    usable = max(0, remaining - finalize_reserve)
-    status["reserve"] = finalize_reserve
-    # USA O MÁXIMO: divide a cota de live entre os jogos que faltam.
-    per_game_cap = usable // max(1, active_today) if active_today else usable
-    status["per_game_cap"] = per_game_cap
-    status["active_today"] = active_today
-    # Cadência do live=all: 1 chamada cobre TODOS os jogos rolando. Espalha a cota
-    # de live numa janela de ~2h, com piso pra não torrar a cota (placar é grátis).
-    live_calls = max(1, usable)
-    live_gap = min(1800, max(API_FOOTBALL_LIVE_GAP_FLOOR, int(7200 / live_calls)))
-    status["live_gap_seconds"] = live_gap
+    has_keys = bool(API_FOOTBALL_KEYS)
+    if has_keys:
+        status["daily_remaining"] = api_football_total_remaining(db)
 
     def call(url: str) -> dict[str, Any] | None:
         if api_football_pick_key(db) is None:
@@ -2381,7 +2366,21 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             return None
         return api_football_get(url, db, status)
 
-    # ── FIM (prioridade): jogo encerrou → goleadores definitivos + confirmação ──
+    def normalize_live(game, raw_names, ai_sources):
+        """Encaixa no elenco (instantâneo). Se sobrar nome fora do elenco, a IA
+        resolve (cacheada). Devolve a lista oficial unida ao que já tinha."""
+        squad = world_cup_game_squad(db, game)
+        union = merge_scorers(game.scorers, raw_names)[0].split(", ")
+        official, unmatched = snap_scorers_to_squad([n for n in (s.strip() for s in union) if n], squad)
+        if unmatched:  # nome estranho → manda pra IA normalizar
+            rec = ai_reconcile_scorers(db, game, ai_sources, status, squad=squad)
+            if rec:
+                official = snap_scorers_to_squad(
+                    [n for n in (s.strip() for s in (rec + official)) if n], squad
+                )[0]
+        return ", ".join(official)[:500]
+
+    # ============ A) FIM: paga 1× → TODOS os goleadores (confirmação final) ============
     incomplete_finished = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.status == "finished")
@@ -2394,12 +2393,12 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         .filter(models.WorldCupGame.kickoff_at <= now - timedelta(hours=2, minutes=30))
         .all()
     )
-    if incomplete_finished or stuck_live:
+    if has_keys and (incomplete_finished or stuck_live):
         discover_api_fixture_ids(db, status)
         db.flush()
-    pending = [g for g in incomplete_finished if g.api_fixture_id]
+    pending = [g for g in incomplete_finished if g.api_fixture_id] if has_keys else []
     seen = {g.id for g in pending}
-    pending += [g for g in stuck_live if g.id not in seen and g.api_fixture_id]
+    pending += [g for g in stuck_live if g.id not in seen and g.api_fixture_id] if has_keys else []
 
     for game in pending:
         payload = call(f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}")
@@ -2419,283 +2418,214 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             game.home_score = int(goals["home"])
             game.away_score = int(goals["away"])
         game.status = "finished"
-        game.end_source = "api-football"  # 1ª confirmação oficial de FIM
+        game.halftime = False
+        if not game.end_source:
+            game.end_source = "api-football"
+        if not game.finished_at:
+            game.finished_at = now
         squad = world_cup_game_squad(db, game)
-        # Fonte 1 (paga, definitiva): goleadores do fixture oficial
         api_names = extract_api_football_scorers(fixture)
-        # Fonte 2 (grátis, 30/min → teto por ciclo): TheSportsDB
-        tsd_names = []
-        if status["tsd_calls"] < THESPORTSDB_CYCLE_LIMIT:
-            status["tsd_calls"] += 1
-            bump_game_poll(db, game.id, "tsd")
-            tsd_names = fetch_thesportsdb_scorers(game, db) or []
-        # Fonte 3 (backup): o que o openfootball/feed já tinha
         of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
-        # A IA SEMPRE entra: recebe as 3 fontes + o ELENCO real e devolve o conjunto
-        # definitivo (cacheado por assinatura — só re-chama quando as fontes mudam).
+        # IA definitiva no fim: cruza paga + openfootball + elenco
         reconciled = ai_reconcile_scorers(
-            db, game,
-            {"API-Football": api_names, "TheSportsDB": tsd_names, "openfootball": of_names},
-            status, squad=squad,
+            db, game, {"API-Football": api_names, "openfootball": of_names}, status, squad=squad
         )
-        # UNIÃO obrigatória: junta a IA + TODAS as fontes + o que já tínhamos. A IA
-        # pode re-rodar com fontes piores e devolver MENOS nomes — nunca podemos
-        # PERDER um goleador já capturado (era o bug do 7-1 que virava 4).
-        candidate = (reconciled or []) + api_names + tsd_names + of_names
-        official, unmatched = snap_scorers_to_squad(
-            [n for n in (s.strip() for s in candidate) if n], squad
-        )
+        candidate = (reconciled or []) + api_names + of_names
+        official, unmatched = snap_scorers_to_squad([n for n in (s.strip() for s in candidate) if n], squad)
         new_scorers = ", ".join(official)[:500]
         if new_scorers != (game.scorers or ""):
             game.scorers = new_scorers
             status["scorers_updated"] += 1
         status["finalized"] += 1
-        # CONFIRMAÇÃO: cada fonte independente que CORROBORA (tudo que ela reportou
-        # está na lista final, sem contradizer) conta. Guarda QUAIS confirmaram.
         agreeing = [
-            name for name, src in (("API-Football", api_names), ("TheSportsDB", tsd_names), ("openfootball", of_names))
+            name for name, src in (("API-Football", api_names), ("openfootball", of_names))
             if scorer_source_corroborates(src, official)
         ]
-        game.scorers_confirmations = len(agreeing)
-        game.confirmation_sources = ", ".join(agreeing) or None
-        # 2+ fontes corroborando = re-confirmado (confiança alta)
-        if len(agreeing) >= 2:
-            game.scorers_confirmed = True
-            status["confirmed"] += 1
+        game.scorers_confirmations = max(game.scorers_confirmations or 0, len(agreeing))
+        game.confirmation_sources = ", ".join(agreeing) or game.confirmation_sources
         if unmatched:
             status["conflicts"].append(
-                {"game": f"{game.home_team} x {game.away_team}", "fora_do_elenco": unmatched,
-                 "api": api_names, "tsd": tsd_names}
+                {"game": f"{game.home_team} x {game.away_team}", "fora_do_elenco": unmatched, "api": api_names}
             )
-        # A API-Football FT é a fonte DEFINITIVA: extraímos todos os eventos de gol,
-        # então a lista (distinta) já é a verdadeira — mesmo que tenha menos nomes que
-        # gols (jogador que fez 2-3, ex.: hat-trick num 7-1). Fixa de vez e para de
-        # gastar cota re-tentando o impossível.
-        game.scorers_final = True
-        conf_txt = f" · ✓✓ {confirms} fonte(s)" if game.scorers_confirmed else ""
-        gol_txt = f" · goleadores: {game.scorers}" if game.scorers else " · sem goleador ainda"
-        log_game_event(db, game, f"🏁 encerrado {game.home_score}-{game.away_score} (API-Football){conf_txt}{gol_txt}")
+        game.scorers_final = True  # paga FT é definitiva (lista distinta = verdade)
+        conf_txt = f" · ✓ {len(agreeing)} fonte(s)" if agreeing else ""
+        gol_txt = f" · goleadores: {game.scorers}" if game.scorers else " · sem goleador"
+        log_game_event(db, game, f"🏁 fim {game.home_score}-{game.away_score} — paga pegou tudo{conf_txt}{gol_txt}")
 
-    # ── REDE DE SEGURANÇA DE FIM: jogo "ao vivo" há tempo demais e nenhuma fonte
-    # confirmou o fim → encerra sozinho (nenhum jogo fica aberto por horas). Mantém
-    # o melhor placar e segue tentando confirmar goleadores nos próximos ciclos. ──
+    # Rede de segurança: jogo "ao vivo" há tempo demais → encerra sozinho
     for game in stuck_live:
         if game.status == "live" and game.kickoff_at and game.kickoff_at <= now - WORLD_CUP_FORCE_FINISH_AFTER:
             game.status = "finished"
+            game.halftime = False
+            if not game.finished_at:
+                game.finished_at = now
             if not game.end_source:
                 game.end_source = "auto:tempo"
-                log_game_event(db, game, f"⏱ encerrado por tempo {game.home_score}-{game.away_score} (sem confirmação de fonte)")
+                log_game_event(db, game, f"⏱ encerrado por tempo {game.home_score}-{game.away_score}")
             status["finalized"] += 1
 
-    # ── AO VIVO: live=all na cadência do orçamento (usa a cota do jogo ao máximo) ──
-    # 1 chamada cobre TODOS os jogos rolando. Espaçada pela cota/dia ÷ jogos.
+    # ============ B) AO VIVO: paga só no GOL NOVO (retry até achar) ============
     live_now_games = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.status == "live")
         .filter(models.WorldCupGame.kickoff_at <= now - timedelta(minutes=2))
         .all()
     )
-    # GATILHO POR GOL: um jogo ao vivo tem GOL NOVO sem goleador capturado se o
-    # placar (que a football-data já trouxe de graça) mudou desde a última busca
-    # paga e os goleadores ainda não cobrem os gols. Só isso dispara a cota.
-    def has_new_goal(g: models.WorldCupGame) -> bool:
+
+    def polled_info(g):
+        raw = get_app_setting(db, f"wc_live_polled_{g.id}") or ""
+        score, _, n = raw.partition(":")
+        return score, (int(n) if n.isdigit() else 0)
+
+    def has_new_goal(g):
         if world_cup_scorers_complete(g):
             return False
-        last_polled = get_app_setting(db, f"wc_live_polled_{g.id}")
-        current = f"{g.home_score or 0}-{g.away_score or 0}"
-        return last_polled != current  # placar mudou desde a última chamada paga
+        cur = f"{g.home_score or 0}-{g.away_score or 0}"
+        sc, n = polled_info(g)
+        if sc != cur:
+            return True  # GOL NOVO (placar mudou desde a última busca)
+        return n < API_FOOTBALL_LIVE_RETRY_MAX  # mesmo placar: ainda re-tentando achar o nome
 
-    goal_pending = any(has_new_goal(g) for g in live_now_games)
-    status["goal_pending"] = goal_pending
-    # Reação rápida (60s) quando falta o nome de um gol; senão só um poll de
-    # segurança espaçado (600s) — na maior parte do tempo nem gasta cota.
-    effective_gap = API_FOOTBALL_GOAL_GAP if goal_pending else max(live_gap, API_FOOTBALL_SAFETY_GAP)
-    status["live_gap_seconds"] = effective_gap
-    last_live_raw = get_app_setting(db, "api_football_last_live_at")
-    gap_ok = True
-    if last_live_raw:
-        try:
-            t = datetime.fromisoformat(last_live_raw)
-            if t.tzinfo:
-                t = t.astimezone(timezone.utc).replace(tzinfo=None)
-            gap_ok = (now - t).total_seconds() >= effective_gap
-        except ValueError:
-            gap_ok = True
-    # O live só roda se ainda houver cota ACIMA da reserva de fim — assim o
-    # finalize (que roda primeiro, com prioridade) sempre tem call garantida.
-    live_budget_ok = api_football_total_remaining(db) > finalize_reserve
-    if live_now_games and gap_ok and live_budget_ok and api_football_pick_key(db) is not None:
-        payload = call(API_FOOTBALL_LIVE_URL)
-        if payload:
-            # só conta o gap a partir de uma chamada bem-sucedida (se foi
-            # estrangulada por minuto/cota, tenta de novo no próximo ciclo)
-            set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
-            by_teams: dict[tuple[str, str], dict[str, Any]] = {}
-            for item in payload.get("response", []):
-                if ((item.get("league") or {}).get("id")) != API_FOOTBALL_LEAGUE_ID:
-                    continue
-                teams = item.get("teams") or {}
-                hk = normalize_scorer_name(normalize_world_cup_team(((teams.get("home") or {}).get("name")) or ""))
-                ak = normalize_scorer_name(normalize_world_cup_team(((teams.get("away") or {}).get("name")) or ""))
-                if hk and ak:
-                    by_teams[(hk, ak)] = item
-            status["live_games"] = len(by_teams)
-            for game in live_now_games:
-                item = by_teams.get((
-                    normalize_scorer_name(normalize_world_cup_team(game.home_team)),
-                    normalize_scorer_name(normalize_world_cup_team(game.away_team)),
-                ))
-                if not item:
-                    continue
-                bump_game_poll(db, game.id, "af")
-                fid = ((item.get("fixture") or {}).get("id"))
-                if fid and not game.api_fixture_id:
-                    game.api_fixture_id = int(fid)
-                goals = item.get("goals") or {}
-                if goals.get("home") is not None and goals.get("away") is not None:
-                    game.home_score = int(goals["home"])
-                    game.away_score = int(goals["away"])
-                live_scorers = extract_api_football_scorers(item)
-                if live_scorers:
-                    # já normaliza o nome ao vivo pro nome oficial do elenco
-                    squad = world_cup_game_squad(db, game)
-                    union = merge_scorers(game.scorers, live_scorers)[0].split(", ")
-                    official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in union) if n], squad)
-                    new_s = ", ".join(official)[:500]
+    def mark_polled(g):
+        cur = f"{g.home_score or 0}-{g.away_score or 0}"
+        sc, n = polled_info(g)
+        if world_cup_scorers_complete(g):
+            set_app_setting(db, f"wc_live_polled_{g.id}", f"{cur}:done")
+        else:
+            set_app_setting(db, f"wc_live_polled_{g.id}", f"{cur}:{(n + 1) if sc == cur else 1}")
+
+    pending_live = [g for g in live_now_games if has_new_goal(g)]
+    status["goal_pending"] = bool(pending_live)
+
+    if pending_live:
+        # anti-rajada: no mín 60s entre chamadas ao vivo (respeita rate limit)
+        last_live_raw = get_app_setting(db, "api_football_last_live_at")
+        gap_ok = True
+        if last_live_raw:
+            try:
+                t = datetime.fromisoformat(last_live_raw)
+                if t.tzinfo:
+                    t = t.astimezone(timezone.utc).replace(tzinfo=None)
+                gap_ok = (now - t).total_seconds() >= API_FOOTBALL_GOAL_GAP
+            except ValueError:
+                gap_ok = True
+        paid_ok = has_keys and api_football_total_remaining(db) > API_FOOTBALL_DAILY_RESERVE + 1 and api_football_pick_key(db) is not None
+        if gap_ok and paid_ok:
+            # PAGA: 1 chamada cobre todos os jogos rolando
+            payload = call(API_FOOTBALL_LIVE_URL)
+            if payload:
+                set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
+                by_teams: dict[tuple[str, str], dict[str, Any]] = {}
+                for item in payload.get("response", []):
+                    if ((item.get("league") or {}).get("id")) != API_FOOTBALL_LEAGUE_ID:
+                        continue
+                    teams = item.get("teams") or {}
+                    hk = normalize_scorer_name(normalize_world_cup_team(((teams.get("home") or {}).get("name")) or ""))
+                    ak = normalize_scorer_name(normalize_world_cup_team(((teams.get("away") or {}).get("name")) or ""))
+                    if hk and ak:
+                        by_teams[(hk, ak)] = item
+                status["live_games"] = len(by_teams)
+                for game in pending_live:
+                    item = by_teams.get((
+                        normalize_scorer_name(normalize_world_cup_team(game.home_team)),
+                        normalize_scorer_name(normalize_world_cup_team(game.away_team)),
+                    ))
+                    if not item:
+                        status["retries"] += 1
+                        mark_polled(game)  # tentou, não achou ainda → conta retry
+                        continue
+                    bump_game_poll(db, game.id, "af")
+                    fid = ((item.get("fixture") or {}).get("id"))
+                    if fid and not game.api_fixture_id:
+                        game.api_fixture_id = int(fid)
+                    goals = item.get("goals") or {}
+                    if goals.get("home") is not None and goals.get("away") is not None:
+                        game.home_score = int(goals["home"])
+                        game.away_score = int(goals["away"])
+                    live_scorers = extract_api_football_scorers(item)
+                    of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+                    if live_scorers:
+                        new_s = normalize_live(game, live_scorers, {"API-Football": live_scorers, "openfootball": of_names})
+                        if new_s != (game.scorers or ""):
+                            game.scorers = new_s
+                            status["scorers_updated"] += 1
+                            log_game_event(db, game, f"⚽ AO VIVO {game.home_score}-{game.away_score} · {new_s}")
+                    else:
+                        status["retries"] += 1
+                    status["mid_checks"] += 1
+                    mark_polled(game)
+        elif gap_ok and not paid_ok:
+            # FAILOVER: paga sem cota → goleador ao vivo pela TheSportsDB (grátis)
+            status["skipped"] = "paga sem cota — failover TheSportsDB ao vivo"
+            for game in pending_live:
+                if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
+                    break
+                status["tsd_calls"] += 1
+                bump_game_poll(db, game.id, "tsd")
+                tsd = fetch_thesportsdb_scorers(game, db) or []
+                of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+                if tsd:
+                    new_s = normalize_live(game, tsd, {"TheSportsDB": tsd, "openfootball": of_names})
                     if new_s != (game.scorers or ""):
                         game.scorers = new_s
                         status["scorers_updated"] += 1
-                        log_game_event(
-                            db, game,
-                            f"⚽ AO VIVO {game.home_score}-{game.away_score} · goleadores: {new_s}",
-                        )
-                # marca que JÁ buscamos o nome neste placar — não re-dispara cota no
-                # mesmo gol (ex.: gol contra que nunca terá goleador nomeado)
-                set_app_setting(db, f"wc_live_polled_{game.id}", f"{game.home_score or 0}-{game.away_score or 0}")
-                status["mid_checks"] += 1
+                        log_game_event(db, game, f"⚽ AO VIVO (failover TheSportsDB) {game.home_score}-{game.away_score} · {new_s}")
+                else:
+                    status["retries"] += 1
+                mark_polled(game)
+            set_app_setting(db, "api_football_last_live_at", datetime.now(timezone.utc).isoformat())
 
-    # ── Confirmação GRÁTIS (TheSportsDB) pra encerrados ainda não confirmados ──
-    # Cobre jogos antigos sem fixture_id da API paga (fora da janela do plano).
-    # Não gasta cota da API-Football. Só jogos RECENTES (TheSportsDB só tem ~hoje±) e
-    # com BACKOFF por jogo: re-tenta no máx a cada 15min em vez de todo ciclo (30s),
-    # senão jogos que a fonte nunca terá ficam sendo consultados pra sempre.
-    confirm_cutoff = now - timedelta(days=3)
-    candidates_confirm = (
+    # ============ C) +10min: re-confirmação grátis (TheSportsDB + openfootball + IA) ============
+    reconfirm_due = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.status == "finished")
-        .filter(or_(models.WorldCupGame.scorers_confirmed.is_(False), models.WorldCupGame.scorers_confirmed.is_(None)))
-        .filter(models.WorldCupGame.kickoff_at >= confirm_cutoff)
-        .order_by(models.WorldCupGame.kickoff_at.desc())
+        .filter(models.WorldCupGame.finished_at.isnot(None))
+        .filter(models.WorldCupGame.finished_at <= now - WORLD_CUP_RECONFIRM_AFTER)
+        .filter(or_(models.WorldCupGame.reconfirmed.is_(False), models.WorldCupGame.reconfirmed.is_(None)))
+        .order_by(models.WorldCupGame.finished_at.desc())
         .all()
     )
-    to_confirm = []
-    for game in candidates_confirm:
-        last_try = get_app_setting(db, f"wc_tsd_tried_{game.id}")
-        due = True
-        if last_try:
-            try:
-                t = datetime.fromisoformat(last_try)
-                if t.tzinfo:
-                    t = t.astimezone(timezone.utc).replace(tzinfo=None)
-                due = (now - t).total_seconds() >= THESPORTSDB_CONFIRM_BACKOFF
-            except ValueError:
-                due = True
-        if due:
-            to_confirm.append(game)
-        if len(to_confirm) >= THESPORTSDB_CYCLE_LIMIT:
-            break
-    for game in to_confirm:
+    for game in reconfirm_due:
         if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
-            break  # teto por ciclo (30/min) — segue no próximo
+            break
         status["tsd_calls"] += 1
         bump_game_poll(db, game.id, "tsd")
-        set_app_setting(db, f"wc_tsd_tried_{game.id}", datetime.now(timezone.utc).isoformat())
-        # [] (não None): mesmo que a TheSportsDB não tenha o jogo, ainda re-confirmamos
-        # via openfootball — assim TODO jogo recebe ao menos 1 fonte corroborando.
-        tsd_names = fetch_thesportsdb_scorers(game, db) or []
+        tsd = fetch_thesportsdb_scorers(game, db) or []
         squad = world_cup_game_squad(db, game)
         of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
-        # IA com elenco: monta o conjunto definitivo a partir da 2ª fonte + backup
+        # IA reconcilia as DUAS grátis e confirma o resultado (que já tem a paga)
         reconciled = ai_reconcile_scorers(
-            db, game, {"TheSportsDB": tsd_names, "openfootball": of_names}, status, squad=squad
+            db, game, {"TheSportsDB": tsd, "openfootball": of_names}, status, squad=squad
         )
-        # UNIÃO obrigatória — nunca perde goleador já capturado
-        candidate = (reconciled or []) + tsd_names + of_names
+        candidate = (reconciled or []) + tsd + of_names
         official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in candidate) if n], squad)
         new_scorers = ", ".join(official)[:500]
         if new_scorers != (game.scorers or ""):
             game.scorers = new_scorers
             status["scorers_updated"] += 1
-        # fontes que corroboram (TheSportsDB + backup openfootball). Recalcula sempre
-        # (re-confirma) e atualiza a lista de quais fontes bateram.
+        # algo que as grátis trouxeram e a paga não tinha → sinaliza
+        extras = [t for t in tsd if not any(same_scorer(t, o) for o in of_names)]
+        if extras:
+            status["conflicts"].append(
+                {"game": f"{game.home_team} x {game.away_team}", "gratis_trouxe_a_mais": extras}
+            )
         agreeing = [
-            name for name, src in (("TheSportsDB", tsd_names), ("openfootball", of_names))
+            name for name, src in (("TheSportsDB", tsd), ("openfootball", of_names))
             if scorer_source_corroborates(src, official)
         ]
-        if len(agreeing) >= (game.scorers_confirmations or 0):
-            game.scorers_confirmations = len(agreeing)
-            game.confirmation_sources = ", ".join(agreeing) or game.confirmation_sources
-        if len(agreeing) >= 2 and world_cup_scorers_complete(game):
+        prev = [s.strip() for s in (game.confirmation_sources or "").split(",") if s.strip()]
+        for a in agreeing:
+            if a not in prev:
+                prev.append(a)
+        game.confirmation_sources = ", ".join(prev) or game.confirmation_sources
+        game.scorers_confirmations = max(game.scorers_confirmations or 0, len(prev))
+        if len(prev) >= 2 and world_cup_scorers_complete(game):
             game.scorers_confirmed = True
-            status["confirmed"] += 1
-        if world_cup_scorers_complete(game):
-            game.scorers_final = True
+        game.reconfirmed = True
+        status["reconfirmed"] += 1
+        log_game_event(db, game, f"🔁 re-confirmado (+10min) — {len(prev)} fonte(s)" + (f" · a mais: {', '.join(extras)}" if extras else ""))
 
-    # ── RE-CONFIRMAÇÃO PELA API-FOOTBALL (3ª fonte definitiva): jogos finalizados
-    # com MENOS de 2 fontes corroborando recebem uma re-checagem na API paga quando
-    # há cota SOBRANDO (acima da reserva + folga). Backoff por jogo. É o "todos têm
-    # que re-confirmar usando todas as APIs". ──
-    if api_football_total_remaining(db) > finalize_reserve + 3:
-        reconf = (
-            db.query(models.WorldCupGame)
-            .filter(models.WorldCupGame.status == "finished")
-            .filter(models.WorldCupGame.api_fixture_id.isnot(None))
-            .filter((models.WorldCupGame.scorers_confirmations < 2) | (models.WorldCupGame.scorers_confirmations.is_(None)))
-            .order_by(models.WorldCupGame.kickoff_at.desc())
-            .all()
-        )
-        for game in reconf:
-            if api_football_total_remaining(db) <= finalize_reserve + 3:
-                break
-            last = get_app_setting(db, f"wc_af_reconf_{game.id}")
-            if last:
-                try:
-                    t = datetime.fromisoformat(last)
-                    if t.tzinfo:
-                        t = t.astimezone(timezone.utc).replace(tzinfo=None)
-                    if (now - t).total_seconds() < 3600:  # re-confirma no máx 1×/h por jogo
-                        continue
-                except ValueError:
-                    pass
-            set_app_setting(db, f"wc_af_reconf_{game.id}", datetime.now(timezone.utc).isoformat())
-            payload = call(f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}")
-            if payload is None:
-                break
-            bump_game_poll(db, game.id, "af")
-            fixtures = payload.get("response") or []
-            if not fixtures:
-                continue
-            api_names = extract_api_football_scorers(fixtures[0])
-            squad = world_cup_game_squad(db, game)
-            of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
-            candidate = api_names + of_names
-            official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in candidate) if n], squad)
-            if ", ".join(official) != (game.scorers or "") and official:
-                game.scorers = ", ".join(official)[:500]
-                status["scorers_updated"] += 1
-            prev_sources = [s.strip() for s in (game.confirmation_sources or "").split(",") if s.strip()]
-            if scorer_source_corroborates(api_names, official) and "API-Football" not in prev_sources:
-                prev_sources.append("API-Football")
-            game.confirmation_sources = ", ".join(prev_sources) or game.confirmation_sources
-            game.scorers_confirmations = max(game.scorers_confirmations or 0, len(prev_sources))
-            if len(prev_sources) >= 2 and world_cup_scorers_complete(game):
-                game.scorers_confirmed = True
-                status["confirmed"] += 1
-
-    # ── VARREDURA FINAL: jogo encerrado cujos goleadores JÁ cobrem os gols vira
-    # 'final' mesmo que nenhuma fonte de confirmação tenha o jogo (o openfootball já
-    # bastou). Sem isso, jogos antigos que a TheSportsDB não tem ficavam "pendentes"
-    # pra sempre e o sistema seguia tentando finalizar à toa. ──
+    # Varredura: jogo encerrado com goleadores completos vira 'final'
     leftover = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.status == "finished")
@@ -3056,6 +2986,7 @@ def ai_reconcile_scorers(
     if not text:
         return None
     status["ai_reconciles"] = status.get("ai_reconciles", 0) + 1
+    bump_daily_counter(db, "ai_reconcile")  # conta as reconciliações de goleador
     try:
         start, end = text.find("["), text.rfind("]")
         names = json.loads(text[start : end + 1]) if start >= 0 and end > start else None
@@ -3162,6 +3093,7 @@ def world_cup_ai_insight(db: Session) -> dict[str, Any]:
     )
     if not text:
         return base
+    bump_daily_counter(db, "ai_insight")  # conta a "resenha" separada do reconcile
     # Teto rígido pra nunca quebrar o card, independente do que a IA escrever
     text = text.strip().strip('"')
     if len(text) > 150:
@@ -4019,6 +3951,7 @@ def world_cup_sync_status(
             "scorers_complete": world_cup_scorers_complete(g),
             "scorers_confirmations": g.scorers_confirmations or 0,
             "end_source": g.end_source,
+            "halftime": bool(g.halftime),
         }
         for g in today_rows
     ]
@@ -4033,7 +3966,10 @@ def world_cup_sync_status(
                          "limit_per_min": API_FOOTBALL_MINUTE_LIMIT, "label": "Nome dos goleadores"},
         "thesportsdb": {"calls": daily_counter(db, "thesportsdb"), "limit_per_min": 30, "daily_cap": None,
                         "label": "2ª confirmação de goleadores"},
-        "openai": {"calls": openai_calls_today(db), "daily_cap": None, "label": "Reconciliação por IA"},
+        "ai_reconcile": {"calls": daily_counter(db, "ai_reconcile"), "daily_cap": None,
+                         "label": "IA: confirma goleadores (~2/jogo)"},
+        "ai_insight": {"calls": daily_counter(db, "ai_insight"), "daily_cap": None,
+                       "label": "IA: resenha do card de palpite"},
     }
 
     # Contagem regressiva: próxima atualização do painel ao vivo e dos artilheiros
@@ -4102,6 +4038,7 @@ def world_cup_sync_status(
                 "status": g.status,
                 "score": f"{g.home_score}-{g.away_score}" if g.home_score is not None else None,
                 "goals": (g.home_score or 0) + (g.away_score or 0),
+                "scorers": g.scorers,
                 "scorers_count": len(game_scorer_names(g)),
                 "scorers_complete": world_cup_scorers_complete(g),
                 "scorers_final": bool(g.scorers_final),
@@ -4109,6 +4046,8 @@ def world_cup_sync_status(
                 "scorers_confirmations": g.scorers_confirmations or 0,
                 "confirmation_sources": g.confirmation_sources,
                 "end_source": g.end_source,
+                "halftime": bool(g.halftime),
+                "reconfirmed": bool(g.reconfirmed),
                 "polls": {"api_football": game_poll_count(db, g.id, "af"), "thesportsdb": game_poll_count(db, g.id, "tsd")},
                 "has_fixture_id": g.api_fixture_id is not None,
                 "predictions": len(g.predictions),

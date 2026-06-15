@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Mail, ShieldCheck, ShieldX } from "lucide-react";
 import { api } from "@/lib/api";
 
-const ADMIN_CONTACT = "redacted@example.com";
+const ADMIN_CONTACT = "matheus.gama@example.com";
 
 function HomeContent() {
   const router = useRouter();

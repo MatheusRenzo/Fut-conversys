@@ -147,7 +147,7 @@ O backend cria um usuario admin local usando variaveis de ambiente:
 ```env
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
-ADMIN_EMAIL=redacted@example.com
+ADMIN_EMAIL=admin@example.com
 ```
 
 > Para publicar ou rodar em ambiente real, troque as credenciais no `.env` e nunca suba esse arquivo para o GitHub.

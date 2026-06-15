@@ -1917,7 +1917,9 @@ export default function BolaoPage() {
                         <span className="wc-game-stage">
                           {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
                         </span>
-                        <span className={`wc-game-status ${game.status}`}>{statusLabels[game.status]}</span>
+                        <span className={`wc-game-status ${game.status}`}>
+                          {game.status === "live" && game.halftime ? "⏸ Intervalo" : statusLabels[game.status]}
+                        </span>
                       </div>
                       <div className="wc-bet-slip-match">
                         <span>
@@ -2109,46 +2111,71 @@ export default function BolaoPage() {
                   );
                 })()}
 
-                {/* Legenda curta: quem faz o quê */}
+                {/* Legenda + cota */}
                 <div className="wc-tech-legend">
-                  <span><b>Placar/fim:</b> football-data (não traz goleador)</span>
-                  <span><b>Goleador:</b> API-Football → confirma TheSportsDB → openfootball</span>
-                  <span><b>IA:</b> junta as 3 + elenco e normaliza os nomes</span>
-                  <span><b>Cota paga:</b> {syncStatus.requests_today?.api_football?.remaining ?? "?"}/{syncStatus.requests_today?.api_football?.daily_cap ?? 100} · TheSportsDB {syncStatus.requests_today?.thesportsdb?.calls ?? 0} hoje · IA {syncStatus.requests_today?.openai?.calls ?? 0}</span>
+                  <span><b>Placar/intervalo/fim:</b> football-data</span>
+                  <span><b>Goleador ao vivo:</b> API-Football no gol (failover TheSportsDB)</span>
+                  <span><b>Cota paga:</b> {syncStatus.requests_today?.api_football?.remaining ?? "?"}/{syncStatus.requests_today?.api_football?.daily_cap ?? 100}</span>
                 </div>
 
-                {/* JOGOS — centro do painel: por jogo, quem fez o quê */}
-                {(syncStatus.games_health?.length ?? 0) > 0 && (
+                {/* IA — quantas vezes rodou (confirma ~2/jogo · resenha) */}
+                <div className="wc-tech-legend">
+                  <span><b>IA confirma goleador:</b> {syncStatus.requests_today?.ai_reconcile?.calls ?? 0} hoje (≈2/jogo)</span>
+                  <span><b>IA resenha (card palpite):</b> {syncStatus.requests_today?.ai_insight?.calls ?? 0} hoje</span>
+                </div>
+
+                {/* ===== AO VIVO AGORA ===== */}
+                {(syncStatus.games_health ?? []).some((g) => g.status === "live") && (
                   <div className="wc-tech-block">
-                    <div className="wc-tech-h">Por jogo — finalizou · confirmou · re-confirmou · 3ª · rodadas</div>
-                    {(syncStatus.games_health ?? []).map((g, i) => {
-                      const conf = g.scorers_confirmations ?? 0;
-                      const srcs = (g.confirmation_sources ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+                    <div className="wc-tech-h">🔴 Ao vivo agora</div>
+                    {(syncStatus.games_health ?? []).filter((g) => g.status === "live").map((g, i) => {
                       const af = g.polls?.api_football ?? 0;
-                      const tsd = g.polls?.thesportsdb ?? 0;
+                      const complete = (g.goals ?? 0) === 0 || g.scorers_complete;
                       return (
-                        <div className="wc-tech-g2" key={i}>
-                          <div className="wc-tech-g2-top">
-                            <span className={`st ${g.status}`}>{g.status === "live" ? "● AO VIVO" : "FIM"}</span>
+                        <div className="wc-tech-live" key={i}>
+                          <div className="wc-tech-live-top">
+                            <span className="lv">● RODANDO</span>
+                            {g.halftime && <span className="ht">⏸ INTERVALO</span>}
                             <span className="mt">{g.match_number ? `#${g.match_number} ` : ""}{g.matchup}</span>
-                            <span className="sc">{g.score ?? "—"}</span>
-                            <span className="gl">{g.scorers_count}/{g.goals} ⚽</span>
+                            <span className="sc">{g.score ?? "0-0"}</span>
                           </div>
-                          <div className="wc-tech-g2-pipe">
-                            <span className={g.scorers_final ? "ok" : "no"}>
-                              {g.scorers_final ? `finalizou✓ (${g.end_source ?? "?"})` : "finalizando…"}
-                            </span>
-                            <span className={conf >= 1 ? "ok" : "no"}>1ª {conf >= 1 ? `✓ ${srcs[0]}` : "—"}</span>
-                            <span className={conf >= 2 ? "ok" : "no"}>2ª {conf >= 2 ? `✓ ${srcs[1]}` : "—"}</span>
-                            <span className={conf >= 3 ? "ok" : "no"}>3ª {conf >= 3 ? `✓ ${srcs[2]}` : "—"}</span>
-                            <span className="run">rodou: API-Football ×{af} · TheSportsDB ×{tsd}</span>
+                          <div className="wc-tech-live-sc">
+                            {(g.goals ?? 0) === 0 ? (
+                              <span className="no">sem gol ainda</span>
+                            ) : complete ? (
+                              <span className="ok">✓ artilheiro: {g.scorers || "—"} (paga trouxe após o gol · API-Football ×{af})</span>
+                            ) : (
+                              <span className="wait">⏳ buscando artilheiro do gol… (retry · API-Football ×{af})</span>
+                            )}
                           </div>
                         </div>
                       );
                     })}
+                  </div>
+                )}
+
+                {/* ===== ENCERRADOS (todos corretos) ===== */}
+                {(syncStatus.games_health ?? []).some((g) => g.status === "finished") && (
+                  <div className="wc-tech-block">
+                    <div className="wc-tech-h">Encerrados — confirmados</div>
+                    {(syncStatus.games_health ?? []).filter((g) => g.status === "finished").map((g, i) => {
+                      const srcs = (g.confirmation_sources ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+                      const ok = g.scorers_final;
+                      return (
+                        <div className="wc-tech-fin" key={i}>
+                          <span className={ok ? "tag ok" : "tag wait"}>{ok ? "✓ CORRETO" : "…"}</span>
+                          <span className="mt">{g.match_number ? `#${g.match_number} ` : ""}{g.matchup} <b>{g.score}</b></span>
+                          <span className="gl">{g.scorers || "sem goleador"}</span>
+                          <span className="src">
+                            fim: {g.end_source ?? "?"} · fontes: {srcs.length ? srcs.join(" + ") : "—"}
+                            {g.reconfirmed ? " · re-confirmado✓" : " · re-confirma em +10min"}
+                          </span>
+                        </div>
+                      );
+                    })}
                     <div className="wc-tech-foot">
-                      &quot;confirmou/re-confirmou&quot; = fontes independentes que batem com a lista (sem contradizer).
-                      A re-confirmação na API-Football roda quando há cota sobrando (≤1×/h por jogo).
+                      Fim = football-data · goleadores = API-Football (1× no fim) · re-confirmação = TheSportsDB +
+                      openfootball + IA, 10min depois.
                     </div>
                   </div>
                 )}

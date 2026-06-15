@@ -183,6 +183,12 @@ class WorldCupGame(Base):
     confirmation_sources = Column(String, nullable=True)
     # quem confirmou o FIM do jogo (football-data / api-football / auto:tempo)
     end_source = Column(String, nullable=True)
+    # está no intervalo? (football-data status PAUSED)
+    halftime = Column(Boolean, default=False)
+    # quando o jogo foi marcado como encerrado (pra agendar a re-confirmação de 10min)
+    finished_at = Column(DateTime, nullable=True)
+    # já passou pela re-confirmação grátis (TheSportsDB + openfootball + IA) pós-jogo
+    reconfirmed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     predictions = relationship("WorldCupPrediction", back_populates="game", lazy="select")

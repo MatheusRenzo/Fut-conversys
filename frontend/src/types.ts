@@ -231,6 +231,7 @@ export type WorldCupGame = {
   venue?: string | null;
   kickoff_at: string;
   status: "scheduled" | "live" | "finished" | "postponed";
+  halftime?: boolean;
   home_score?: number | null;
   away_score?: number | null;
   scorers?: string | null;
@@ -343,6 +344,8 @@ export type WorldCupSyncStatus = {
       live_gap_seconds?: number;
       mid_checks?: number;
       confirmed?: number;
+      reconfirmed?: number;
+      retries?: number;
       ai_reconciles?: number;
       reserve?: number;
       tsd_calls?: number;
@@ -402,6 +405,7 @@ export type WorldCupSyncStatus = {
     status: string;
     score?: string | null;
     goals: number;
+    scorers?: string | null;
     scorers_count: number;
     scorers_complete: boolean;
     scorers_final: boolean;
@@ -409,6 +413,8 @@ export type WorldCupSyncStatus = {
     scorers_confirmations?: number;
     confirmation_sources?: string | null;
     end_source?: string | null;
+    halftime?: boolean;
+    reconfirmed?: boolean;
     polls?: { api_football: number; thesportsdb: number };
     has_fixture_id: boolean;
     predictions: number;
@@ -438,6 +444,7 @@ export type WorldCupSyncStatus = {
     scorers_complete?: boolean;
     scorers_confirmations?: number;
     end_source?: string | null;
+    halftime?: boolean;
   }>;
   requests_today?: Record<
     string,

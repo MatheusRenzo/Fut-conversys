@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SSL_DIR="$ROOT/nginx/ssl"
 FULLCHAIN="$SSL_DIR/fullchain.pem"
 PRIVKEY="$SSL_DIR/privkey.pem"
-SERVER_IP="${APP_SERVER_IP:-<REDACTED-IP>}"
+SERVER_IP="${APP_SERVER_IP:-127.0.0.1}"
 
 mkdir -p "$SSL_DIR"
 

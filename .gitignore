@@ -59,3 +59,7 @@ conversys-wildcard-cert.tar.gz
 Thumbs.db
 .idea/
 .vscode/
+
+# Runbooks internos de infra (não versionar — contêm IP/NAT/SSH)
+nginx/INFRA-FIREWALL.md
+nginx/CERTIFICADO.md

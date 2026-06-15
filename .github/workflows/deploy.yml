@@ -34,7 +34,7 @@ jobs:
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
           subject: "✅ Deploy concluído — Fut Conversys"
-          to: redacted@example.com
+          to: ${{ secrets.NOTIFY_EMAIL }}
           from: "GitHub Actions <${{ secrets.MAIL_USERNAME }}>"
           body: |
             Deploy realizado com sucesso no servidor conversysfut.
@@ -57,7 +57,7 @@ jobs:
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
           subject: "❌ FALHA no deploy — Fut Conversys"
-          to: redacted@example.com
+          to: ${{ secrets.NOTIFY_EMAIL }}
           from: "GitHub Actions <${{ secrets.MAIL_USERNAME }}>"
           body: |
             O deploy FALHOU no servidor conversysfut.
