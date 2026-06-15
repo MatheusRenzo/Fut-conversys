@@ -777,6 +777,7 @@ export default function BolaoPage() {
   const [resultDraft, setResultDraft] = useState<ResultDraft>({ home: "0", away: "0", scorers: "" });
   const [savingResult, setSavingResult] = useState(false);
   const [adminModalOpen, setAdminModalOpen] = useState(false);
+  const [expandedAdminGame, setExpandedAdminGame] = useState<number | null>(null);
   const [rankingModalOpen, setRankingModalOpen] = useState(false);
   const [myBetsModalOpen, setMyBetsModalOpen] = useState(false);
   const [championQuery, setChampionQuery] = useState("");
@@ -2127,18 +2128,23 @@ export default function BolaoPage() {
                 {/* ===== AO VIVO AGORA ===== */}
                 {(syncStatus.games_health ?? []).some((g) => g.status === "live") && (
                   <div className="wc-tech-block">
-                    <div className="wc-tech-h">🔴 Ao vivo agora</div>
+                    <div className="wc-tech-h">🔴 Ao vivo agora — toque pra ver o histórico</div>
                     {(syncStatus.games_health ?? []).filter((g) => g.status === "live").map((g, i) => {
                       const af = g.polls?.api_football ?? 0;
+                      const tsd = g.polls?.thesportsdb ?? 0;
                       const complete = (g.goals ?? 0) === 0 || g.scorers_complete;
+                      const open = expandedAdminGame === (g.match_number ?? -i - 1);
+                      const evs = (syncStatus.game_events ?? []).filter((e) => e.match_number === g.match_number);
                       return (
                         <div className="wc-tech-live" key={i}>
-                          <div className="wc-tech-live-top">
+                          <button className="wc-tech-live-top wc-tech-clickable" type="button"
+                            onClick={() => setExpandedAdminGame(open ? null : (g.match_number ?? -i - 1))}>
                             <span className="lv">● RODANDO</span>
                             {g.halftime && <span className="ht">⏸ INTERVALO</span>}
                             <span className="mt">{g.match_number ? `#${g.match_number} ` : ""}{g.matchup}</span>
                             <span className="sc">{g.score ?? "0-0"}</span>
-                          </div>
+                            <span className="exp">{open ? "▾" : "▸"}</span>
+                          </button>
                           <div className="wc-tech-live-sc">
                             {(g.goals ?? 0) === 0 ? (
                               <span className="no">sem gol ainda</span>
@@ -2148,6 +2154,14 @@ export default function BolaoPage() {
                               <span className="wait">⏳ buscando artilheiro do gol… (retry · API-Football ×{af})</span>
                             )}
                           </div>
+                          {open && (
+                            <div className="wc-tech-detail">
+                              <div className="hist">chamadas de API neste jogo: API-Football ×{af} · TheSportsDB ×{tsd}</div>
+                              {evs.length ? evs.map((ev, j) => (
+                                <div className="wc-tech-logrow" key={j}><span className="t">{timeHM(ev.at)}</span><span className="a">{ev.action}</span></div>
+                              )) : <div className="hist muted">sem eventos registrados ainda</div>}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -2157,19 +2171,37 @@ export default function BolaoPage() {
                 {/* ===== ENCERRADOS (todos corretos) ===== */}
                 {(syncStatus.games_health ?? []).some((g) => g.status === "finished") && (
                   <div className="wc-tech-block">
-                    <div className="wc-tech-h">Encerrados — confirmados</div>
+                    <div className="wc-tech-h">Encerrados — confirmados (toque pra ver o histórico)</div>
                     {(syncStatus.games_health ?? []).filter((g) => g.status === "finished").map((g, i) => {
                       const srcs = (g.confirmation_sources ?? "").split(",").map((s) => s.trim()).filter(Boolean);
                       const ok = g.scorers_final;
+                      const af = g.polls?.api_football ?? 0;
+                      const tsd = g.polls?.thesportsdb ?? 0;
+                      const open = expandedAdminGame === (g.match_number ?? -1000 - i);
+                      const evs = (syncStatus.game_events ?? []).filter((e) => e.match_number === g.match_number);
                       return (
-                        <div className="wc-tech-fin" key={i}>
-                          <span className={ok ? "tag ok" : "tag wait"}>{ok ? "✓ CORRETO" : "…"}</span>
-                          <span className="mt">{g.match_number ? `#${g.match_number} ` : ""}{g.matchup} <b>{g.score}</b></span>
-                          <span className="gl">{g.scorers || "sem goleador"}</span>
-                          <span className="src">
-                            fim: {g.end_source ?? "?"} · fontes: {srcs.length ? srcs.join(" + ") : "—"}
-                            {g.reconfirmed ? " · re-confirmado✓" : " · re-confirma em +10min"}
-                          </span>
+                        <div key={i}>
+                          <button className="wc-tech-fin wc-tech-clickable" type="button"
+                            onClick={() => setExpandedAdminGame(open ? null : (g.match_number ?? -1000 - i))}>
+                            <span className={ok ? "tag ok" : "tag wait"}>{ok ? "✓ CORRETO" : "…"}</span>
+                            <span className="mt">{g.match_number ? `#${g.match_number} ` : ""}{g.matchup} <b>{g.score}</b></span>
+                            <span className="gl">{g.scorers || "sem goleador"}</span>
+                            <span className="src">
+                              fim: {g.end_source ?? "?"} · {srcs.length ? `${srcs.length} fonte(s): ${srcs.join(" + ")}` : "—"}
+                              {g.reconfirmed ? " · re-confirmado✓" : " · re-confirma +10min"} {open ? "▾" : "▸"}
+                            </span>
+                          </button>
+                          {open && (
+                            <div className="wc-tech-detail">
+                              <div className="hist">
+                                etapas: finalizou {ok ? "✓" : "…"} · confirmou {srcs[0] ? `✓ ${srcs[0]}` : "…"} · re-confirmou {srcs[1] ? `✓ ${srcs[1]}` : "…"} · 3ª {srcs[2] ? `✓ ${srcs[2]}` : "…"}
+                              </div>
+                              <div className="hist">chamadas de API neste jogo: API-Football ×{af} · TheSportsDB ×{tsd}</div>
+                              {evs.length ? evs.map((ev, j) => (
+                                <div className="wc-tech-logrow" key={j}><span className="t">{timeHM(ev.at)}</span><span className="a">{ev.action}</span></div>
+                              )) : <div className="hist muted">sem eventos no log (jogo antigo)</div>}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -2180,10 +2212,10 @@ export default function BolaoPage() {
                   </div>
                 )}
 
-                {/* LOG — o que fez e quando */}
+                {/* LOG GERAL — o que fez e quando (todos os jogos) */}
                 {(syncStatus.game_events?.length ?? 0) > 0 && (
                   <div className="wc-tech-block">
-                    <div className="wc-tech-h">Log — o que fez e quando</div>
+                    <div className="wc-tech-h">Log geral — o que rodou e quando</div>
                     <div className="wc-tech-log">
                       {(syncStatus.game_events ?? []).slice(0, 16).map((ev, i) => (
                         <div className="wc-tech-logrow" key={i}>

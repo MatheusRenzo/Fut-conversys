@@ -12853,6 +12853,16 @@ img.team-flag {
 .wc-tech-fin .mt { color: #fff; font-weight: 700; flex: 1 1 150px; }
 .wc-tech-fin .gl { color: var(--brand-green); }
 .wc-tech-fin .src { color: #7f8ba0; width: 100%; }
+
+/* expansível por jogo (histórico + log estruturado) */
+.wc-tech-clickable { width: 100%; text-align: left; background: none; border: 0; cursor: pointer; padding: 0; font: inherit; color: inherit; }
+.wc-tech-live-top.wc-tech-clickable { display: flex; }
+.wc-tech-clickable .exp { margin-left: auto; color: #8fa3c8; font-weight: 900; }
+.wc-tech-fin.wc-tech-clickable:hover, .wc-tech-live-top.wc-tech-clickable:hover { opacity: 0.85; }
+.wc-tech-detail { margin: 4px 0 8px; padding: 8px 10px; border-left: 2px solid rgba(43,108,255,0.4); background: rgba(0,0,0,0.18); border-radius: 0 8px 8px 0; display: flex; flex-direction: column; gap: 2px; }
+.wc-tech-detail .hist { font-size: 11px; color: #aab6c9; }
+.wc-tech-detail .hist.muted { color: #7f8ba0; font-style: italic; }
+.wc-tech-detail .wc-tech-logrow { grid-template-columns: 52px 1fr; }
 @media (max-width: 560px) {
   .wc-tech-row { grid-template-columns: 1fr auto; }
   .wc-tech-row .d { grid-column: 1 / -1; }
