@@ -19,12 +19,9 @@ type GameRow = {
   kickoff_at?: string | null;
   status: string;
   score?: string | null;
-  goals?: number;
   scorers?: string | null;
   halftime?: boolean;
-  scorers_complete?: boolean;
   scorers_final?: boolean;
-  confirmation_sources?: string | null;
   end_source?: string | null;
   reconfirmed?: boolean;
   polls?: { api_football: number; thesportsdb: number };
@@ -49,15 +46,6 @@ function timeFull(iso: string) {
   });
 }
 
-function timeHM(iso: string | null | undefined) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "America/Sao_Paulo",
-  });
-}
-
 function inLabel(lastIso: string | null | undefined, gapSeconds: number | undefined, now: number) {
   if (!gapSeconds) return "—";
   const base = lastIso ? new Date(lastIso).getTime() : now;
@@ -71,7 +59,12 @@ function eventKey(game: GameRow) {
   return game.match_number ?? `${game.home_team}-${game.away_team}`;
 }
 
+function chrono(evs: GameEvent[]) {
+  return [...evs].reverse();
+}
+
 function rowTone(ev: GameEvent): string {
+  if (ev.cached) return "ia-cache";
   if (ev.ok === false) return "err";
   if (ev.ok === true) return "ok";
   if (ev.action.startsWith("↻") || ev.action.includes("retry")) return "retry";
@@ -81,6 +74,135 @@ function rowTone(ev: GameEvent): string {
   if (ev.action.includes("intervalo") || ev.action.includes("2º tempo")) return "ht";
   if (ev.phase === "fim" || ev.action.includes("🏁")) return "end";
   return "plain";
+}
+
+function lastOf(evs: GameEvent[], pred: (e: GameEvent) => boolean) {
+  return evs.find(pred) ?? null;
+}
+
+type StepStatus = "ok" | "err" | "wait" | "na";
+
+type ConfirmStep = {
+  title: string;
+  status: StepStatus;
+  when?: string;
+  who?: string;
+  detail?: string;
+};
+
+function buildConfirmSteps(evs: GameEvent[], game: GameRow): ConfirmStep[] {
+  const c = chrono(evs);
+
+  const fimGratis = lastOf(c, (e) => e.action.includes("encerrado") || e.action.includes("🏁"));
+  const fimPaga = lastOf(c, (e) => e.phase === "fim" && e.api === "API-Football" && e.ok === true);
+  const fimPagaFail = lastOf(c, (e) => e.phase === "fim" && e.api === "API-Football" && e.ok === false);
+  const fimIa = lastOf(c, (e) => e.phase === "fim" && e.api === "IA merge" && e.ok === true);
+  const fimIaFail = lastOf(c, (e) => e.phase === "fim" && e.api === "IA merge" && e.ok === false);
+  const reconf = lastOf(c, (e) => e.phase === "reconfirmacao");
+  const reconfIa = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "IA merge");
+  const reconfTsdOk = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "TheSportsDB" && e.ok === true);
+  const reconfTsdFail = lastOf(c, (e) => e.phase === "reconfirmacao" && e.api === "TheSportsDB" && e.ok === false);
+
+  const steps: ConfirmStep[] = [];
+
+  // 1. Finalizou
+  if (game.end_source || fimGratis) {
+    steps.push({
+      title: "Finalizou",
+      status: "ok",
+      when: (fimGratis ?? fimPaga)?.at ? timeFull((fimGratis ?? fimPaga)!.at) : undefined,
+      who: game.end_source ?? fimGratis?.api ?? "—",
+      detail: fimGratis?.action.replace(/^🏁\s*/, ""),
+    });
+  } else if (game.status === "live") {
+    steps.push({ title: "Finalizou", status: "wait", detail: "jogo ainda rolando" });
+  } else {
+    steps.push({ title: "Finalizou", status: "na", detail: "aguardando" });
+  }
+
+  // 2. Confirmação (paga + IA no fim)
+  if (fimPaga) {
+    const iaTxt = fimIa
+      ? (fimIa.cached ? `IA cache: ${fimIa.action.split("—")[1]?.trim()}` : `IA: ${fimIa.action.split("—")[1]?.trim()}`)
+      : fimIaFail
+        ? "IA falhou"
+        : undefined;
+    steps.push({
+      title: "Confirmação",
+      status: "ok",
+      when: timeFull(fimPaga.at),
+      who: "API-Football",
+      detail: [fimPaga.action.replace(/^✓\s*/, ""), iaTxt].filter(Boolean).join(" · "),
+    });
+  } else if (fimPagaFail) {
+    steps.push({
+      title: "Confirmação",
+      status: "err",
+      when: timeFull(fimPagaFail.at),
+      who: "API-Football",
+      detail: fimPagaFail.action.replace(/^✗\s*/, ""),
+    });
+  } else if (game.status === "finished") {
+    steps.push({ title: "Confirmação", status: "wait", detail: "aguardando API paga no fim" });
+  }
+
+  // 3. Reconfirmação (+10min)
+  if (reconf) {
+    const ok = reconf.ok !== false && (reconfTsdOk || reconfIa?.ok);
+    const parts: string[] = [];
+    if (reconfTsdOk) parts.push(`TheSportsDB: ${reconfTsdOk.action.replace(/^✓\s*achou:\s*/, "")}`);
+    if (reconfTsdFail) parts.push("TheSportsDB: não achou");
+    if (reconfIa?.ok) parts.push(reconfIa.cached ? "IA (cache)" : `IA: ${reconfIa.action.split("—")[1]?.trim()}`);
+    if (reconf.action.includes("divergência")) parts.push("⚠ divergência");
+    steps.push({
+      title: "Reconfirmação",
+      status: ok ? "ok" : reconfTsdFail ? "err" : "wait",
+      when: timeFull(reconf.at),
+      who: "TheSportsDB + openfootball + IA",
+      detail: parts.length ? parts.join(" · ") : reconf.action,
+    });
+  } else if (game.status === "finished" && game.scorers_final) {
+    steps.push({ title: "Reconfirmação", status: "wait", detail: "agendada +10min após o fim" });
+  }
+
+  return steps;
+}
+
+function FlowDiagram() {
+  return (
+    <div className="wc-flow-diagram">
+      <div className="wc-flow-row">
+        <span className="wc-tl-v2-phase p-gratuito">GRÁTIS</span>
+        <span className="wc-flow-arrow">→</span>
+        <span>football-data (todo ciclo)</span>
+      </div>
+      <div className="wc-flow-row indent">
+        <span className="wc-flow-arrow">↳ gol?</span>
+        <span className="wc-tl-v2-phase p-ao_vivo">AO VIVO</span>
+        <span>API-Football →</span>
+        <span className="wc-tl-v2-api">IA merge</span>
+      </div>
+      <div className="wc-flow-row indent warn">
+        <span className="wc-flow-arrow">↳ sem cota</span>
+        <span className="wc-tl-v2-phase p-ao_vivo_failover">FAILOVER</span>
+        <span>TheSportsDB →</span>
+        <span className="wc-tl-v2-api">IA merge</span>
+      </div>
+      <div className="wc-flow-row">
+        <span className="wc-tl-v2-phase p-fim">FIM</span>
+        <span>API-Football 1× →</span>
+        <span className="wc-tl-v2-api">IA merge</span>
+      </div>
+      <div className="wc-flow-row">
+        <span className="wc-tl-v2-phase p-reconfirmacao">RECONF</span>
+        <span>TheSportsDB + openfootball →</span>
+        <span className="wc-tl-v2-api">IA merge</span>
+      </div>
+      <p className="wc-flow-note">
+        <b>IA merge:</b> tenta cache primeiro (mesma assinatura = 0 chamada OpenAI). Timeline mostra CACHE vs chamada real.
+      </p>
+    </div>
+  );
 }
 
 function TimelineRow({ ev }: { ev: GameEvent }) {
@@ -93,13 +215,13 @@ function TimelineRow({ ev }: { ev: GameEvent }) {
     <div className={`wc-tl-v2 tone-${tone}`}>
       <div className="wc-tl-v2-rail">
         <span className={`wc-tl-v2-status s-${tone}`}>{status}</span>
-        <span className="wc-tl-v2-line" aria-hidden="true" />
       </div>
       <div className="wc-tl-v2-body">
         <div className="wc-tl-v2-meta">
           <time className="wc-tl-v2-time">{timeFull(ev.at)}</time>
           {phase && <span className={`wc-tl-v2-phase p-${ev.phase}`}>{phase}</span>}
           {ev.api && <span className="wc-tl-v2-api">{ev.api}</span>}
+          {ev.cached && <span className="wc-tl-v2-cache">CACHE</span>}
         </div>
         <p className="wc-tl-v2-text">{ev.action}</p>
       </div>
@@ -107,9 +229,25 @@ function TimelineRow({ ev }: { ev: GameEvent }) {
   );
 }
 
+function ConfirmStepCard({ step }: { step: ConfirmStep }) {
+  if (step.status === "na" && !step.detail) return null;
+  return (
+    <div className={`wc-confirm-step-card s-${step.status}`}>
+      <div className="wc-confirm-step-head">
+        <strong>{step.title}</strong>
+        {step.when && step.when !== "—" && <time>{step.when}</time>}
+      </div>
+      {step.who && <span className="wc-confirm-who">{step.who}</span>}
+      {step.detail && <p className="wc-confirm-detail">{step.detail}</p>}
+    </div>
+  );
+}
 
-function countIaMerge(evs: GameEvent[]) {
-  return evs.filter((e) => e.api === "IA merge" && (e.action.includes("→") || e.action.includes("✓") || e.action.includes("cache"))).length;
+function iaStats(evs: GameEvent[]) {
+  const real = evs.filter((e) => e.api === "IA merge" && e.action.startsWith("→")).length;
+  const cache = evs.filter((e) => e.api === "IA merge" && e.cached).length;
+  const fail = evs.filter((e) => e.api === "IA merge" && e.ok === false).length;
+  return { real, cache, fail };
 }
 
 export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePanelProps) {
@@ -131,12 +269,9 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         away_team: parts[1] ?? "",
         status: g.status,
         score: g.score,
-        goals: g.goals,
         scorers: g.scorers,
         halftime: g.halftime,
-        scorers_complete: g.scorers_complete,
         scorers_final: g.scorers_final,
-        confirmation_sources: g.confirmation_sources,
         end_source: g.end_source,
         reconfirmed: g.reconfirmed,
         polls: g.polls,
@@ -157,12 +292,9 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         kickoff_at: g.kickoff_at,
         status: g.status,
         score: g.score ?? h?.score,
-        goals: h?.goals,
         scorers: g.scorers ?? h?.scorers,
         halftime: g.halftime ?? h?.halftime,
-        scorers_complete: g.scorers_complete ?? h?.scorers_complete,
         scorers_final: h?.scorers_final,
-        confirmation_sources: h?.confirmation_sources,
         end_source: g.end_source ?? h?.end_source,
         reconfirmed: h?.reconfirmed,
         polls: h?.polls,
@@ -178,12 +310,9 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         away_team: parts[1] ?? "",
         status: g.status,
         score: g.score,
-        goals: g.goals,
         scorers: g.scorers,
         halftime: g.halftime,
-        scorers_complete: g.scorers_complete,
         scorers_final: g.scorers_final,
-        confirmation_sources: g.confirmation_sources,
         end_source: g.end_source,
         reconfirmed: g.reconfirmed,
         polls: g.polls,
@@ -212,7 +341,6 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
   const iaToday = syncStatus.requests_today?.ai_reconcile?.calls ?? 0;
   const iaInsightToday = syncStatus.requests_today?.ai_insight?.calls ?? 0;
   const tsdToday = syncStatus.requests_today?.thesportsdb?.calls ?? 0;
-
   const activeGames = games.filter((g) => g.status === "live" || g.status === "finished");
 
   return (
@@ -242,58 +370,34 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
             <strong>{syncStatus.totals.live_games ?? 0}</strong>
           </div>
           <div className="wc-dash-stat">
-            <span className="wc-dash-stat-k"><Database size={11} /> TSD hoje</span>
+            <span className="wc-dash-stat-k"><Database size={11} /> TSD</span>
             <strong>{tsdToday}</strong>
           </div>
           <div className="wc-dash-stat">
-            <span className="wc-dash-stat-k"><Bot size={11} /> IA hoje</span>
-            <strong>{iaToday + iaInsightToday}</strong>
+            <span className="wc-dash-stat-k"><Bot size={11} /> IA real</span>
+            <strong>{iaToday}</strong>
           </div>
         </div>
       </div>
 
-      {/* Regras TheSportsDB + IA */}
-      <section className="wc-dash-rules">
-        <div className="wc-dash-rule-card tsd">
-          <strong>TheSportsDB — quando roda?</strong>
-          <p><b>Não</b> fica ao vivo o tempo todo. Só 2 momentos:</p>
-          <ul>
-            <li><span className="wc-tl-v2-phase p-ao_vivo_failover">FAILOVER</span> ao vivo se API-Football sem cota</li>
-            <li><span className="wc-tl-v2-phase p-reconfirmacao">RECONF</span> 1× +10min após o fim</li>
-          </ul>
-          <small>Placar · intervalo · fim ao vivo = <b>football-data</b> (grátis, todo ciclo)</small>
-        </div>
-        <div className="wc-dash-rule-card ia">
-          <strong>IA — regras de uso</strong>
-          <p>
-            <b>Merge ({iaToday} hoje):</b> toda confirmação de artilheiro (ao vivo, fim, +10min).
-            Cruza fontes + elenco. Cacheada — não repete se nada mudou.
-          </p>
-          <p>
-            <b>Resenha ({iaInsightToday} hoje):</b> 1 frase no card do próximo jogo (mín. 4 palpites, cache 30min).
-            Fala <em>intenção</em> de time e artilheiro — sem números nem pacoca.
-          </p>
-        </div>
-      </section>
+      <FlowDiagram />
 
       {activeGames.length > 0 && (
         <section className="wc-dash-games">
-          <div className="wc-dash-section-title">Jogos — timeline visual</div>
+          <div className="wc-dash-section-title">Jogos</div>
           <div className="wc-dash-game-list">
             {activeGames.map((game) => {
               const key = eventKey(game);
               const evs = eventsByGame.get(game.match_number ?? `${game.home_team} x ${game.away_team}`) ?? [];
-              const chronological = [...evs].reverse();
+              const chronological = chrono(evs);
               const timelineOpen = openTimeline === key;
               const confirmOpen = openConfirm === key;
-              const af = game.polls?.api_football ?? 0;
-              const tsd = game.polls?.thesportsdb ?? 0;
-              const iaHere = countIaMerge(evs);
-              const lastFail = evs.find((e) => e.ok === false);
-              const lastOk = evs.find((e) => e.ok === true);
+              const ia = iaStats(evs);
+              const confirmSteps = buildConfirmSteps(evs, game);
+              const hasErr = evs.some((e) => e.ok === false);
 
               return (
-                <article className={`wc-dash-game-card ${game.status}${lastFail && !lastOk ? " has-fail" : ""}`} key={String(key)}>
+                <article className={`wc-dash-game-card ${game.status}${hasErr ? " has-fail" : ""}`} key={String(key)}>
                   <div className="wc-dash-game-head">
                     <div className="wc-dash-game-match">
                       <span><TeamFlag team={game.home_team} /> {teamLabel(game.home_team)}</span>
@@ -305,23 +409,43 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
                         {game.status === "live" && <span className="wc-live-dot small" />}
                         {game.halftime ? "Intervalo" : game.status === "live" ? "Ao vivo" : "Encerrado"}
                       </span>
-                      {game.kickoff_at && <span className="wc-dash-chip">jogo {timeHM(game.kickoff_at)}</span>}
-                      <span className="wc-dash-chip">AF×{af}</span>
-                      <span className="wc-dash-chip">TSD×{tsd}</span>
-                      <span className="wc-dash-chip ia">IA×{iaHere}</span>
+                      <span className="wc-dash-chip">AF×{game.polls?.api_football ?? 0}</span>
+                      <span className="wc-dash-chip">TSD×{game.polls?.thesportsdb ?? 0}</span>
+                      <span className="wc-dash-chip ia">IA {ia.real}r/{ia.cache}c</span>
                     </div>
                     {game.scorers && (
                       <div className="wc-dash-game-scorers"><Goal size={12} /> {game.scorers}</div>
                     )}
                   </div>
 
+                  {/* Confirmação — 3 passos só */}
+                  <button
+                    className={`wc-dash-drop confirm${confirmOpen ? " open" : ""}`}
+                    onClick={() => setOpenConfirm(confirmOpen ? null : key)}
+                    type="button"
+                  >
+                    <span>Confirmação</span>
+                    <small>finalizou · paga+IA · reconf</small>
+                    <ChevronDown size={15} className="wc-dash-drop-chevron" />
+                  </button>
+                  {confirmOpen && (
+                    <div className="wc-dash-drop-body confirm-v2">
+                      {confirmSteps.length > 0 ? (
+                        confirmSteps.map((step) => <ConfirmStepCard key={step.title} step={step} />)
+                      ) : (
+                        <p className="wc-dash-empty">Nada a confirmar ainda.</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Timeline — histórico completo de requisições */}
                   <button
                     className={`wc-dash-drop${timelineOpen ? " open" : ""}`}
                     onClick={() => setOpenTimeline(timelineOpen ? null : key)}
                     type="button"
                   >
                     <span>Timeline</span>
-                    <small>{chronological.length} eventos · selo por fase/API</small>
+                    <small>{chronological.length} reqs · histórico completo</small>
                     <ChevronDown size={15} className="wc-dash-drop-chevron" />
                   </button>
                   {timelineOpen && (
@@ -333,35 +457,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
                           ))}
                         </div>
                       ) : (
-                        <p className="wc-dash-empty">Aguardando eventos…</p>
-                      )}
-                      <div className="wc-tl-v2-legend">
-                        <span className="s-ok">✓ achou</span>
-                        <span className="s-err">✗ falhou / sem cota</span>
-                        <span className="s-retry">↻ retry</span>
-                        <span className="s-ia">🤖 IA merge</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <button
-                    className={`wc-dash-drop confirm${confirmOpen ? " open" : ""}`}
-                    onClick={() => setOpenConfirm(confirmOpen ? null : key)}
-                    type="button"
-                  >
-                    <span>Confirmação</span>
-                    <small>quem achou no fim e na reconf</small>
-                    <ChevronDown size={15} className="wc-dash-drop-chevron" />
-                  </button>
-                  {confirmOpen && (
-                    <div className="wc-dash-drop-body confirm-v2">
-                      {chronological
-                        .filter((e) => e.phase === "fim" || e.phase === "reconfirmacao")
-                        .map((ev, i) => (
-                          <TimelineRow ev={ev} key={`c-${i}`} />
-                        ))}
-                      {chronological.filter((e) => e.phase === "fim" || e.phase === "reconfirmacao").length === 0 && (
-                        <p className="wc-dash-empty">Fim e reconf ainda não rodaram.</p>
+                        <p className="wc-dash-empty">Sem requisições ainda.</p>
                       )}
                     </div>
                   )}
@@ -374,15 +470,12 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
 
       {syncStatus.requests_today && (
         <section className="wc-dash-apis">
-          <div className="wc-dash-section-title detail">Cotas do dia (UTC)</div>
+          <div className="wc-dash-section-title detail">Cotas hoje · IA resenha: {iaInsightToday}</div>
           <div className="wc-dash-apis-grid">
             {Object.entries(syncStatus.requests_today).map(([key, r]) => (
               <div className="wc-api-card" key={key}>
-                <div className="wc-api-card-head">
-                  <strong>{key.replace("_", "-")}</strong>
-                  <span className="wc-api-calls">{r.calls}{r.daily_cap ? `/${r.daily_cap}` : ""}</span>
-                </div>
-                {r.remaining != null && <span className="wc-api-rem">sobra {r.remaining}</span>}
+                <strong>{key.replace(/_/g, "-")}</strong>
+                <span className="wc-api-calls">{r.calls}{r.daily_cap ? `/${r.daily_cap}` : ""}</span>
               </div>
             ))}
           </div>

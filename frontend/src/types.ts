@@ -435,6 +435,7 @@ export type WorldCupSyncStatus = {
     phase?: string | null;
     api?: string | null;
     ok?: boolean | null;
+    cached?: boolean | null;
   }>;
   today_games?: Array<{
     match_number?: number | null;

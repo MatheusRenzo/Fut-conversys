@@ -12855,6 +12855,7 @@ img.team-flag {
 .wc-tl-v2.tone-ok { background: rgba(57,217,138,0.1); border: 1px solid rgba(57,217,138,0.28); }
 .wc-tl-v2.tone-retry, .wc-tl-v2.tone-warn { background: rgba(255,176,46,0.1); border: 1px solid rgba(255,176,46,0.28); }
 .wc-tl-v2.tone-ia { background: rgba(167,139,250,0.12); border: 1px solid rgba(167,139,250,0.3); }
+.wc-tl-v2.tone-ia-cache { background: rgba(34,211,238,0.1); border: 1px solid rgba(34,211,238,0.28); }
 .wc-tl-v2.tone-goal { background: rgba(227,28,121,0.1); border: 1px solid rgba(227,28,121,0.28); }
 .wc-tl-v2-rail { display: flex; flex-direction: column; align-items: center; }
 .wc-tl-v2-status {
@@ -12865,6 +12866,7 @@ img.team-flag {
 .wc-tl-v2-status.s-err { background: rgba(255,80,80,0.3); color: #ff8a8a; }
 .wc-tl-v2-status.s-retry, .wc-tl-v2-status.s-warn { background: rgba(255,176,46,0.25); color: #ffc879; }
 .wc-tl-v2-status.s-ia { background: rgba(167,139,250,0.3); color: #d4c4ff; }
+.wc-tl-v2-status.s-ia-cache { background: rgba(34,211,238,0.25); color: var(--brand-cyan, #22d3ee); }
 .wc-tl-v2-status.s-goal { background: rgba(227,28,121,0.25); color: #ffb3d4; }
 .wc-tl-v2-status.s-plain, .wc-tl-v2-status.s-ht, .wc-tl-v2-status.s-end { background: rgba(255,255,255,0.08); color: var(--muted); }
 .wc-tl-v2-meta { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-bottom: 3px; }
@@ -12881,6 +12883,10 @@ img.team-flag {
   font-size: 0.52rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;
   background: rgba(34,211,238,0.15); color: var(--brand-cyan, #22d3ee);
 }
+.wc-tl-v2-cache {
+  font-size: 0.52rem; font-weight: 950; letter-spacing: 0.05em; padding: 2px 6px; border-radius: 4px;
+  background: rgba(34,211,238,0.22); color: var(--brand-cyan, #22d3ee);
+}
 .wc-tl-v2-text { font-size: 0.7rem; color: #e8eefc; margin: 0; line-height: 1.4; }
 .wc-tl-v2.tone-err .wc-tl-v2-text { color: #ffb0b0; }
 .wc-tl-v2-legend {
@@ -12892,6 +12898,41 @@ img.team-flag {
 .wc-tl-v2-legend .s-retry { color: #ffc879; }
 .wc-tl-v2-legend .s-ia { color: #d4c4ff; }
 .timeline-v2, .confirm-v2 { padding: 8px 6px !important; }
+
+/* Diagrama de fluxo */
+.wc-flow-diagram {
+  margin: 10px 0 12px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.22);
+  font-size: 0.64rem; line-height: 1.5; color: #b6c1d4;
+}
+.wc-flow-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 4px; }
+.wc-flow-row.indent { padding-left: 12px; }
+.wc-flow-row.warn { color: #ffc879; }
+.wc-flow-arrow { font-weight: 900; color: var(--muted); }
+.wc-flow-note { margin: 8px 0 0; font-size: 0.6rem; color: var(--muted); line-height: 1.4; }
+.wc-flow-note b { color: #d4c4ff; }
+
+/* Confirmação — 3 passos */
+.wc-confirm-step-card {
+  border-radius: 10px; padding: 8px 10px; margin-bottom: 6px;
+  border: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.18);
+}
+.wc-confirm-step-card.s-ok { border-color: rgba(57,217,138,0.35); background: rgba(57,217,138,0.1); }
+.wc-confirm-step-card.s-err { border-color: rgba(255,80,80,0.4); background: rgba(255,60,60,0.12); }
+.wc-confirm-step-card.s-wait { border-color: rgba(255,176,46,0.3); background: rgba(255,176,46,0.08); }
+.wc-confirm-step-card.s-na { border-color: rgba(255,255,255,0.06); opacity: 0.7; }
+.wc-confirm-step-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 3px; }
+.wc-confirm-step-head strong { font-size: 0.72rem; color: #fff; }
+.wc-confirm-step-head time { font-size: 0.62rem; font-weight: 900; color: var(--muted); font-variant-numeric: tabular-nums; }
+.wc-confirm-who {
+  display: inline-block; font-size: 0.58rem; font-weight: 900; padding: 2px 7px; border-radius: 999px;
+  background: rgba(255,255,255,0.08); color: var(--muted); margin-bottom: 4px;
+}
+.wc-confirm-step-card.s-ok .wc-confirm-who { background: rgba(57,217,138,0.18); color: var(--brand-green); }
+.wc-confirm-step-card.s-err .wc-confirm-who { background: rgba(255,80,80,0.2); color: #ff8a8a; }
+.wc-confirm-detail { font-size: 0.66rem; color: #e8eefc; margin: 0; line-height: 1.4; }
+.wc-confirm-step-card.s-err .wc-confirm-detail { color: #ffb0b0; }
+.wc-confirm-step-card.s-wait .wc-confirm-detail { color: #ffc879; }
 .wc-admin-modal .wc-champion-form { flex-shrink: 0; margin-top: 8px; }
 @media (max-width: 560px) {
   .wc-admin-backdrop { align-items: flex-end; padding: 0; }

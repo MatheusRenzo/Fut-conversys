@@ -1830,6 +1830,7 @@ def log_game_event(
     phase: str | None = None,
     api: str | None = None,
     ok: bool | None = None,
+    cached: bool | None = None,
 ) -> None:
     """Registra evento do jogo pro painel admin. phase: ao_vivo|fim|reconfirmacao|gratuito;
     api: football-data|API-Football|TheSportsDB|IA merge|calendário; ok: achou/falhou."""
@@ -1850,6 +1851,8 @@ def log_game_event(
         row["api"] = api
     if ok is not None:
         row["ok"] = ok
+    if cached:
+        row["cached"] = True
     events.insert(0, row)
     set_app_setting(db, "wc_game_events", json.dumps(events[:100], ensure_ascii=False))
 
@@ -2019,7 +2022,7 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
             status["filled"] += 1
             if not was_finished:
                 game.finished_at = datetime.utcnow()  # marca o relógio pra re-confirmação de 10min
-                log_game_event(db, game, f"🏁 encerrado {official_h}-{official_a} (football-data, oficial)")
+                log_game_event(db, game, f"🏁 encerrado {official_h}-{official_a} (football-data, oficial)", phase="fim", api="football-data", ok=True)
     return status
 
 
@@ -2507,7 +2510,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 game.finished_at = now
             if not game.end_source:
                 game.end_source = "auto:tempo"
-                log_game_event(db, game, f"⏱ encerrado por tempo {game.home_score}-{game.away_score}")
+                log_game_event(db, game, f"⏱ encerrado por tempo {game.home_score}-{game.away_score}", phase="fim", api="auto", ok=True)
             status["finalized"] += 1
 
     # ============ B) AO VIVO: paga só no GOL NOVO (retry até achar) ============
@@ -2797,7 +2800,7 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
             if not game.finished_at:
                 game.finished_at = datetime.utcnow()
             if not was_finished:
-                log_game_event(db, game, f"🏁 encerrado {home_score}-{away_score} (openfootball)")
+                log_game_event(db, game, f"🏁 encerrado {home_score}-{away_score} (openfootball)", phase="fim", api="openfootball", ok=True)
         if scorers:
             # União: o openfootball traz nomes oficiais, mas não pode apagar
             # goleadores que o feed ao vivo já tinha capturado
@@ -3058,7 +3061,11 @@ def ai_reconcile_scorers(
             cached = json.loads(cached_raw)
             if cached.get("sig") == sig and isinstance(cached.get("names"), list):
                 names = cached["names"]
-                log_game_event(db, game, f"🤖 IA merge ({phase}) cache ✓ — {', '.join(names) if names else 'vazio'}", phase=phase, api="IA merge", ok=True)
+                log_game_event(
+                    db, game,
+                    f"🤖 IA merge ({phase}) cache — {', '.join(names) if names else 'vazio'}",
+                    phase=phase, api="IA merge", ok=True, cached=True,
+                )
                 return names
         except json.JSONDecodeError:
             pass
