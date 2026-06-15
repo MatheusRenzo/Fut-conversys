@@ -3024,7 +3024,8 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     )
 
     # ============ C) +10min: re-confirmação grátis → IA (openfootball + SportsDB + API paga) ============
-    # Retry espaçado até 6× se fontes grátis vazias ou IA/fontes não fecharem o resultado.
+    # Retry só se AS DUAS fontes grátis vazias, sem API paga no fim, ou IA não fechar.
+    # Se uma grátis achou e a outra não → segue na hora (fonte vazia não entra em retry).
     reconfirm_candidates = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.status == "finished")
@@ -3074,7 +3075,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         else:
             log_game_event(
                 db, game,
-                f"openfootball reconfirmação — não achou (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
+                f"openfootball reconfirmação — sem dados (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
                 phase="reconfirmacao", api="openfootball", ok=False,
             )
 
@@ -3117,11 +3118,8 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             if tsd:
                 log_game_event(db, game, f"SportsDB reconfirmação — achou: {', '.join(tsd)}", phase="reconfirmacao", api="TheSportsDB", ok=True)
             else:
-                log_game_event(
-                    db, game,
-                    f"SportsDB reconfirmação — não achou (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
-                    phase="reconfirmacao", api="TheSportsDB", ok=False,
-                )
+                msg = f"SportsDB reconfirmação — sem dados (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})"
+                log_game_event(db, game, msg, phase="reconfirmacao", api="TheSportsDB", ok=False)
 
         if not of_names and not tsd:
             log_game_event(
@@ -3130,6 +3128,19 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 phase="reconfirmacao", api="pipeline", ok=False,
             )
             continue
+
+        if of_names and not tsd:
+            log_game_event(
+                db, game,
+                "Reconfirmação — openfootball ok, SportsDB vazio (segue sem retry da fonte vazia)",
+                phase="reconfirmacao", api="pipeline", ok=True,
+            )
+        elif tsd and not of_names:
+            log_game_event(
+                db, game,
+                "Reconfirmação — SportsDB ok, openfootball vazio (segue sem retry da fonte vazia)",
+                phase="reconfirmacao", api="pipeline", ok=True,
+            )
 
         if not paid_names:
             log_game_event(
@@ -3186,7 +3197,9 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             )
             if src and scorer_source_corroborates(src, official)
         ]
-        if len(agreeing) < 2:
+        has_free = any(n in agreeing for n in ("openfootball", "TheSportsDB"))
+        has_paid = "API paga" in agreeing
+        if len(agreeing) < 2 or not has_free or not has_paid:
             log_game_event(
                 db, game,
                 f"Reconfirmação — fontes não batem com IA (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",

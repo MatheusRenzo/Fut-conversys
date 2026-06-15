@@ -217,7 +217,10 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
   if (/openfootball reconfirmação — achou/i.test(raw)) {
     return { kind: "RECONFIRMAÇÃO", api: "openfootball", result: "Achou", detail: pickNames(raw), tone: "ok" };
   }
-  if (/openfootball reconfirmação — não achou/i.test(raw)) {
+  if (/reconfirmação — openfootball ok|reconfirmação — sportsdb ok/i.test(raw)) {
+    return { kind: "RECONFIRMAÇÃO", api: "Pipeline", result: "Segue", detail: raw.replace(/^reconfirmação —\s*/i, ""), tone: "ok" };
+  }
+  if (/openfootball reconfirmação — sem dados/i.test(raw)) {
     return {
       kind: "RECONFIRMAÇÃO", api: "openfootball", result: "Não achou",
       detail: tentativa ? `Tentativa ${tentativa[1]}/${tentativa[2]}` : "Aguarda retry",
@@ -236,7 +239,7 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
   if (/sportsdb reconfirmação — achou/i.test(raw)) {
     return { kind: "RECONFIRMAÇÃO", api: "SportsDB", result: "Achou", detail: pickNames(raw), tone: "ok" };
   }
-  if (/sportsdb reconfirmação — não achou/i.test(raw)) {
+  if (/sportsdb reconfirmação — sem dados/i.test(raw)) {
     return {
       kind: "RECONFIRMAÇÃO", api: "SportsDB", result: "Não achou",
       detail: tentativa ? `Tentativa ${tentativa[1]}/${tentativa[2]}` : "Aguarda retry",
@@ -465,7 +468,6 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
   const fast = Boolean(cadence?.live_now ?? syncStatus.live_now);
   const loopSec = cadence?.loop_seconds ?? syncStatus.interval_seconds ?? (fast ? 30 : 600);
   const retryMax = cadence?.live_retry_max ?? 2;
-  const tsdRetryMax = cadence?.tsd_live_retry_max ?? 2;
 
   const healthMap = useMemo(() => {
     const map = new Map<number | string, GameRow>();
