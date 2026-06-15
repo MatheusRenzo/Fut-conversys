@@ -142,7 +142,7 @@ Secrets necessários no repositório (`Settings → Secrets`):
 |--------|-----------|
 | `MAIL_USERNAME` | Gmail usado para enviar |
 | `MAIL_PASSWORD` | Senha de app do Gmail |
-| `NOTIFY_EMAIL` | Quem recebe (ex.: `admin@conversys.global`) |
+| `NOTIFY_EMAIL` | Quem recebe (padrão: `matheus.gama@conversys.global`) |
 
 Atalho local (com `gh` autenticado):
 
