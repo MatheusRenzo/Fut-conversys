@@ -40,7 +40,7 @@ jobs:
         if: always()
         run: |
           TO="${{ secrets.NOTIFY_EMAIL }}"
-          if [ -z "$TO" ]; then TO="matheus.gama@conversys.global"; fi
+          if [ -z "$TO" ]; then TO="admin@example.com"; fi
           if [ -z "$TO" ]; then TO="${{ secrets.MAIL_USERNAME }}"; fi
           echo "to=$TO" >> "$GITHUB_OUTPUT"
 

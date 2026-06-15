@@ -142,7 +142,7 @@ Secrets necessários no repositório (`Settings → Secrets`):
 |--------|-----------|
 | `MAIL_USERNAME` | Gmail usado para enviar |
 | `MAIL_PASSWORD` | Senha de app do Gmail |
-| `NOTIFY_EMAIL` | Quem recebe (padrão: `matheus.gama@conversys.global`) |
+| `NOTIFY_EMAIL` | Quem recebe (padrão: `admin@example.com`) |
 
 Atalho local (com `gh` autenticado):
 
@@ -153,7 +153,7 @@ bash scripts/setup-deploy-mail-secrets.sh
 bash scripts/send-deploy-email-test.sh   # envia preview de teste
 ```
 
-Se `NOTIFY_EMAIL` não existir no GitHub, o workflow envia para `matheus.gama@conversys.global` (e só depois cai no `MAIL_USERNAME`).
+Se `NOTIFY_EMAIL` não existir no GitHub, o workflow envia para `admin@example.com` (e só depois cai no `MAIL_USERNAME`).
 
 Acesse `http://localhost:3000` (app) e `http://localhost:8000` (API).
 

@@ -252,7 +252,7 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
       detail: "openfootball + SportsDB + API paga → IA", tone: "call",
     };
   }
-  if (/reconfirmação — aguardando|reconfirmação — ia sem|reconfirmação — artilheiros incompletos|reconfirmação — fontes não batem/i.test(raw)) {
+  if (/reconfirmação — aguardando|reconfirmação — ia sem|reconfirmação — artilheiros incompletos|reconfirmação — fontes não batem|aguardando próximo ciclo/i.test(raw)) {
     return { kind: "RECONFIRMAÇÃO", api: "Pipeline", result: "Retry", detail: raw.replace(/^reconfirmação —\s*/i, ""), tone: "retry" };
   }
   if (/reconfirmação — resultado/i.test(raw)) {

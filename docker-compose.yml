@@ -48,6 +48,13 @@ services:
       API_FOOTBALL_KEY: ${API_FOOTBALL_KEY:-}
       API_FOOTBALL_KEY_2: ${API_FOOTBALL_KEY_2:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # SMTP do e-mail de transparência (palpites no fechamento da aposta)
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Bolão Fut Conversys}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
     depends_on:
       db:
         condition: service_healthy

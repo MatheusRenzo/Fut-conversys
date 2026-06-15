@@ -7,8 +7,12 @@ import os
 import re
 import secrets
 import threading
+import smtplib
 import time as time_module
 import unicodedata
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import formataddr
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -78,6 +82,15 @@ THESPORTSDB_KEY = os.getenv("THESPORTSDB_KEY", "123").strip()
 THESPORTSDB_BASE = os.getenv("THESPORTSDB_BASE", "https://www.thesportsdb.com/api/v1/json")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+# SMTP para o e-mail de transparência (palpites enviados quando a aposta fecha).
+# Aceita MAIL_USERNAME/MAIL_PASSWORD (mesmos secrets do deploy) ou SMTP_USER/SMTP_PASSWORD.
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = (os.getenv("SMTP_USER") or os.getenv("MAIL_USERNAME") or "").strip()
+SMTP_PASSWORD = (os.getenv("SMTP_PASSWORD") or os.getenv("MAIL_PASSWORD") or "").strip()
+SMTP_FROM = (os.getenv("SMTP_FROM") or SMTP_USER).strip()
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Bolão Fut Conversys").strip()
+PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").strip()
 OPENAI_CHAT_URL = os.getenv("OPENAI_CHAT_URL", "https://api.openai.com/v1/chat/completions")
 # Pode ter VÁRIAS chaves da API-Football (cada uma 100/dia) — usamos a que
 # tiver mais cota no dia, somando ~200+/dia e ficando bem mais ao vivo.
@@ -3236,6 +3249,143 @@ def world_cup_scorers_complete(game: models.WorldCupGame) -> bool:
     return len(names) >= max(1, total - 1)
 
 
+def send_email(recipients: list[str], subject: str, html_body: str) -> tuple[bool, str | None]:
+    """Envia 1 e-mail HTML com os destinatários em BCC (privacidade). Usa o SMTP
+    configurado (Gmail por padrão). Nunca levanta — devolve (ok, erro)."""
+    if not (SMTP_USER and SMTP_PASSWORD):
+        return False, "SMTP não configurado (defina MAIL_USERNAME/MAIL_PASSWORD no .env)"
+    bcc = sorted({r.strip() for r in recipients if r and EMAIL_PATTERN.match(r.strip())})
+    if not bcc:
+        return False, "sem destinatários válidos"
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = formataddr((SMTP_FROM_NAME, SMTP_FROM))
+    msg["To"] = formataddr((SMTP_FROM_NAME, SMTP_FROM))  # demais ficam em BCC (envelope)
+    msg.attach(MIMEText("Abra no app pra ver os palpites do bolão.", "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as srv:
+            srv.starttls()
+            srv.login(SMTP_USER, SMTP_PASSWORD)
+            srv.sendmail(SMTP_FROM, [SMTP_FROM] + bcc, msg.as_string())
+        return True, None
+    except Exception as exc:
+        return False, str(exc)[:200]
+
+
+def world_cup_bet_email_html(game: models.WorldCupGame, predictions: list[models.WorldCupPrediction]) -> str:
+    """E-mail de transparência no estilo do bolão (dark + acento Conversys): lista
+    TODOS os palpites trancados do jogo, pra todo mundo ver que ninguém mexe nada."""
+    kickoff_brt = (game.kickoff_at - timedelta(hours=3)).strftime("%d/%m às %Hh%M") if game.kickoff_at else "a confirmar"
+    rows = []
+    for i, p in enumerate(predictions):
+        nome = (p.user.name if p.user else None) or "—"
+        placar = f"{p.home_score or 0} <span style='color:#5b6b86'>x</span> {p.away_score or 0}"
+        artil = (p.scorer_guess or "").strip() or "—"
+        bg = "#0f1626" if i % 2 == 0 else "#0b1120"
+        rows.append(
+            f"<tr style='background:{bg};'>"
+            f"<td style='padding:11px 14px;color:#e8eefc;font-weight:700;border-bottom:1px solid #1b2740;'>{nome}</td>"
+            f"<td style='padding:11px 14px;color:#fff;font-weight:800;text-align:center;font-variant-numeric:tabular-nums;border-bottom:1px solid #1b2740;white-space:nowrap;'>{placar}</td>"
+            f"<td style='padding:11px 14px;color:#39d98a;font-weight:700;border-bottom:1px solid #1b2740;'>⚽ {artil}</td>"
+            f"</tr>"
+        )
+    rows_html = "".join(rows)
+    app_link = (
+        f"<a href='{PUBLIC_APP_URL}/bolao' style='color:#22d3ee;text-decoration:none;font-weight:700;'>ver no app →</a>"
+        if PUBLIC_APP_URL else ""
+    )
+    return f"""<!doctype html><html><body style="margin:0;background:#070b16;">
+<div style="background:#070b16;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;border-radius:16px;overflow:hidden;border:1px solid #1b2740;">
+      <tr><td style="background:#2b6cff;padding:18px 22px;">
+        <div style="color:#dbe6ff;font-size:12px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">Bolão Fut Conversys · Copa 2026</div>
+        <div style="color:#ffffff;font-size:20px;font-weight:900;margin-top:4px;">🔒 Apostas trancadas</div>
+      </td></tr>
+      <tr><td style="background:#0b1120;padding:20px 22px;">
+        <div style="color:#8fa3c8;font-size:13px;">Jogo {('#' + str(game.match_number) + ' · ') if game.match_number else ''}fecha agora · começa {kickoff_brt} (Brasília)</div>
+        <div style="color:#ffffff;font-size:22px;font-weight:900;margin:8px 0 2px;">{game.home_team} <span style="color:#5b6b86;">x</span> {game.away_team}</div>
+        <div style="color:#c7d0dd;font-size:13px;margin-top:6px;">{len(predictions)} palpite(s) registrado(s). Lista enviada automaticamente no fechamento — ninguém muda mais nada. {app_link}</div>
+      </td></tr>
+      <tr><td style="background:#0b1120;padding:0 22px 8px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:12px;overflow:hidden;border:1px solid #1b2740;">
+          <tr style="background:#13203a;">
+            <td style="padding:9px 14px;color:#8fa3c8;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">Jogador</td>
+            <td style="padding:9px 14px;color:#8fa3c8;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;text-align:center;">Placar</td>
+            <td style="padding:9px 14px;color:#8fa3c8;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">Artilheiro</td>
+          </tr>
+          {rows_html}
+        </table>
+      </td></tr>
+      <tr><td style="background:#0b1120;padding:14px 22px 20px;">
+        <div style="color:#5b6b86;font-size:11px;line-height:1.6;">
+          Pontuação: placar exato <b style="color:#8fa3c8;">3</b> · vencedor <b style="color:#8fa3c8;">1</b> · artilheiro <b style="color:#8fa3c8;">+1</b> · campeã <b style="color:#8fa3c8;">10</b>.<br>
+          E-mail automático e transparente do Bolão Fut Conversys — todos recebem os mesmos palpites no momento do fechamento.
+        </div>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</div></body></html>"""
+
+
+def send_locked_game_palpites_emails(db: Session) -> int:
+    """Quando a aposta de um jogo FECHA (1h antes), manda os palpites de todo mundo
+    por e-mail pra todos — transparência total. Roda 1× por jogo (idempotente),
+    com retry a cada 10min se o SMTP falhar, e só pra jogos recentes (sem flood)."""
+    if not (SMTP_USER and SMTP_PASSWORD):
+        return 0
+    now = datetime.utcnow()
+    sent = 0
+    games = (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.kickoff_at.isnot(None))
+        .filter(models.WorldCupGame.kickoff_at >= now - timedelta(hours=3))  # só recentes (anti-flood)
+        .filter(models.WorldCupGame.kickoff_at <= now + timedelta(hours=1))  # já passou o cutoff de 1h
+        .all()
+    )
+    recipients: list[str] | None = None
+    for game in games:
+        if not is_bettable_world_cup_game(game) or not world_cup_game_lock_passed(game):
+            continue
+        if get_app_setting(db, f"wc_palpites_email_{game.id}") == "1":
+            continue
+        # backoff de retry: tenta no máx a cada 10min
+        last_try = get_app_setting(db, f"wc_palpites_email_try_{game.id}")
+        if last_try:
+            try:
+                t = datetime.fromisoformat(last_try)
+                if t.tzinfo:
+                    t = t.astimezone(timezone.utc).replace(tzinfo=None)
+                if (now - t).total_seconds() < 600:
+                    continue
+            except ValueError:
+                pass
+        preds = sorted(game.predictions, key=lambda p: ((p.user.name if p.user else "") or "").lower())
+        if not preds:
+            set_app_setting(db, f"wc_palpites_email_{game.id}", "1")  # ninguém apostou → nada a enviar
+            continue
+        if recipients is None:
+            recipients = [
+                (u.email or "").strip()
+                for u in db.query(models.User).filter(models.User.email.isnot(None)).all()
+                if (u.email or "").strip() and not (u.email or "").lower().endswith("@example.com")
+            ]
+        set_app_setting(db, f"wc_palpites_email_try_{game.id}", datetime.now(timezone.utc).isoformat())
+        ok, err = send_email(
+            recipients,
+            f"🔒 Apostas trancadas — {game.home_team} x {game.away_team}",
+            world_cup_bet_email_html(game, preds),
+        )
+        if ok:
+            set_app_setting(db, f"wc_palpites_email_{game.id}", "1")
+            sent += 1
+            log_game_event(db, game, f"📧 palpites enviados ({len(preds)} palpites → {len(recipients)} pessoas)")
+        else:
+            log_game_event(db, game, f"📧 falha no e-mail: {err} (tenta de novo em 10min)")
+    return sent
+
+
 def apply_world_cup_sync(db: Session) -> tuple[int, int]:
     imported = 0
     updated = 0
@@ -3311,6 +3461,12 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
         score_world_cup_game(game)
     db.flush()
     update_rank_movement(db)
+    # E-mail de transparência: ao fechar a aposta, manda os palpites pra todo mundo.
+    # Isolado: falha de e-mail nunca derruba o sync.
+    try:
+        send_locked_game_palpites_emails(db)
+    except Exception as exc:
+        print(f"[world-cup-sync] e-mail de palpites falhou: {exc}", flush=True)
     now_iso = datetime.now(timezone.utc).isoformat()
     set_app_setting(db, "world_cup_last_sync", now_iso)
     # marca quando os artilheiros mudaram pela última vez (pro painel/contagem)
@@ -4493,6 +4649,39 @@ def sync_world_cup_squads(
         "updated": updated,
         "players": world_cup_players_grouped(db),
     }
+
+
+@app.post("/api/world-cup/email/test")
+def world_cup_email_test(
+    game_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Manda o e-mail de palpites de UM jogo SÓ pro próprio admin (teste/preview),
+    sem marcar como enviado e sem mandar pra ninguém mais."""
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Apenas o admin pode testar o e-mail")
+    if not (SMTP_USER and SMTP_PASSWORD):
+        raise HTTPException(status_code=400, detail="SMTP não configurado: defina MAIL_USERNAME e MAIL_PASSWORD no .env")
+    if not (user.email and EMAIL_PATTERN.match(user.email)):
+        raise HTTPException(status_code=400, detail="Seu usuário admin não tem e-mail válido pra receber o teste")
+    query = db.query(models.WorldCupGame)
+    game = (
+        query.filter(models.WorldCupGame.id == game_id).first()
+        if game_id
+        else query.filter(models.WorldCupGame.predictions.any()).order_by(models.WorldCupGame.kickoff_at.desc()).first()
+    )
+    if not game:
+        raise HTTPException(status_code=404, detail="Nenhum jogo com palpites pra testar")
+    preds = sorted(game.predictions, key=lambda p: ((p.user.name if p.user else "") or "").lower())
+    ok, err = send_email(
+        [user.email],
+        f"[TESTE] Apostas trancadas — {game.home_team} x {game.away_team}",
+        world_cup_bet_email_html(game, preds),
+    )
+    if not ok:
+        raise HTTPException(status_code=502, detail=f"Falha ao enviar: {err}")
+    return {"sent_to": user.email, "game": f"{game.home_team} x {game.away_team}", "palpites": len(preds)}
 
 
 @app.get("/api/world-cup/sync/status")
