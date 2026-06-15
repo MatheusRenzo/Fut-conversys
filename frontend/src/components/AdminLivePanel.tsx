@@ -222,8 +222,8 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
   }
   if (/openfootball reconfirmação — sem dados/i.test(raw)) {
     return {
-      kind: "RECONFIRMAÇÃO", api: "openfootball", result: "Não achou",
-      detail: tentativa ? `Tentativa ${tentativa[1]}/${tentativa[2]}` : "Aguarda retry",
+      kind: "RECONFIRMAÇÃO", api: "openfootball", result: "Sem dados",
+      detail: "—",
       tone: "retry",
     };
   }
@@ -241,16 +241,15 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
   }
   if (/sportsdb reconfirmação — sem dados/i.test(raw)) {
     return {
-      kind: "RECONFIRMAÇÃO", api: "SportsDB", result: "Não achou",
-      detail: tentativa ? `Tentativa ${tentativa[1]}/${tentativa[2]}` : "Aguarda retry",
+      kind: "RECONFIRMAÇÃO", api: "SportsDB", result: "Sem dados",
+      detail: "—",
       tone: "retry",
     };
   }
-  if (/reconfirmação — tentativa/i.test(raw)) {
-    const t = raw.match(/\((\d+)\/(\d+)\)/);
+  if (/reconfirmação — iniciada/i.test(raw)) {
     return {
-      kind: "RECONFIRMAÇÃO", api: "Pipeline", result: "Tentativa",
-      detail: t ? `${t[1]}/${t[2]}` : "—", tone: "call",
+      kind: "RECONFIRMAÇÃO", api: "Pipeline", result: "Início",
+      detail: "openfootball + SportsDB + API paga → IA", tone: "call",
     };
   }
   if (/reconfirmação — aguardando|reconfirmação — ia sem|reconfirmação — artilheiros incompletos|reconfirmação — fontes não batem/i.test(raw)) {

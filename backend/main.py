@@ -3055,7 +3055,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         set_reconfirm_state(db, game.id, attempt, now.replace(tzinfo=None).isoformat())
         log_game_event(
             db, game,
-            f"Reconfirmação — tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES}",
+            "Reconfirmação — iniciada",
             phase="reconfirmacao", api="pipeline",
         )
 
@@ -3075,7 +3075,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         else:
             log_game_event(
                 db, game,
-                f"openfootball reconfirmação — sem dados (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
+                f"openfootball reconfirmação — sem dados",
                 phase="reconfirmacao", api="openfootball", ok=False,
             )
 
@@ -3118,13 +3118,13 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             if tsd:
                 log_game_event(db, game, f"SportsDB reconfirmação — achou: {', '.join(tsd)}", phase="reconfirmacao", api="TheSportsDB", ok=True)
             else:
-                msg = f"SportsDB reconfirmação — sem dados (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})"
+                msg = "SportsDB reconfirmação — sem dados"
                 log_game_event(db, game, msg, phase="reconfirmacao", api="TheSportsDB", ok=False)
 
         if not of_names and not tsd:
             log_game_event(
                 db, game,
-                f"Reconfirmação — aguardando próxima tentativa (openfootball e SportsDB sem dados)",
+                f"Reconfirmação — aguardando próximo ciclo (openfootball e SportsDB sem dados)",
                 phase="reconfirmacao", api="pipeline", ok=False,
             )
             continue
@@ -3161,7 +3161,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         if not reconciled:
             log_game_event(
                 db, game,
-                f"Reconfirmação — IA sem resultado (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
+                f"Reconfirmação — IA sem resultado",
                 phase="reconfirmacao", api="IA merge", ok=False,
             )
             continue
@@ -3173,7 +3173,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         if not world_cup_scorers_complete(chk):  # type: ignore[arg-type]
             log_game_event(
                 db, game,
-                f"Reconfirmação — artilheiros incompletos (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
+                f"Reconfirmação — artilheiros incompletos",
                 phase="reconfirmacao", api="pipeline", ok=False,
             )
             continue
@@ -3202,7 +3202,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         if len(agreeing) < 2 or not has_free or not has_paid:
             log_game_event(
                 db, game,
-                f"Reconfirmação — fontes não batem com IA (tentativa {attempt}/{WORLD_CUP_RECONFIRM_MAX_TRIES})",
+                f"Reconfirmação — fontes não batem com IA",
                 phase="reconfirmacao", api="pipeline", ok=False,
             )
             continue
