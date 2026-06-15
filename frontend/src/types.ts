@@ -416,6 +416,7 @@ export type WorldCupSyncStatus = {
     halftime?: boolean;
     reconfirmed?: boolean;
     polls?: { gratuito: number; api_football: number; thesportsdb: number; ia: number };
+    goal_flow?: { score: string; stage: string } | null;
     has_fixture_id: boolean;
     predictions: number;
   }>;

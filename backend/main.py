@@ -1822,6 +1822,69 @@ def game_poll_count(db: Session, game_id: int, api: str) -> int:
     return int(raw) if (raw or "").isdigit() else 0
 
 
+def _game_score_str(game: models.WorldCupGame) -> str:
+    return f"{game.home_score or 0}-{game.away_score or 0}"
+
+
+def get_goal_pipeline(db: Session, game: models.WorldCupGame) -> dict[str, Any]:
+    """Estado do fluxo por gol: detectado → paga/tsd → IA → done."""
+    raw = get_app_setting(db, f"wc_goal_pipe_{game.id}")
+    if raw:
+        try:
+            pipe = json.loads(raw)
+            if isinstance(pipe, dict) and pipe.get("score"):
+                return pipe
+        except json.JSONDecodeError:
+            pass
+    cur = _game_score_str(game)
+    polled = get_app_setting(db, f"wc_live_polled_{game.id}") or ""
+    parts = polled.split(":")
+    score = parts[0] if parts else cur
+    if parts and parts[-1] == "done":
+        return {"score": score, "stage": "done", "api_tries": 0, "tsd_tries": 0}
+    api_n = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    tsd_n = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+    if score != cur:
+        return {"score": cur, "stage": "detected", "api_tries": 0, "tsd_tries": 0}
+    if api_n >= API_FOOTBALL_LIVE_RETRY_MAX:
+        stage = "tsd" if tsd_n < THESPORTSDB_LIVE_RETRY_MAX else "ia"
+    elif api_n > 0:
+        stage = "detected"
+    else:
+        stage = "detected"
+    return {"score": score, "stage": stage, "api_tries": api_n, "tsd_tries": tsd_n}
+
+
+def set_goal_pipeline(db: Session, game_id: int, pipe: dict[str, Any]) -> None:
+    set_app_setting(db, f"wc_goal_pipe_{game_id}", json.dumps(pipe, ensure_ascii=False))
+    score = pipe.get("score", "")
+    stage = pipe.get("stage", "detected")
+    api_n = int(pipe.get("api_tries") or 0)
+    tsd_n = int(pipe.get("tsd_tries") or 0)
+    if stage == "done":
+        set_app_setting(db, f"wc_live_polled_{game_id}", f"{score}:done")
+    else:
+        set_app_setting(db, f"wc_live_polled_{game_id}", f"{score}:{api_n}:{tsd_n}")
+
+
+def start_goal_pipeline(db: Session, game: models.WorldCupGame, score: str) -> None:
+    """Novo gol: reinicia o fluxo obrigatório (paga/tsd → IA) para ESTE placar."""
+    set_goal_pipeline(db, game.id, {"score": score, "stage": "detected", "api_tries": 0, "tsd_tries": 0})
+
+
+def complete_goal_pipeline(db: Session, game: models.WorldCupGame, pipe: dict[str, Any]) -> None:
+    set_goal_pipeline(db, game.id, {**pipe, "stage": "done"})
+
+
+def goal_label(pipe: dict[str, Any]) -> str:
+    score = pipe.get("score") or ""
+    return f"Gol {score} — " if score else ""
+
+
+def goal_pipeline_pending(pipe: dict[str, Any]) -> bool:
+    return pipe.get("stage") != "done"
+
+
 def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[dict[str, Any]]:
     """Reconstrói timeline limpa do jogo: remove spam, mantém fatos reais, zera contadores velhos."""
     raw = get_app_setting(db, "wc_game_events")
@@ -1849,70 +1912,106 @@ def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[
         "phase": "gratuito", "api": "calendário", "ok": True,
     })
 
-    seen_scores: set[str] = set()
+    goal_marks: list[tuple[str, str]] = []
     for e in sorted(old, key=lambda x: x["at"]):
         act = e.get("action", "")
-        if not re.search(r"gol|placar virou", act, re.I):
+        if not re.search(r"gol detectado|placar virou", act, re.I):
             continue
         m = re.search(r"(\d+-\d+)", act)
-        if not m or m.group(1) in seen_scores:
+        if not m:
             continue
-        seen_scores.add(m.group(1))
-        clean.append({
-            "at": e["at"], "match_number": mn, "game": gname,
-            "action": f"Gol detectado — placar {m.group(1)}",
-            "phase": "gratuito", "api": "football-data", "ok": True,
-        })
+        score = m.group(1)
+        if any(s == score for _, s in goal_marks):
+            continue
+        goal_marks.append((e["at"], score))
 
     af = 0
     ia = 0
-    for e in sorted(old, key=lambda x: x["at"]):
-        act = e.get("action", "")
-        if "API paga — achou" in act or (
-            e.get("api") == "API-Football" and e.get("ok") and "achou" in act.lower()
-        ):
-            t = e["at"]
-            names_m = re.search(r"achou:\s*(.+)", act, re.I)
+    for i, (g_at, g_score) in enumerate(goal_marks):
+        gl = f"Gol {g_score} — "
+        next_at = goal_marks[i + 1][0] if i + 1 < len(goal_marks) else "9999-12-31T23:59:59"
+        window = [e for e in old if g_at <= e["at"] < next_at]
+
+        clean.append({
+            "at": g_at, "match_number": mn, "game": gname,
+            "action": f"Gol detectado — placar {g_score}",
+            "phase": "gratuito", "api": "football-data", "ok": True,
+        })
+
+        achou = next(
+            (e for e in window if re.search(r"api paga — achou", e.get("action", ""), re.I)),
+            None,
+        )
+        if achou:
+            t = achou["at"]
+            names_m = re.search(r"achou:\s*(.+)", achou["action"], re.I)
             names_s = names_m.group(1).strip() if names_m else (game.scorers or "")
-            clean.append({"at": t, "match_number": mn, "game": gname, "action": "API paga — consulta artilheiro", "phase": "ao_vivo", "api": "API-Football"})
-            clean.append({"at": t, "match_number": mn, "game": gname, "action": f"API paga — achou: {names_s}", "phase": "ao_vivo", "api": "API-Football", "ok": True})
+            consulta = next(
+                (e for e in window if re.search(r"api paga — consulta", e.get("action", ""), re.I)),
+                None,
+            )
+            t_consulta = consulta["at"] if consulta else t
+            clean.append({"at": t_consulta, "match_number": mn, "game": gname, "action": f"{gl}API paga — consulta artilheiro", "phase": "ao_vivo", "api": "API-Football"})
+            clean.append({"at": t, "match_number": mn, "game": gname, "action": f"{gl}API paga — achou: {names_s}", "phase": "ao_vivo", "api": "API-Football", "ok": True})
             af += 1
+
+        ia_res = next(
+            (e for e in window
+             if e.get("api") == "IA merge" and e.get("ok") and re.search(r"resultado|merge|✓", e.get("action", ""), re.I)),
+            None,
+        )
+        if ia_res:
+            t = ia_res["at"]
+            names_s = game.scorers or ""
+            for pat in (r"resultado:\s*(.+)", r"✓ —\s*(.+)", r"—\s*(.+)"):
+                m = re.search(pat, ia_res["action"])
+                if m:
+                    names_s = m.group(1).strip()
+                    break
+            t_consulta = next(
+                (e["at"] for e in window
+                 if e.get("api") == "IA merge" and re.search(r"consulta|chamada", e.get("action", ""), re.I)),
+                t,
+            )
+            clean.append({"at": t_consulta, "match_number": mn, "game": gname, "action": f"{gl}IA — consulta (API paga)", "phase": "ao_vivo", "api": "IA merge"})
+            clean.append({"at": t, "match_number": mn, "game": gname, "action": f"{gl}IA — resultado: {names_s}", "phase": "ao_vivo", "api": "IA merge", "ok": True})
+            ia += 1
+
+        if achou and ia_res:
+            clean.append({
+                "at": ia_res["at"], "match_number": mn, "game": gname,
+                "action": f"{gl}fluxo do gol concluído",
+                "phase": "ao_vivo", "api": "pipeline", "ok": True,
+            })
 
     for e in sorted(old, key=lambda x: x["at"]):
         act = e.get("action", "")
-        if not (e.get("api") == "IA merge" and e.get("ok") and re.search(r"resultado|merge|✓", act, re.I)):
-            continue
-        t = e["at"]
-        names_s = game.scorers or ""
-        for pat in (r"resultado:\s*(.+)", r"✓ —\s*(.+)", r"—\s*(.+)"):
-            m = re.search(pat, act)
-            if m:
-                names_s = m.group(1).strip()
-                break
-        t_consulta = pick_at(
-            lambda ev, _t=t: ev.get("at", "") <= _t and ev.get("api") == "IA merge"
-            and re.search(r"consulta|chamada", ev.get("action", ""), re.I),
-            t,
-        )
-        clean.append({"at": t_consulta, "match_number": mn, "game": gname, "action": "IA — consulta (API paga)", "phase": "ao_vivo", "api": "IA merge"})
-        clean.append({"at": t, "match_number": mn, "game": gname, "action": f"IA — resultado: {names_s}", "phase": "ao_vivo", "api": "IA merge", "ok": True})
-        ia += 1
+        if act.strip().lower() == "intervalo":
+            clean.append({**e, "action": "Intervalo", "phase": "gratuito", "api": "football-data", "ok": True})
+        elif re.match(r"^2º tempo", act, re.I):
+            clean.append({**e, "action": "2º tempo", "phase": "gratuito", "api": "football-data", "ok": True})
 
     clean.sort(key=lambda x: x["at"])
     merged = list(reversed(clean)) + others
     set_app_setting(db, "wc_game_events", json.dumps(merged[:100], ensure_ascii=False))
 
-    gratis = sum(1 for e in clean if e.get("api") in ("football-data", "calendário"))
+    gratis = sum(
+        1 for e in clean
+        if e.get("api") == "football-data" and re.search(r"gol detectado", e.get("action", ""), re.I)
+    )
     set_app_setting(db, f"gpoll_af_{game.id}", str(af))
     set_app_setting(db, f"gpoll_tsd_{game.id}", "0")
     set_app_setting(db, f"gpoll_ia_{game.id}", str(ia))
     set_app_setting(db, f"gpoll_gratis_{game.id}", str(gratis))
 
     cur = f"{game.home_score or 0}-{game.away_score or 0}"
-    if world_cup_scorers_complete(game):
+    total = (game.home_score or 0) + (game.away_score or 0)
+    if total > 0 and len(game_scorer_names(game)) >= total:
         set_app_setting(db, f"wc_live_polled_{game.id}", f"{cur}:done")
+        set_goal_pipeline(db, game.id, {"score": cur, "stage": "done", "api_tries": 0, "tsd_tries": 0})
     else:
         set_app_setting(db, f"wc_live_polled_{game.id}", f"{cur}:0:0")
+        set_goal_pipeline(db, game.id, {"score": cur, "stage": "detected", "api_tries": 0, "tsd_tries": 0})
 
     return list(reversed(clean))
 
@@ -1965,7 +2064,6 @@ def refresh_world_cup_live_statuses(db: Session) -> bool:
         game.status = "live"
         changed = True
         log_game_event(db, game, "Início do jogo — palpites fechados", phase="gratuito", api="calendário", ok=True)
-        bump_game_poll(db, game.id, "gratis")
     return changed
 
 
@@ -2076,7 +2174,7 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
                     )
                     bump_game_poll(db, game.id, "gratis")
                     set_app_setting(db, f"wc_goal_at_{game.id}", datetime.now(timezone.utc).isoformat())
-                    set_app_setting(db, f"wc_live_polled_{game.id}", f"{lh}-{la}:0:0")
+                    start_goal_pipeline(db, game, f"{lh}-{la}")
                 # INTERVALO: football-data manda PAUSED no intervalo
                 was_ht = bool(game.halftime)
                 game.halftime = (remote_status == "PAUSED")
@@ -2511,8 +2609,10 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             return None
         return api_football_get(url, db, status)
 
-    def normalize_live(game, raw_names, ai_sources, phase: str = "ao_vivo", source_label: str = "API paga"):
-        """IA reconcilia e grava; loga resultado com nomes."""
+    def normalize_live(
+        game, raw_names, ai_sources, phase: str = "ao_vivo", source_label: str = "API paga",
+    ) -> tuple[str, bool]:
+        """IA reconcilia e grava. Retorna (scorers, ia_ok)."""
         squad = world_cup_game_squad(db, game)
         of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
         sources = dict(ai_sources)
@@ -2524,11 +2624,12 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             if rec:
                 official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in rec) if n], squad)
                 merged, _ = merge_scorers(game.scorers, official)
-                return merged[:500]
+                return merged[:500], True
         union = merge_scorers(game.scorers, raw_names)[0].split(", ")
         official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in union) if n], squad)
         merged, _ = merge_scorers(game.scorers, official)
-        return merged[:500]
+        ia_ok = not OPENAI_API_KEY and bool(merged)
+        return merged[:500], ia_ok
 
     # ============ A) FIM: paga 1× → TODOS os goleadores (confirmação final) ============
     incomplete_finished = (
@@ -2620,7 +2721,7 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 log_game_event(db, game, f"Finalização automática — {game.home_score}-{game.away_score}", phase="fim", api="auto", ok=True)
             status["finalized"] += 1
 
-    # ============ B) AO VIVO: paga só no GOL NOVO (retry até achar) ============
+    # ============ B) AO VIVO: fluxo OBRIGATÓRIO por gol (paga/tsd → IA → done) ============
     live_now_games = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.status == "live")
@@ -2628,93 +2729,96 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         .all()
     )
 
-    def polled_info(g):
-        raw = get_app_setting(db, f"wc_live_polled_{g.id}") or ""
-        parts = raw.split(":")
-        score = parts[0] if parts else ""
-        if parts and parts[-1] == "done":
-            return score, 999, 999
-        api_n = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-        tsd_n = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
-        if len(parts) == 2 and parts[1].isdigit():
-            tsd_n = 0
-        return score, api_n, tsd_n
-
-    def current_score(g):
-        return f"{g.home_score or 0}-{g.away_score or 0}"
-
-    def mark_api_try(g):
-        cur = current_score(g)
-        sc, api_n, tsd_n = polled_info(g)
-        if world_cup_scorers_complete(g):
-            set_app_setting(db, f"wc_live_polled_{g.id}", f"{cur}:done")
-        else:
-            new_api = (api_n + 1) if sc == cur else 1
-            set_app_setting(db, f"wc_live_polled_{g.id}", f"{cur}:{new_api}:{tsd_n}")
-
-    def mark_tsd_try(g):
-        cur = current_score(g)
-        sc, api_n, tsd_n = polled_info(g)
-        new_tsd = (tsd_n + 1) if sc == cur else 1
-        set_app_setting(db, f"wc_live_polled_{g.id}", f"{cur}:{api_n}:{new_tsd}")
-
-    def mark_scorer_found(g):
-        set_app_setting(db, f"wc_live_polled_{g.id}", f"{current_score(g)}:done")
-
     paid_ok = has_keys and api_football_pick_key(db) is not None
 
-    def api_pending(g):
-        if world_cup_scorers_complete(g):
-            return False
-        cur = current_score(g)
-        sc, api_n, _ = polled_info(g)
-        if not paid_ok:
-            return False
-        if sc != cur:
-            return True
-        return api_n < API_FOOTBALL_LIVE_RETRY_MAX
+    def run_ia_step(
+        game: models.WorldCupGame,
+        pipe: dict[str, Any],
+        sources: dict[str, list[str]],
+        *,
+        phase: str,
+        source_label: str,
+    ) -> bool:
+        gl = goal_label(pipe)
+        raw_names = sources.get("API-Football") or sources.get("TheSportsDB") or []
+        new_s, ia_ok = normalize_live(
+            game, raw_names, sources, phase=phase, source_label=source_label,
+        )
+        if new_s != (game.scorers or ""):
+            game.scorers = new_s
+            status["scorers_updated"] += 1
+        if ia_ok:
+            complete_goal_pipeline(db, game, pipe)
+            log_game_event(db, game, f"{gl}fluxo do gol concluído", phase="ao_vivo", api="pipeline", ok=True)
+        else:
+            set_goal_pipeline(db, game.id, {**pipe, "stage": "ia", "last_sources": sources})
+        return ia_ok
 
-    def tsd_pending(g):
-        if world_cup_scorers_complete(g):
+    # Sem cota na paga → vai direto pro SportsDB neste gol
+    for game in live_now_games:
+        pipe = get_goal_pipeline(db, game)
+        if pipe.get("stage") == "detected" and goal_pipeline_pending(pipe) and not paid_ok:
+            set_goal_pipeline(db, game.id, {
+                **pipe,
+                "stage": "tsd",
+                "api_tries": API_FOOTBALL_LIVE_RETRY_MAX,
+            })
+
+    def api_pending(g: models.WorldCupGame) -> bool:
+        pipe = get_goal_pipeline(db, g)
+        if not goal_pipeline_pending(pipe):
             return False
-        cur = current_score(g)
-        sc, api_n, tsd_n = polled_info(g)
-        if tsd_n >= THESPORTSDB_LIVE_RETRY_MAX:
+        if _game_score_str(g) != pipe.get("score"):
+            start_goal_pipeline(db, g, _game_score_str(g))
+            pipe = get_goal_pipeline(db, g)
+        return pipe.get("stage") == "detected" and paid_ok and int(pipe.get("api_tries") or 0) < API_FOOTBALL_LIVE_RETRY_MAX
+
+    def tsd_pending(g: models.WorldCupGame) -> bool:
+        pipe = get_goal_pipeline(db, g)
+        if not goal_pipeline_pending(pipe):
             return False
-        if paid_ok and sc != cur:
-            return False
-        if paid_ok and api_n < API_FOOTBALL_LIVE_RETRY_MAX:
-            return False
-        return True
+        return pipe.get("stage") == "tsd" and int(pipe.get("tsd_tries") or 0) < THESPORTSDB_LIVE_RETRY_MAX
+
+    def ia_pending(g: models.WorldCupGame) -> bool:
+        pipe = get_goal_pipeline(db, g)
+        return goal_pipeline_pending(pipe) and pipe.get("stage") == "ia"
 
     api_games = [g for g in live_now_games if api_pending(g)]
     tsd_games = [g for g in live_now_games if tsd_pending(g)]
-    status["goal_pending"] = bool(api_games or tsd_games)
+    ia_games = [g for g in live_now_games if ia_pending(g)]
+    status["goal_pending"] = bool(api_games or tsd_games or ia_games)
 
     if api_games and paid_ok:
         for game in api_games:
-            sc, api_n, _ = polled_info(game)
-            if sc != current_score(game):
-                log_game_event(db, game, "API paga — consulta artilheiro", phase="ao_vivo", api="API-Football")
+            pipe = get_goal_pipeline(db, game)
+            gl = goal_label(pipe)
+            api_n = int(pipe.get("api_tries") or 0)
+            if api_n == 0:
+                log_game_event(db, game, f"{gl}API paga — consulta artilheiro", phase="ao_vivo", api="API-Football")
             else:
                 log_game_event(
                     db, game,
-                    f"API paga — não achou ({api_n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX})",
-                    phase="ao_vivo", api="API-Football", ok=False,
+                    f"{gl}API paga — nova tentativa ({api_n + 1}/{API_FOOTBALL_LIVE_RETRY_MAX})",
+                    phase="ao_vivo", api="API-Football",
                 )
         payload = call(API_FOOTBALL_LIVE_URL)
         if payload is None:
             no_quota = api_football_pick_key(db) is None
             for game in api_games:
-                if no_quota:
-                    cur = current_score(game)
-                    _, _, tsd_n = polled_info(game)
-                    set_app_setting(db, f"wc_live_polled_{game.id}", f"{cur}:{API_FOOTBALL_LIVE_RETRY_MAX}:{tsd_n}")
-                    log_game_event(db, game, "API paga — sem cota", phase="ao_vivo", api="API-Football", ok=False)
+                pipe = get_goal_pipeline(db, game)
+                gl = goal_label(pipe)
+                pipe = {**pipe, "api_tries": int(pipe.get("api_tries") or 0) + 1}
+                if no_quota or pipe["api_tries"] >= API_FOOTBALL_LIVE_RETRY_MAX:
+                    pipe["stage"] = "tsd"
+                    if no_quota:
+                        log_game_event(db, game, f"{gl}API paga — sem cota", phase="ao_vivo", api="API-Football", ok=False)
+                    else:
+                        log_game_event(db, game, f"{gl}API paga — esgotou tentativas", phase="ao_vivo", api="API-Football", ok=False)
                 elif status.get("minute_throttled"):
-                    log_game_event(db, game, "API paga — limite por minuto", phase="ao_vivo", api="API-Football", ok=False)
+                    log_game_event(db, game, f"{gl}API paga — limite por minuto", phase="ao_vivo", api="API-Football", ok=False)
                 else:
-                    log_game_event(db, game, "API paga — erro na resposta", phase="ao_vivo", api="API-Football", ok=False)
+                    log_game_event(db, game, f"{gl}API paga — erro na resposta", phase="ao_vivo", api="API-Football", ok=False)
+                set_goal_pipeline(db, game.id, pipe)
         if payload:
             by_teams: dict[tuple[str, str], dict[str, Any]] = {}
             for item in payload.get("response", []):
@@ -2727,14 +2831,19 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                     by_teams[(hk, ak)] = item
             status["live_games"] = len(by_teams)
             for game in api_games:
+                pipe = get_goal_pipeline(db, game)
+                gl = goal_label(pipe)
                 item = by_teams.get((
                     normalize_scorer_name(normalize_world_cup_team(game.home_team)),
                     normalize_scorer_name(normalize_world_cup_team(game.away_team)),
                 ))
+                pipe = {**pipe, "api_tries": int(pipe.get("api_tries") or 0) + 1}
                 if not item:
                     status["retries"] += 1
-                    log_game_event(db, game, "API paga — jogo não encontrado", phase="ao_vivo", api="API-Football", ok=False)
-                    mark_api_try(game)
+                    log_game_event(db, game, f"{gl}API paga — jogo não encontrado", phase="ao_vivo", api="API-Football", ok=False)
+                    if pipe["api_tries"] >= API_FOOTBALL_LIVE_RETRY_MAX:
+                        pipe["stage"] = "tsd"
+                    set_goal_pipeline(db, game.id, pipe)
                     continue
                 bump_game_poll(db, game.id, "af")
                 fid = ((item.get("fixture") or {}).get("id"))
@@ -2747,30 +2856,34 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
                 live_scorers = extract_api_football_scorers(item)
                 of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
                 if live_scorers:
-                    log_game_event(db, game, f"API paga — achou: {', '.join(live_scorers)}", phase="ao_vivo", api="API-Football", ok=True)
-                    new_s = normalize_live(
-                        game, live_scorers, {"API-Football": live_scorers, "openfootball": of_names},
-                        phase="ao_vivo", source_label="API paga",
-                    )
-                    if new_s != (game.scorers or ""):
-                        game.scorers = new_s
-                        status["scorers_updated"] += 1
-                    mark_scorer_found(game)
+                    log_game_event(db, game, f"{gl}API paga — achou: {', '.join(live_scorers)}", phase="ao_vivo", api="API-Football", ok=True)
+                    sources = {"API-Football": live_scorers, "openfootball": of_names}
+                    run_ia_step(game, pipe, sources, phase="ao_vivo", source_label="API paga")
                 else:
                     status["retries"] += 1
-                    mark_api_try(game)
+                    log_game_event(
+                        db, game,
+                        f"{gl}API paga — não achou ({pipe['api_tries']}/{API_FOOTBALL_LIVE_RETRY_MAX})",
+                        phase="ao_vivo", api="API-Football", ok=False,
+                    )
+                    if pipe["api_tries"] >= API_FOOTBALL_LIVE_RETRY_MAX:
+                        pipe["stage"] = "tsd"
+                    set_goal_pipeline(db, game.id, pipe)
                 status["mid_checks"] += 1
 
     tsd_games = [g for g in live_now_games if tsd_pending(g)]
 
     if tsd_games:
         for game in tsd_games:
-            _, api_n, tsd_n = polled_info(game)
+            pipe = get_goal_pipeline(db, game)
+            gl = goal_label(pipe)
+            tsd_n = int(pipe.get("tsd_tries") or 0)
+            api_n = int(pipe.get("api_tries") or 0)
             if tsd_n == 0:
                 motivo = "sem cota" if not paid_ok else ("API paga não achou" if api_n >= API_FOOTBALL_LIVE_RETRY_MAX else "API paga indisponível")
                 log_game_event(
                     db, game,
-                    f"SportsDB fallback — motivo: {motivo}",
+                    f"{gl}SportsDB fallback — motivo: {motivo}",
                     phase="ao_vivo_failover", api="TheSportsDB",
                 )
             if status["tsd_calls"] >= THESPORTSDB_CYCLE_LIMIT:
@@ -2779,26 +2892,35 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             bump_game_poll(db, game.id, "tsd")
             tsd = fetch_thesportsdb_scorers(game, db) or []
             of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+            pipe = {**pipe, "tsd_tries": tsd_n + 1}
             if tsd:
-                log_game_event(db, game, f"SportsDB — achou: {', '.join(tsd)}", phase="ao_vivo_failover", api="TheSportsDB", ok=True)
-                new_s = normalize_live(
-                    game, tsd, {"TheSportsDB": tsd, "openfootball": of_names},
-                    phase="ao_vivo_failover", source_label="SportsDB",
-                )
-                if new_s != (game.scorers or ""):
-                    game.scorers = new_s
-                    status["scorers_updated"] += 1
-                mark_scorer_found(game)
+                log_game_event(db, game, f"{gl}SportsDB — achou: {', '.join(tsd)}", phase="ao_vivo_failover", api="TheSportsDB", ok=True)
+                sources = {"TheSportsDB": tsd, "openfootball": of_names}
+                run_ia_step(game, pipe, sources, phase="ao_vivo_failover", source_label="SportsDB")
             else:
                 status["retries"] += 1
                 log_game_event(
                     db, game,
-                    f"SportsDB — não achou ({tsd_n + 1}/{THESPORTSDB_LIVE_RETRY_MAX})",
+                    f"{gl}SportsDB — não achou ({pipe['tsd_tries']}/{THESPORTSDB_LIVE_RETRY_MAX})",
                     phase="ao_vivo_failover", api="TheSportsDB", ok=False,
                 )
-                mark_tsd_try(game)
-                if tsd_n + 1 >= THESPORTSDB_LIVE_RETRY_MAX:
-                    log_game_event(db, game, "SportsDB — passou", phase="ao_vivo_failover", api="TheSportsDB", ok=False)
+                if pipe["tsd_tries"] >= THESPORTSDB_LIVE_RETRY_MAX:
+                    log_game_event(db, game, f"{gl}SportsDB — passou para IA", phase="ao_vivo_failover", api="TheSportsDB", ok=False)
+                    sources = {"openfootball": of_names, "lista_atual": of_names}
+                    set_goal_pipeline(db, game.id, {**pipe, "stage": "ia", "last_sources": sources})
+                else:
+                    set_goal_pipeline(db, game.id, pipe)
+
+    ia_games = [g for g in live_now_games if ia_pending(g)]
+    for game in ia_games:
+        pipe = get_goal_pipeline(db, game)
+        of_names = [n.strip() for n in re.split(r"[,;\n]", game.scorers or "") if n.strip()]
+        sources = pipe.get("last_sources") or {"openfootball": of_names, "lista_atual": of_names}
+        run_ia_step(game, pipe, sources, phase="ao_vivo", source_label="retry IA")
+
+    status["goal_pending"] = any(
+        goal_pipeline_pending(get_goal_pipeline(db, g)) for g in live_now_games
+    )
 
     # ============ C) +10min: re-confirmação grátis (TheSportsDB + openfootball + IA) ============
     reconfirm_due = (
@@ -4303,6 +4425,14 @@ def world_cup_sync_status(
                     "thesportsdb": game_poll_count(db, g.id, "tsd"),
                     "ia": game_poll_count(db, g.id, "ia"),
                 },
+                "goal_flow": (
+                    lambda p: {
+                        "score": p.get("score"),
+                        "stage": p.get("stage"),
+                    }
+                )(get_goal_pipeline(db, g))
+                if g.status == "live"
+                else None,
                 "has_fixture_id": g.api_fixture_id is not None,
                 "predictions": len(g.predictions),
             }

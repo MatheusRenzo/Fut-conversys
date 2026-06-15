@@ -25,6 +25,7 @@ type GameRow = {
   end_source?: string | null;
   reconfirmed?: boolean;
   polls?: { gratuito: number; api_football: number; thesportsdb: number; ia: number };
+  goal_flow?: { score: string; stage: string } | null;
 };
 
 type GameEvent = NonNullable<WorldCupSyncStatus["game_events"]>[number];
@@ -112,6 +113,16 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
   const isReconf = ev.phase === "reconfirmacao";
   const tentativa = raw.match(/\((\d+)\/(\d+)\)/);
 
+  if (/gol \d+-\d+ — fluxo do gol concluído/i.test(raw)) {
+    const score = raw.match(/gol (\d+-\d+)/i)?.[1];
+    return { kind: "GOL OK", api: "Pipeline", result: "Completo", detail: score ? `Gol ${score} finalizado` : "Fluxo OK", tone: "ok" };
+  }
+  if (/^gol \d+-\d+ —/i.test(raw)) {
+    const score = raw.match(/^gol (\d+-\d+)/i)?.[1];
+    const rest = raw.replace(/^gol \d+-\d+ —\s*/i, "");
+    const inner = parseTimelineEvent({ ...ev, action: rest }, retryMax);
+    return { ...inner, detail: score ? `Gol ${score} · ${inner.detail}` : inner.detail };
+  }
   if (/início|começou/i.test(raw) || apiKey === "calendário") {
     return { kind: "INÍCIO", api: "Sistema", result: "OK", detail: "Jogo começou", tone: "milestone" };
   }
@@ -124,6 +135,15 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
   }
   if (/2º tempo/i.test(raw)) {
     return { kind: "2º TEMPO", api: "API grátis", result: "—", detail: "Volta do intervalo", tone: "milestone" };
+  }
+  if (/api paga — nova tentativa/i.test(raw)) {
+    const score = raw.match(/^gol (\d+-\d+)/i)?.[1];
+    const t = raw.match(/\((\d+)\/(\d+)\)/);
+    return {
+      kind: "CONSULTA GOL", api: "API paga", result: "Retry",
+      detail: score ? `Gol ${score} · tentativa ${t?.[1]}/${t?.[2]}` : `Tentativa ${t?.[1]}/${t?.[2]}`,
+      tone: "call",
+    };
   }
   if (/api paga — consulta/i.test(raw)) {
     return { kind: "CONSULTA GOL", api: "API paga", result: "Chamou", detail: "Busca artilheiro", tone: "call" };
@@ -343,6 +363,12 @@ function ConfirmStepCard({ step }: { step: ConfirmStep }) {
   );
 }
 
+function goalFlowLabel(flow?: GameRow["goal_flow"]): string | null {
+  if (!flow || flow.stage === "done") return null;
+  const step = { detected: "API paga", tsd: "SportsDB", ia: "IA" }[flow.stage] ?? flow.stage;
+  return `Gol ${flow.score} → ${step}`;
+}
+
 export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePanelProps) {
   const [openTimeline, setOpenTimeline] = useState<number | string | null>(null);
   const [openConfirm, setOpenConfirm] = useState<number | string | null>(null);
@@ -369,6 +395,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         end_source: g.end_source,
         reconfirmed: g.reconfirmed,
         polls: g.polls,
+        goal_flow: g.goal_flow,
       });
     }
     return map;
@@ -392,6 +419,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         end_source: g.end_source ?? h?.end_source,
         reconfirmed: h?.reconfirmed,
         polls: h?.polls,
+        goal_flow: h?.goal_flow,
       };
     });
     for (const g of syncStatus.games_health ?? []) {
@@ -410,6 +438,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         end_source: g.end_source,
         reconfirmed: g.reconfirmed,
         polls: g.polls,
+        goal_flow: g.goal_flow,
       });
     }
     const order = { live: 0, finished: 1, scheduled: 2, postponed: 3 };
@@ -456,7 +485,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
           </strong>
           <span className="wc-dash-hero-sub">
             Próximo ciclo {inLabel(cadence?.last_sync_at ?? syncStatus.last_sync, loopSec, currentTime)}
-            {cadence?.goal_pending && " · artilheiro pendente"}
+            {cadence?.goal_pending && " · falta artilheiro"}
           </span>
         </div>
         <div className="wc-dash-hero-stats">
@@ -469,13 +498,13 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
             <strong>{fast ? "30s" : "10min"}</strong>
           </div>
           <div className="wc-dash-stat">
-            <span className="wc-dash-stat-k">Pendente</span>
-            <strong>{cadence?.goal_pending ? "Sim" : "Não"}</strong>
+            <span className="wc-dash-stat-k">Artilheiro</span>
+            <strong>{cadence?.goal_pending ? "Pendente" : "OK"}</strong>
           </div>
           {livePolls && (
             <>
               <div className="wc-dash-stat">
-                <span className="wc-dash-stat-k">Grátis</span>
+                <span className="wc-dash-stat-k">Gols</span>
                 <strong>{livePolls.gratuito ?? 0}x</strong>
               </div>
               <div className="wc-dash-stat">
@@ -523,10 +552,13 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
                         {game.status === "live" && <span className="wc-live-dot small" />}
                         {game.halftime ? "Intervalo" : game.status === "live" ? "Ao vivo" : "Encerrado"}
                       </span>
-                      <span className="wc-dash-chip gratis">Grátis {game.polls?.gratuito ?? 0}x</span>
+                      <span className="wc-dash-chip gratis">Gols {game.polls?.gratuito ?? 0}x</span>
                       <span className="wc-dash-chip paid">Paga {game.polls?.api_football ?? 0}x</span>
                       <span className="wc-dash-chip tsd">DB {game.polls?.thesportsdb ?? 0}x</span>
                       <span className="wc-dash-chip ia">IA {game.polls?.ia ?? 0}x</span>
+                      {goalFlowLabel(game.goal_flow) && (
+                        <span className="wc-dash-chip flow">{goalFlowLabel(game.goal_flow)}</span>
+                      )}
                     </div>
                     {game.scorers && (
                       <div className="wc-dash-game-scorers"><Goal size={12} /> {game.scorers}</div>

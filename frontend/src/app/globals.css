@@ -12842,6 +12842,7 @@ img.team-flag {
   background: rgba(255,255,255,0.08); color: var(--muted);
 }
 .wc-dash-chip.gratis { background: rgba(57,217,138,0.18); color: #8ee8b8; }
+.wc-dash-chip.flow { background: rgba(255,176,46,0.2); color: #ffd699; }
 .wc-dash-chip.ia { background: rgba(167,139,250,0.18); color: #d4c4ff; }
 .wc-dash-game-chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .wc-dash-game-card.has-fail { border-color: rgba(255,80,80,0.45); }
