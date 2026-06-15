@@ -394,7 +394,6 @@ function BolaoRankingPanel({
 
       <div className="bolao-ranking-list">
         {listEntries.map((entry, index) => {
-          const delta = rankingTab === "geral" ? rankDelta?.[entry.user.id] : undefined;
           const live = rankingTab === "geral" ? liveMoves?.[entry.user.id] : undefined;
           const isGlow = rankingTab === "geral" && glowUserId === entry.user.id && glowDelta != null;
           const moveClass = isGlow
@@ -949,7 +948,12 @@ export default function BolaoPage() {
   const mainFxScheduledKeyRef = useRef<string | null>(null);
   const modalFxScheduledKeyRef = useRef<string | null>(null);
   const rankingModalOpenRef = useRef(rankingModalOpen);
-  rankingModalOpenRef.current = rankingModalOpen;
+
+  useEffect(() => {
+    rankingModalOpenRef.current = rankingModalOpen;
+  }, [rankingModalOpen]);
+
+  const visiblePointsFlash = rankingModalOpen ? pointsFlash : null;
 
   const triggerRankGlow = useCallback((delta: number, mode: "main" | "modal") => {
     rankGlowPulseRef.current += 1;
@@ -1076,7 +1080,10 @@ export default function BolaoPage() {
       window.clearTimeout(modalFxTimerRef.current);
       modalFxTimerRef.current = null;
     }
-    setPointsFlash(null);
+    if (pointsFlashTimerRef.current) {
+      window.clearTimeout(pointsFlashTimerRef.current);
+      pointsFlashTimerRef.current = null;
+    }
   }, [rankingModalOpen]);
 
   useEffect(() => () => {
@@ -1398,12 +1405,12 @@ export default function BolaoPage() {
 
   return (
     <AppShell hideRightRail user={profile} nextEvent={events[0] ?? null} leaderboard={leaderboard}>
-      {pointsFlash != null && rankingModalOpen && (
+      {visiblePointsFlash != null && (
         <div className="bolao-flash-stack bolao-flash-stack--modal" role="status" aria-live="polite">
           <div className="bolao-points-flash">
             <small className="bolao-flash-tag">Pontos</small>
             <span>
-              🔥 +{pointsFlash} {pointsFlash === 1 ? "ponto" : "pontos"}!
+              🔥 +{visiblePointsFlash} {visiblePointsFlash === 1 ? "ponto" : "pontos"}!
             </span>
           </div>
         </div>

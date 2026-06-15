@@ -384,7 +384,7 @@ function buildConfirmSteps(evs: GameEvent[], game: GameRow, retryMax: number): C
   return steps;
 }
 
-function FlowDiagram({ retryMax, tsdRetryMax }: { retryMax: number; tsdRetryMax: number }) {
+function FlowDiagram({ retryMax }: { retryMax: number }) {
   return (
     <div className="wc-flow-diagram">
       <div className="wc-flow-steps">
@@ -613,7 +613,7 @@ export function AdminLivePanel({ syncStatus, currentTime, error }: AdminLivePane
         </div>
       </div>
 
-      <FlowDiagram retryMax={retryMax} tsdRetryMax={tsdRetryMax} />
+      <FlowDiagram retryMax={retryMax} />
 
       {activeGames.length > 0 && (
         <section className="wc-dash-games">
