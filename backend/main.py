@@ -1031,7 +1031,10 @@ def public_user_summary(user: models.User) -> dict[str, Any]:
     return data
 
 
-def user_summary(user: models.User) -> dict[str, Any]:
+def user_summary(user: models.User, include_rating: bool = True) -> dict[str, Any]:
+    # include_rating=False evita o player_traits (que varre posts/likes/comentários/rsvps
+    # do usuário) — usado em listas grandes, como o ranking do bolão, onde o rating não
+    # é exibido. Assim não precisamos carregar o "grafo social" inteiro de cada usuário.
     return {
         "id": user.id,
         "username": user.username,
@@ -1055,7 +1058,7 @@ def user_summary(user: models.User) -> dict[str, Any]:
             has_verified_features(user) and (user.show_verified_badge if user.show_verified_badge is not None else True)
         ),
         "avatar_config": avatar_config(user),
-        "player_rating": player_traits(user)["overall"],
+        "player_rating": player_traits(user)["overall"] if include_rating else None,
         "verified_domain": bool(user.verified_domain),
         "verified_enabled": has_verified_features(user),
         "is_admin": is_admin_user(user),
@@ -1232,24 +1235,15 @@ def world_cup_game_response(game: models.WorldCupGame, user: models.User | None 
 
 
 def world_cup_leaderboard_response(db: Session, exclude_game_id: int | None = None) -> list[dict[str, Any]]:
+    # Agregamos os pontos por usuário SEM dar JOIN do usuário nas predictions: o
+    # avatar/banner é base64 e seria duplicado em cada uma das centenas de linhas,
+    # estourando o tempo do request. Carregamos o objeto User só dos ~30 que entram
+    # no ranking, depois de ordenar. Placar dos jogos vem num lookup leve por id.
     rows: dict[int, dict[str, Any]] = {}
-    predictions = (
-        db.query(models.WorldCupPrediction)
-        .options(
-            joinedload(models.WorldCupPrediction.user)
-            .subqueryload(models.User.posts)
-            .subqueryload(models.Post.likes),
-            joinedload(models.WorldCupPrediction.user)
-            .subqueryload(models.User.rsvps),
-            joinedload(models.WorldCupPrediction.user)
-            .subqueryload(models.User.comments),
-            joinedload(models.WorldCupPrediction.game),
-        )
-        .all()
-    )
-    def empty_row(user: models.User) -> dict[str, Any]:
+
+    def empty_row() -> dict[str, Any]:
         return {
-            "user": user_summary(user),
+            "user_id": None,
             "points": 0,
             "predictions": 0,
             "scored_predictions": 0,
@@ -1260,51 +1254,68 @@ def world_cup_leaderboard_response(db: Session, exclude_game_id: int | None = No
             "champion_points": 0,
         }
 
+    game_scores = {
+        gid: (home, away)
+        for gid, home, away in db.query(
+            models.WorldCupGame.id,
+            models.WorldCupGame.home_score,
+            models.WorldCupGame.away_score,
+        ).all()
+    }
+
+    predictions = db.query(models.WorldCupPrediction).all()
     for prediction in predictions:
         # reconstrução "antes da rodada": ignora o jogo excluído por completo
         # (pontos E desempates), pra calcular a posição real anterior
         if exclude_game_id is not None and prediction.game_id == exclude_game_id:
             continue
-        if prediction.user_id not in rows:
-            rows[prediction.user_id] = empty_row(prediction.user)
-
-        row = rows[prediction.user_id]
+        row = rows.setdefault(prediction.user_id, empty_row())
+        row["user_id"] = prediction.user_id
         row["points"] += prediction.points or 0
         row["predictions"] += 1
         if prediction.status == "scored":
             row["scored_predictions"] += 1
-            game = prediction.game
-            if game and game.home_score is not None and game.away_score is not None:
-                if prediction.home_score == game.home_score and prediction.away_score == game.away_score:
+            home_score, away_score = game_scores.get(prediction.game_id, (None, None))
+            if home_score is not None and away_score is not None:
+                if prediction.home_score == home_score and prediction.away_score == away_score:
                     row["exact_scores"] += 1
                 if game_outcome(prediction.home_score or 0, prediction.away_score or 0) == game_outcome(
-                    game.home_score, game.away_score
+                    home_score, away_score
                 ):
                     row["outcome_hits"] += 1
             if prediction.scorer_hit:
                 row["scorer_hits"] += 1
 
-    champion_picks = (
-        db.query(models.WorldCupChampionPick)
-        .options(joinedload(models.WorldCupChampionPick.user))
-        .all()
-    )
+    champion_picks = db.query(
+        models.WorldCupChampionPick.user_id,
+        models.WorldCupChampionPick.team,
+        models.WorldCupChampionPick.points,
+    ).all()
     # Palpite de campeã é público no ranking (é único e não pode ser trocado)
-    for pick in champion_picks:
-        if pick.user_id not in rows:
-            rows[pick.user_id] = empty_row(pick.user)
-        row = rows[pick.user_id]
-        row["champion_team"] = pick.team
-        row["champion_points"] = pick.points or 0
-        row["points"] += pick.points or 0
+    for pick_user_id, pick_team, pick_points in champion_picks:
+        row = rows.setdefault(pick_user_id, empty_row())
+        row["user_id"] = pick_user_id
+        row["champion_team"] = pick_team
+        row["champion_points"] = pick_points or 0
+        row["points"] += pick_points or 0
 
     # Só entra no ranking quem palpitou em jogos ou já pontuou; palpite de campeão sozinho não lista
     leaderboard = sorted(
         (row for row in rows.values() if row["predictions"] > 0 or row["points"] > 0),
         key=lambda item: (item["points"], item["exact_scores"], item["outcome_hits"], item["scorer_hits"], item["predictions"]),
         reverse=True,
+    )[:30]
+
+    # Só agora buscamos os usuários que de fato aparecem (no máximo 30), numa query só.
+    user_ids = [row["user_id"] for row in leaderboard]
+    users = (
+        {user.id: user for user in db.query(models.User).filter(models.User.id.in_(user_ids)).all()}
+        if user_ids
+        else {}
     )
+    leaderboard = [row for row in leaderboard if users.get(row["user_id"]) is not None]
     for index, row in enumerate(leaderboard, start=1):
+        row["user"] = user_summary(users[row.pop("user_id")], include_rating=False)
         row["rank"] = index
 
     # Movimentação = posição ANTES da última rodada menos a posição agora (persistida
@@ -4560,10 +4571,12 @@ def world_cup_board(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    # Apenas o "relógio" (vira scheduled->live no horário, fecha palpites) roda no
+    # request: é uma query barata, sem rede. A atualização de placar via fonte
+    # externa (football-data) NÃO entra no caminho do request — ela é cara e
+    # bloqueante; quem mantém o placar fresco é o world_cup_sync_loop em background
+    # (apply_world_cup_sync -> cross_check_world_cup_results, a cada ~30s ao vivo).
     if refresh_world_cup_live_statuses(db):
-        db.commit()
-    score_changed = refresh_live_scores_if_due(db)
-    if score_changed:
         db.commit()
     games = db.query(models.WorldCupGame).order_by(models.WorldCupGame.kickoff_at.asc()).all()
     return {

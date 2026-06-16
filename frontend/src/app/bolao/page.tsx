@@ -1140,6 +1140,10 @@ export default function BolaoPage() {
   }, [refreshBoard, hasLiveGame]);
 
   const games = useMemo(() => (board?.games ?? []).filter((game) => game.bettable !== false), [board?.games]);
+  // Filtros/locks só mudam na virada de minuto (cutoff é de 1h). Derivando um tempo
+  // arredondado ao minuto, as listas pesadas (sort/filter de todos os jogos) param de
+  // recalcular a cada segundo — só o countdown ao vivo continua usando o relógio de 1s.
+  const currentMinute = useMemo(() => Math.floor(currentTime / 60_000) * 60_000, [currentTime]);
   const isAdmin = Boolean(profile?.is_admin);
   const myEntry = board?.leaderboard.find((entry) => entry.user.id === profile?.id);
   const champion = board?.champion;
@@ -1163,8 +1167,8 @@ export default function BolaoPage() {
   );
 
   const nextGame = useMemo(
-    () => sortGames(games).find((game) => isUpcomingGame(game, currentTime)) ?? null,
-    [currentTime, games],
+    () => sortGames(games).find((game) => isUpcomingGame(game, currentMinute)) ?? null,
+    [currentMinute, games],
   );
 
   const liveGames = useMemo(() => games.filter((game) => game.status === "live"), [games]);
@@ -1172,13 +1176,13 @@ export default function BolaoPage() {
   const filteredGames = useMemo(() => {
     return games.filter((game) => {
       if (stageFilter !== "all" && game.stage !== stageFilter) return false;
-      if (quickFilter === "today") return isSameDay(game.kickoff_at, currentTime);
-      if (quickFilter === "open") return isUpcomingGame(game, currentTime);
+      if (quickFilter === "today") return isSameDay(game.kickoff_at, currentMinute);
+      if (quickFilter === "open") return isUpcomingGame(game, currentMinute);
       if (quickFilter === "live") return game.status === "live";
       if (quickFilter === "finished") return game.status === "finished";
       return true;
     });
-  }, [currentTime, games, quickFilter, stageFilter]);
+  }, [currentMinute, games, quickFilter, stageFilter]);
 
   const myBetGames = useMemo(
     () => games.filter((game) => game.viewer_prediction).sort((a, b) => new Date(b.kickoff_at).getTime() - new Date(a.kickoff_at).getTime()),
@@ -1186,8 +1190,8 @@ export default function BolaoPage() {
   );
 
   const upcomingGames = useMemo(
-    () => sortGames(filteredGames.filter((game) => isUpcomingGame(game, currentTime))),
-    [currentTime, filteredGames],
+    () => sortGames(filteredGames.filter((game) => isUpcomingGame(game, currentMinute))),
+    [currentMinute, filteredGames],
   );
 
   const openBetGames = useMemo(
@@ -1213,7 +1217,7 @@ export default function BolaoPage() {
   }, [championQuery, championTeams]);
 
   const summary = useMemo(() => {
-    const open = games.filter((game) => isUpcomingGame(game, currentTime)).length;
+    const open = games.filter((game) => isUpcomingGame(game, currentMinute)).length;
     const predicted = games.filter((game) => game.viewer_prediction).length;
     return {
       open,
@@ -1221,7 +1225,7 @@ export default function BolaoPage() {
       points: myEntry?.points ?? 0,
       rank: myEntry?.rank ?? null,
     };
-  }, [currentTime, games, myEntry?.points, myEntry?.rank]);
+  }, [currentMinute, games, myEntry?.points, myEntry?.rank]);
 
   const countdown = nextGame ? countdownParts(nextGame.kickoff_at, currentTime) : null;
 
