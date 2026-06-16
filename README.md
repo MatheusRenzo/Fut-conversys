@@ -8,6 +8,7 @@
   Peladas da firma, eventos, resenha, ranking gamer, validação de gols com aprovação — e um bolão que acompanha a Copa em tempo real cruzando várias APIs, com IA reconciliando os goleadores e um painel admin transparente.
 
   [![CI](https://github.com/MatheusRenzo/Fut-conversys/actions/workflows/ci.yml/badge.svg)](https://github.com/MatheusRenzo/Fut-conversys/actions/workflows/ci.yml)
+  [![Deploy](https://github.com/MatheusRenzo/Fut-conversys/actions/workflows/deploy.yml/badge.svg)](https://github.com/MatheusRenzo/Fut-conversys/actions/workflows/deploy.yml)
   [![License: MIT](https://img.shields.io/badge/License-MIT-61A229.svg)](LICENSE)
   [![Open Source](https://img.shields.io/badge/Open%20Source-ready-00CFB4.svg)](CONTRIBUTING.md)
   [![Security Policy](https://img.shields.io/badge/Security-policy-041E42.svg)](SECURITY.md)
