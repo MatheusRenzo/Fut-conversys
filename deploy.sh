@@ -13,6 +13,17 @@ fi
 
 echo "=== Fut-Conversys — Deploy de Produção ==="
 
+# Garante que o que vai pro ar é EXATAMENTE o que está no git (origin), e não
+# arquivos soltos/esquecidos na pasta. O reset --hard mexe só nos arquivos
+# versionados; .env, certificados (nginx/ssl/*, *.tar.gz) e demais arquivos
+# ignorados pelo .gitignore são preservados.
+BRANCH="${DEPLOY_BRANCH:-main}"
+echo "[0/5] Sincronizando com o git (origin/$BRANCH)..."
+git fetch --prune origin "$BRANCH"
+git checkout -q "$BRANCH" 2>/dev/null || git checkout -q -B "$BRANCH" "origin/$BRANCH"
+git reset --hard "origin/$BRANCH"
+echo "  -> deploy a partir do commit $(git rev-parse --short HEAD)"
+
 if [ ! -f .env ]; then
   echo "ERRO: arquivo .env não encontrado. Crie-o antes de continuar."
   exit 1
