@@ -5063,9 +5063,6 @@ def world_cup_sync_status(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    if not is_admin_user(user):
-        raise HTTPException(status_code=403, detail="Apenas o admin pode ver o status de sincronização")
-
     def read_status(key: str) -> dict[str, Any] | None:
         raw = get_app_setting(db, key)
         if not raw:
@@ -5189,8 +5186,7 @@ def world_cup_sync_status(
             "players": db.query(models.WorldCupPlayer).count(),
             "teams_with_squads": db.query(models.WorldCupPlayer.team).distinct().count(),
         },
-        # Saúde por jogo (ao vivo + encerrados): o admin vê o que está rolando,
-        # se encerrou, e se os goleadores já foram capturados por completo
+        # Saúde por jogo (ao vivo + encerrados): visível no painel público de transparência
         "games_health": [
             {
                 "match_number": g.match_number,

@@ -845,7 +845,7 @@ export default function BolaoPage() {
   const [resultModalGame, setResultModalGame] = useState<WorldCupGame | null>(null);
   const [resultDraft, setResultDraft] = useState<ResultDraft>({ home: "0", away: "0", scorers: "" });
   const [savingResult, setSavingResult] = useState(false);
-  const [adminModalOpen, setAdminModalOpen] = useState(false);
+  const [liveModalOpen, setLiveModalOpen] = useState(false);
   const [rankingModalOpen, setRankingModalOpen] = useState(false);
   const [myBetsModalOpen, setMyBetsModalOpen] = useState(false);
   const [championQuery, setChampionQuery] = useState("");
@@ -908,10 +908,8 @@ export default function BolaoPage() {
     load();
   }, [router]);
 
-  const isAdminProfile = Boolean(profile?.is_admin);
-
   useEffect(() => {
-    if (!adminModalOpen || !isAdminProfile) return;
+    if (!liveModalOpen) return;
     let active = true;
     const load = () =>
       api
@@ -930,7 +928,7 @@ export default function BolaoPage() {
       active = false;
       window.clearInterval(poll);
     };
-  }, [adminModalOpen, isAdminProfile]);
+  }, [liveModalOpen]);
 
   const hasLiveGame = useMemo(
     () => (board?.games ?? []).some((game) => game.status === "live"),
@@ -1144,7 +1142,6 @@ export default function BolaoPage() {
   // arredondado ao minuto, as listas pesadas (sort/filter de todos os jogos) param de
   // recalcular a cada segundo — só o countdown ao vivo continua usando o relógio de 1s.
   const currentMinute = useMemo(() => Math.floor(currentTime / 60_000) * 60_000, [currentTime]);
-  const isAdmin = Boolean(profile?.is_admin);
   const myEntry = board?.leaderboard.find((entry) => entry.user.id === profile?.id);
   const champion = board?.champion;
   const highlights = board?.highlights;
@@ -1448,16 +1445,14 @@ export default function BolaoPage() {
               <Medal size={15} />
               <span>Ranking</span>
             </button>
-            {isAdmin && (
-              <button
-                className={`wc-hero2-btn wc-admin-live-btn${hasLiveGame ? " pulsing" : ""}`}
-                onClick={() => setAdminModalOpen(true)}
-                type="button"
-              >
-                <Radio size={15} />
-                <span>Ao vivo</span>
-              </button>
-            )}
+            <button
+              className={`wc-hero2-btn wc-admin-live-btn${hasLiveGame ? " pulsing" : ""}`}
+              onClick={() => setLiveModalOpen(true)}
+              type="button"
+            >
+              <Radio size={15} />
+              <span>Ao vivo</span>
+            </button>
           </div>
         </div>
 
@@ -2286,15 +2281,15 @@ export default function BolaoPage() {
         </div>
       )}
 
-      {adminModalOpen && (
-        <div className="event-modal-backdrop wc-admin-backdrop" onClick={() => setAdminModalOpen(false)}>
+      {liveModalOpen && (
+        <div className="event-modal-backdrop wc-admin-backdrop" onClick={() => setLiveModalOpen(false)}>
           <div className="event-modal glass-panel wc-modal wc-admin-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <span className="eyebrow">Admin</span>
+                <span className="eyebrow">Transparência</span>
                 <h2>Painel ao vivo</h2>
               </div>
-              <button className="modal-close" onClick={() => setAdminModalOpen(false)} type="button">
+              <button className="modal-close" onClick={() => setLiveModalOpen(false)} type="button">
                 <X size={18} />
               </button>
             </div>
