@@ -3905,22 +3905,7 @@ def world_cup_ai_insight(db: Session) -> dict[str, Any]:
 
 
 def world_cup_champion_lock_at(db: Session) -> datetime | None:
-    # Palpite de campeão fica aberto até 1h antes da estreia do Brasil;
-    # se o Brasil não estiver na tabela, vale até o fim da fase de grupos
-    brazil_game = (
-        db.query(models.WorldCupGame)
-        .filter(models.WorldCupGame.kickoff_at.isnot(None))
-        .filter(
-            or_(
-                models.WorldCupGame.home_team.in_(("Brazil", "Brasil")),
-                models.WorldCupGame.away_team.in_(("Brazil", "Brasil")),
-            )
-        )
-        .order_by(models.WorldCupGame.kickoff_at.asc())
-        .first()
-    )
-    if brazil_game:
-        return brazil_game.kickoff_at - WORLD_CUP_BET_CUTOFF
+    # Palpite de campeão fica aberto até o início do último jogo da fase de grupos
     last_group_game = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.kickoff_at.isnot(None))
