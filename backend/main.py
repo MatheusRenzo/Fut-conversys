@@ -2338,6 +2338,16 @@ def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[
     if game.status == "finished":
         _append_closing_timeline(clean, old, game, mn, gname)
 
+    seen_actions: set[tuple[str, str]] = set()
+    deduped: list[dict[str, Any]] = []
+    for e in clean:
+        key = (e.get("phase") or "", e.get("action") or "")
+        if key in seen_actions:
+            continue
+        seen_actions.add(key)
+        deduped.append(e)
+    clean = deduped
+
     clean.sort(key=lambda x: x["at"])
     merged = trim_game_events(list(reversed(clean)) + others)
     set_app_setting(db, "wc_game_events", json.dumps(merged, ensure_ascii=False))
