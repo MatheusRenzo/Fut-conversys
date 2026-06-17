@@ -182,6 +182,8 @@ PLACEHOLDER_TEAM_PATTERN = re.compile(
 WORLD_CUP_YEAR = int(os.getenv("WORLD_CUP_YEAR", "2026"))
 # Palpites fecham 1 hora antes do início de cada jogo
 WORLD_CUP_BET_CUTOFF = timedelta(hours=1)
+WC_GAME_EVENTS_PER_MATCH_MAX = int(os.getenv("WC_GAME_EVENTS_PER_MATCH_MAX", "60"))
+WC_GAME_EVENTS_TOTAL_MAX = int(os.getenv("WC_GAME_EVENTS_TOTAL_MAX", "600"))
 MONTHS_EN = {
     "jan": 1,
     "feb": 2,
@@ -2068,8 +2070,8 @@ def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[
             clean.append({**e, "action": "2º tempo", "phase": "gratuito", "api": "football-data", "ok": True})
 
     clean.sort(key=lambda x: x["at"])
-    merged = list(reversed(clean)) + others
-    set_app_setting(db, "wc_game_events", json.dumps(merged[:100], ensure_ascii=False))
+    merged = trim_game_events(list(reversed(clean)) + others)
+    set_app_setting(db, "wc_game_events", json.dumps(merged, ensure_ascii=False))
 
     gratis = sum(
         1 for e in clean
@@ -2090,6 +2092,24 @@ def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[
         set_goal_pipeline(db, game.id, {"score": cur, "stage": "detected", "api_tries": 0, "tsd_tries": 0})
 
     return list(reversed(clean))
+
+
+def trim_game_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mantém histórico por jogo — um match não apaga os logs dos outros."""
+    if not events:
+        return []
+    counts: dict[str, int] = {}
+    out: list[dict[str, Any]] = []
+    for row in events:
+        key = str(row.get("match_number") or row.get("game") or "?")
+        seen = counts.get(key, 0)
+        if seen >= WC_GAME_EVENTS_PER_MATCH_MAX:
+            continue
+        counts[key] = seen + 1
+        out.append(row)
+        if len(out) >= WC_GAME_EVENTS_TOTAL_MAX:
+            break
+    return out
 
 
 def log_game_event(
@@ -2124,7 +2144,7 @@ def log_game_event(
     if cached:
         row["cached"] = True
     events.insert(0, row)
-    set_app_setting(db, "wc_game_events", json.dumps(events[:100], ensure_ascii=False))
+    set_app_setting(db, "wc_game_events", json.dumps(trim_game_events(events), ensure_ascii=False))
 
 
 def refresh_world_cup_live_statuses(db: Session) -> bool:

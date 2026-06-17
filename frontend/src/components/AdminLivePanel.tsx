@@ -417,13 +417,16 @@ function FlowDiagram({ retryMax }: { retryMax: number }) {
 
 function TimelineRow({ ev, retryMax }: { ev: GameEvent; retryMax: number }) {
   const d = parseTimelineEvent(ev, retryMax);
+  const raw = cleanText(ev.action);
+  const detail = d.detail && d.detail !== "—" ? d.detail : raw.slice(0, 80) || "—";
+  const kind = d.kind !== "—" ? d.kind : "LOG";
   return (
     <div className={`wc-tl-v3 tone-${d.tone}`}>
       <time className="wc-tl-v3-time">{timeFull(ev.at)}</time>
-      <span className={`wc-tl-v3-kind k-${d.tone}`}>{d.kind}</span>
+      <span className={`wc-tl-v3-kind k-${d.tone}`}>{kind}</span>
       <span className={`wc-tl-v3-api a-${d.api.replace(/\s+/g, "-").toLowerCase()}`}>{d.api}</span>
       <span className={`wc-tl-v3-result r-${d.tone}`}>{d.result}</span>
-      <span className="wc-tl-v3-detail">{d.detail}</span>
+      <span className="wc-tl-v3-detail">{detail}</span>
     </div>
   );
 }
