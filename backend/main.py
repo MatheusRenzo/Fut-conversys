@@ -3128,7 +3128,32 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         .all()
     )
     of_games_cache: list[dict[str, Any]] | None = None
+
+    def _finish_scoreless_reconfirm(game: models.WorldCupGame) -> None:
+        game.scorers_confirmed = True
+        game.reconfirmed = True
+        clear_reconfirm_state(db, game.id)
+        status["reconfirmed"] += 1
+        log_game_event(
+            db, game,
+            "Reconfirmação — resultado: sem goleadores (0-0)",
+            phase="reconfirmacao", api="pipeline", ok=True,
+        )
+
+    # 0-0 não tem artilheiro — fecha reconfirmação sem exigir API paga no fim
+    for game in (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.status == "finished")
+        .filter(models.WorldCupGame.scorers_final.is_(True))
+        .filter(or_(models.WorldCupGame.reconfirmed.is_(False), models.WorldCupGame.reconfirmed.is_(None)))
+        .all()
+    ):
+        if game_goal_total(game) == 0:
+            _finish_scoreless_reconfirm(game)
+
     for game in reconfirm_candidates:
+        if game_goal_total(game) == 0:
+            continue
         state = get_reconfirm_state(db, game.id)
         if state["tries"] >= WORLD_CUP_RECONFIRM_MAX_TRIES:
             continue
