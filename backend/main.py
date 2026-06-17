@@ -183,7 +183,7 @@ WORLD_CUP_YEAR = int(os.getenv("WORLD_CUP_YEAR", "2026"))
 # Palpites fecham 1 hora antes do início de cada jogo
 WORLD_CUP_BET_CUTOFF = timedelta(hours=1)
 WC_GAME_EVENTS_PER_MATCH_MAX = int(os.getenv("WC_GAME_EVENTS_PER_MATCH_MAX", "60"))
-WC_GAME_EVENTS_TOTAL_MAX = int(os.getenv("WC_GAME_EVENTS_TOTAL_MAX", "600"))
+WC_GAME_EVENTS_TOTAL_MAX = int(os.getenv("WC_GAME_EVENTS_TOTAL_MAX", "1200"))
 MONTHS_EN = {
     "jan": 1,
     "feb": 2,
@@ -2209,15 +2209,12 @@ def _append_canonical_closing(
     ))
 
 
-def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[dict[str, Any]]:
-    """Reconstrói timeline canônica: fluxo teórico real, ignora logs sujos/retry."""
-    raw = get_app_setting(db, "wc_game_events")
-    try:
-        all_ev = json.loads(raw) if raw else []
-    except json.JSONDecodeError:
-        all_ev = []
-    old = [e for e in all_ev if e.get("match_number") == game.match_number]
-    others = [e for e in all_ev if e.get("match_number") != game.match_number]
+def _build_canonical_game_events(
+    db: Session,
+    game: models.WorldCupGame,
+    old: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int, int]:
+    """Monta timeline canônica em memória (sem gravar no banco)."""
     scorers_names = game_scorer_names(game)
     total = game_goal_total(game)
     duration = _match_duration_sec(game)
@@ -2270,11 +2267,19 @@ def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[
         seen_actions.add(key)
         deduped.append(e)
     clean = deduped
-
     clean.sort(key=lambda x: x["at"])
-    merged = trim_game_events(list(reversed(clean)) + others)
-    set_app_setting(db, "wc_game_events", json.dumps(merged, ensure_ascii=False))
+    return clean, af, ia
 
+
+def _apply_canonical_game_settings(
+    db: Session,
+    game: models.WorldCupGame,
+    clean: list[dict[str, Any]],
+    af: int,
+    ia: int,
+) -> None:
+    total = game_goal_total(game)
+    scorers_names = game_scorer_names(game)
     gratis = sum(
         1 for e in clean
         if e.get("api") == "football-data" and re.search(r"gol detectado", e.get("action", ""), re.I)
@@ -2297,6 +2302,21 @@ def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[
     else:
         ensure_idle_goal_pipeline(db, game)
 
+
+def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[dict[str, Any]]:
+    """Reconstrói timeline canônica: fluxo teórico real, ignora logs sujos/retry."""
+    raw = get_app_setting(db, "wc_game_events")
+    try:
+        all_ev = json.loads(raw) if raw else []
+    except json.JSONDecodeError:
+        all_ev = []
+    old = [e for e in all_ev if e.get("match_number") == game.match_number]
+    others = [e for e in all_ev if e.get("match_number") != game.match_number]
+
+    clean, af, ia = _build_canonical_game_events(db, game, old)
+    merged = trim_game_events(list(reversed(clean)) + others)
+    set_app_setting(db, "wc_game_events", json.dumps(merged, ensure_ascii=False))
+    _apply_canonical_game_settings(db, game, clean, af, ia)
     return list(reversed(clean))
 
 
@@ -2306,14 +2326,31 @@ def sanitize_all_finished_timelines(db: Session, *, before_match_number: int | N
     if before_match_number is not None:
         query = query.filter(models.WorldCupGame.match_number <= before_match_number)
     games = query.order_by(models.WorldCupGame.match_number.asc()).all()
+
+    raw = get_app_setting(db, "wc_game_events")
+    try:
+        all_ev = json.loads(raw) if raw else []
+    except json.JSONDecodeError:
+        all_ev = []
+
+    finished_mns = {g.match_number for g in games}
+    others = [e for e in all_ev if e.get("match_number") not in finished_mns]
+
+    merged_clean: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
     for game in games:
-        events = rebuild_clean_game_timeline(db, game)
+        old = [e for e in all_ev if e.get("match_number") == game.match_number]
+        clean, af, ia = _build_canonical_game_events(db, game, old)
+        _apply_canonical_game_settings(db, game, clean, af, ia)
+        merged_clean.extend(reversed(clean))
         results.append({
             "match_number": game.match_number,
             "matchup": f"{game.home_team} x {game.away_team}",
-            "events": len(events),
+            "events": len(clean),
         })
+
+    merged = trim_game_events(merged_clean + others)
+    set_app_setting(db, "wc_game_events", json.dumps(merged, ensure_ascii=False))
     return results
 
 
