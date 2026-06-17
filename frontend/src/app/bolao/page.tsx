@@ -1652,7 +1652,7 @@ export default function BolaoPage() {
             <p className="wc-champion-copy">
               Vale <strong>{champion?.points_award ?? 10} pts</strong>. Escolhe uma vez — depois não dá pra trocar.
               {!champion?.locked && champion?.lock_at && (
-                <> Fecha {formatEventDate(champion.lock_at)} (fim da fase de grupos).</>
+                <> Fecha {formatEventDate(champion.lock_at)} (fim da 1ª rodada da fase de grupos).</>
               )}
             </p>
           </div>

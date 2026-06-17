@@ -3905,15 +3905,37 @@ def world_cup_ai_insight(db: Session) -> dict[str, Any]:
 
 
 def world_cup_champion_lock_at(db: Session) -> datetime | None:
-    # Palpite de campeão fica aberto até o início do último jogo da fase de grupos
-    last_group_game = (
+    # Palpite de campeão fica aberto até o fim da 1ª rodada da fase de grupos
+    games = (
         db.query(models.WorldCupGame)
         .filter(models.WorldCupGame.kickoff_at.isnot(None))
         .filter(models.WorldCupGame.stage == "group-stage")
-        .order_by(models.WorldCupGame.kickoff_at.desc())
-        .first()
+        .order_by(models.WorldCupGame.kickoff_at.asc())
+        .all()
     )
-    return last_group_game.kickoff_at if last_group_game else None
+    by_group: dict[str, list[models.WorldCupGame]] = {}
+    for game in games:
+        label = (game.group_label or "").strip()
+        if not label:
+            continue
+        by_group.setdefault(label, []).append(game)
+    if not by_group:
+        return None
+
+    round_two_starts = [
+        group_games[2].kickoff_at
+        for group_games in by_group.values()
+        if len(group_games) >= 3
+    ]
+    if round_two_starts:
+        return min(round_two_starts)
+
+    round_one_ends = [
+        game.kickoff_at
+        for group_games in by_group.values()
+        for game in group_games[:2]
+    ]
+    return max(round_one_ends) if round_one_ends else None
 
 
 def world_cup_champion_locked(db: Session) -> bool:
