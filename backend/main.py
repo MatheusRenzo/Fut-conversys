@@ -1904,6 +1904,36 @@ def _game_score_str(game: models.WorldCupGame) -> str:
     return f"{game.home_score or 0}-{game.away_score or 0}"
 
 
+def game_goal_total(game: models.WorldCupGame) -> int:
+    return (game.home_score or 0) + (game.away_score or 0)
+
+
+def get_last_processed_goal_total(db: Session, game_id: int) -> int:
+    raw = get_app_setting(db, f"wc_last_goal_total_{game_id}")
+    return int(raw) if (raw or "").isdigit() else 0
+
+
+def mark_goal_total_processed(db: Session, game_id: int, total: int) -> None:
+    if total < 0:
+        return
+    prev = get_last_processed_goal_total(db, game_id)
+    if total > prev:
+        set_app_setting(db, f"wc_last_goal_total_{game_id}", str(total))
+
+
+def ensure_idle_goal_pipeline(db: Session, game: models.WorldCupGame) -> None:
+    """Sem gol no placar: não dispara API paga/SportsDB ao vivo."""
+    if game_goal_total(game) > 0:
+        return
+    pipe = get_goal_pipeline(db, game)
+    score = _game_score_str(game)
+    if goal_pipeline_pending(pipe):
+        complete_goal_pipeline(db, game, {**pipe, "score": score})
+    else:
+        set_goal_pipeline(db, game.id, {"score": score, "stage": "done", "api_tries": 0, "tsd_tries": 0})
+    mark_goal_total_processed(db, game.id, 0)
+
+
 def get_goal_pipeline(db: Session, game: models.WorldCupGame) -> dict[str, Any]:
     """Estado do fluxo por gol: detectado → paga/tsd → IA → done."""
     raw = get_app_setting(db, f"wc_goal_pipe_{game.id}")
@@ -1930,7 +1960,10 @@ def get_goal_pipeline(db: Session, game: models.WorldCupGame) -> dict[str, Any]:
         stage = "detected"
     else:
         stage = "detected"
-    return {"score": score, "stage": stage, "api_tries": api_n, "tsd_tries": tsd_n}
+    pipe = {"score": score, "stage": stage, "api_tries": api_n, "tsd_tries": tsd_n}
+    if game_goal_total(game) == 0 and stage == "detected" and api_n == 0 and tsd_n == 0:
+        pipe["stage"] = "done"
+    return pipe
 
 
 def set_goal_pipeline(db: Session, game_id: int, pipe: dict[str, Any]) -> None:
@@ -1952,6 +1985,7 @@ def start_goal_pipeline(db: Session, game: models.WorldCupGame, score: str) -> N
 
 def complete_goal_pipeline(db: Session, game: models.WorldCupGame, pipe: dict[str, Any]) -> None:
     set_goal_pipeline(db, game.id, {**pipe, "stage": "done"})
+    mark_goal_total_processed(db, game.id, game_goal_total(game))
 
 
 def goal_label(pipe: dict[str, Any]) -> str:
@@ -2159,6 +2193,8 @@ def refresh_world_cup_live_statuses(db: Session) -> bool:
     for game in games:
         game.status = "live"
         changed = True
+        mark_goal_total_processed(db, game.id, game_goal_total(game))
+        ensure_idle_goal_pipeline(db, game)
         log_game_event(db, game, "Início do jogo — palpites fechados", phase="gratuito", api="calendário", ok=True)
     return changed
 
@@ -2273,7 +2309,6 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
         if remote_status in ("IN_PLAY", "PAUSED") and has_score:
             lh, la = int(item["home_score"]), int(item["away_score"])
             if game.status in ("scheduled", "live") or game.status is None:
-                old_total = (game.home_score or 0) + (game.away_score or 0)
                 if game.home_score != lh or game.away_score != la or game.status != "live":
                     game.home_score = lh
                     game.away_score = la
@@ -2281,7 +2316,9 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
                     status["filled"] += 1
                 # GOL detectado pela football-data (placar subiu) → registra na timeline;
                 # a busca do autor (API-Football/failover) é disparada no apply_api_football_live
-                if (lh + la) > old_total:
+                new_total = lh + la
+                last_proc = get_last_processed_goal_total(db, game.id)
+                if new_total > last_proc:
                     log_game_event(
                         db, game,
                         f"Gol detectado — placar {lh}-{la}",
@@ -2290,6 +2327,7 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
                     bump_game_poll(db, game.id, "gratis")
                     set_app_setting(db, f"wc_goal_at_{game.id}", datetime.now(timezone.utc).isoformat())
                     start_goal_pipeline(db, game, f"{lh}-{la}")
+                    mark_goal_total_processed(db, game.id, new_total)
                 # INTERVALO: football-data manda PAUSED no intervalo
                 was_ht = bool(game.halftime)
                 game.halftime = (remote_status == "PAUSED")
@@ -2880,6 +2918,9 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
 
     # Sem cota na paga → vai direto pro SportsDB neste gol
     for game in live_now_games:
+        if game_goal_total(game) == 0:
+            ensure_idle_goal_pipeline(db, game)
+            continue
         pipe = get_goal_pipeline(db, game)
         if pipe.get("stage") == "detected" and goal_pipeline_pending(pipe) and not paid_ok:
             set_goal_pipeline(db, game.id, {
@@ -2889,6 +2930,8 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             })
 
     def api_pending(g: models.WorldCupGame) -> bool:
+        if game_goal_total(g) == 0:
+            return False
         pipe = get_goal_pipeline(db, g)
         if not goal_pipeline_pending(pipe):
             return False
@@ -2898,12 +2941,16 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         return pipe.get("stage") == "detected" and paid_ok and int(pipe.get("api_tries") or 0) < API_FOOTBALL_LIVE_RETRY_MAX
 
     def tsd_pending(g: models.WorldCupGame) -> bool:
+        if game_goal_total(g) == 0:
+            return False
         pipe = get_goal_pipeline(db, g)
         if not goal_pipeline_pending(pipe):
             return False
         return pipe.get("stage") == "tsd" and int(pipe.get("tsd_tries") or 0) < THESPORTSDB_LIVE_RETRY_MAX
 
     def ia_pending(g: models.WorldCupGame) -> bool:
+        if game_goal_total(g) == 0:
+            return False
         pipe = get_goal_pipeline(db, g)
         return goal_pipeline_pending(pipe) and pipe.get("stage") == "ia"
 
