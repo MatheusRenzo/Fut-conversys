@@ -2004,10 +2004,6 @@ def _timeline_iso(game: models.WorldCupGame, offset_sec: int = 0) -> str:
     return (base + timedelta(seconds=offset_sec)).replace(tzinfo=timezone.utc).isoformat()
 
 
-def _pick_last_event(events: list[dict[str, Any]], pred) -> dict[str, Any] | None:
-    hits = [e for e in sorted(events, key=lambda x: x.get("at", "")) if pred(e)]
-    return hits[-1] if hits else None
-
 
 def _end_source_meta(end_source: str | None) -> tuple[str, str]:
     mapping = {
@@ -2018,203 +2014,203 @@ def _end_source_meta(end_source: str | None) -> tuple[str, str]:
     return mapping.get(end_source or "", ("football-data", "sistema"))
 
 
-def _append_closing_timeline(
-    clean: list[dict[str, Any]],
+def _is_timeline_noise(action: str) -> bool:
+    return bool(re.search(
+        r"retry|nova tentativa|não achou|sem cota|esgotou|erro|aguardando|fixture direto|"
+        r"jogo encerrou|jogo não encontrado|segue retry|failover|limite por minuto|passou para",
+        action or "",
+        re.I,
+    ))
+
+
+def _match_duration_sec(game: models.WorldCupGame) -> int:
+    if game.kickoff_at and game.finished_at:
+        return max(3600, int((game.finished_at - game.kickoff_at).total_seconds()))
+    return 5400
+
+
+def _theoretical_goal_scores(game: models.WorldCupGame) -> list[str]:
+    """Placar progressivo plausível gol a gol (ex.: 3-1 → 1-0, 2-0, 3-0, 3-1)."""
+    h, a = game.home_score or 0, game.away_score or 0
+    home_left, away_left = h, a
+    ch = ca = 0
+    scores: list[str] = []
+    while home_left + away_left > 0:
+        if home_left >= away_left and home_left > 0:
+            home_left -= 1
+            ch += 1
+        elif away_left > 0:
+            away_left -= 1
+            ca += 1
+        scores.append(f"{ch}-{ca}")
+    return scores
+
+
+def _extract_monotonic_goal_marks(
     old: list[dict[str, Any]],
+    total_goals: int,
+) -> list[tuple[str, str]]:
+    """Usa só detecções de gol válidas (sem spam) para horários reais quando existirem."""
+    marks: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    prev_total = 0
+    for e in sorted(old, key=lambda x: x.get("at", "")):
+        act = e.get("action", "")
+        if _is_timeline_noise(act):
+            continue
+        if not re.search(r"gol detectado|placar virou", act, re.I):
+            continue
+        m = re.search(r"(\d+-\d+)", act)
+        if not m:
+            continue
+        g_score = m.group(1)
+        if g_score in seen:
+            continue
+        try:
+            gh, ga = [int(x) for x in g_score.split("-", 1)]
+        except ValueError:
+            continue
+        g_total = gh + ga
+        if g_total <= prev_total or g_total > total_goals:
+            continue
+        seen.add(g_score)
+        prev_total = g_total
+        marks.append((e["at"], g_score))
+    return marks
+
+
+def _timeline_event(
     game: models.WorldCupGame,
-    mn: int | None,
-    gname: str,
+    at: str,
+    action: str,
+    *,
+    phase: str,
+    api: str,
+    ok: bool | None = None,
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "at": at,
+        "match_number": game.match_number,
+        "game": f"{game.home_team} x {game.away_team}",
+        "action": action,
+        "phase": phase,
+        "api": api,
+    }
+    if ok is not None:
+        row["ok"] = ok
+    return row
+
+
+def _append_goal_flow(
+    clean: list[dict[str, Any]],
+    game: models.WorldCupGame,
+    g_at: str,
+    g_score: str,
+    scorers_slice: str,
+) -> tuple[int, int]:
+    """Um gol completo: detectado → API paga → IA → concluído."""
+    gl = f"Gol {g_score} — "
+    mn = game.match_number
+    gname = f"{game.home_team} x {game.away_team}"
+    clean.append(_timeline_event(game, g_at, f"Gol detectado — placar {g_score}", phase="gratuito", api="football-data", ok=True))
+    if not scorers_slice and game_goal_total(game) == 0:
+        return 0, 0
+    t_api = g_at
+    clean.append(_timeline_event(game, t_api, f"{gl}API paga — consulta artilheiro", phase="ao_vivo", api="API-Football"))
+    names = scorers_slice or "confirmado"
+    clean.append(_timeline_event(game, t_api, f"{gl}API paga — achou: {names}", phase="ao_vivo", api="API-Football", ok=True))
+    clean.append(_timeline_event(game, t_api, f"{gl}IA — consulta (API paga)", phase="ao_vivo", api="IA merge"))
+    clean.append(_timeline_event(game, t_api, f"{gl}IA — resultado: {names}", phase="ao_vivo", api="IA merge", ok=True))
+    clean.append(_timeline_event(game, t_api, f"{gl}fluxo do gol concluído", phase="ao_vivo", api="pipeline", ok=True))
+    return 1, 1
+
+
+def _append_canonical_closing(
+    db: Session,
+    clean: list[dict[str, Any]],
+    game: models.WorldCupGame,
 ) -> None:
-    """Fim + confirmação final + reconfirmação — só eventos OK, sem retry/erro."""
+    """Fim + confirmação final + reconfirmação — fluxo teórico limpo, sem ler logs sujos."""
     score = _game_score_str(game)
     total = game_goal_total(game)
+    scorers_txt = game.scorers or ""
+    fim_at = (
+        game.finished_at.replace(tzinfo=timezone.utc).isoformat()
+        if game.finished_at
+        else _timeline_iso(game, _match_duration_sec(game))
+    )
+    api_key, api_label = _end_source_meta(game.end_source)
 
-    fim = _pick_last_event(old, lambda e: re.search(r"finalização", e.get("action", ""), re.I))
-    if fim:
-        clean.append({
-            **fim,
-            "action": re.sub(r"\s+", " ", fim.get("action", "")).strip(),
-            "phase": "fim",
-            "ok": True,
-        })
-    elif game.status == "finished":
-        api_key, api_label = _end_source_meta(game.end_source)
-        clean.append({
-            "at": (game.finished_at.replace(tzinfo=timezone.utc).isoformat() if game.finished_at else _timeline_iso(game, 7200)),
-            "match_number": mn,
-            "game": gname,
-            "action": f"Finalização — placar {score} ({api_label})",
-            "phase": "fim",
-            "api": api_key,
-            "ok": True,
-        })
+    clean.append(_timeline_event(
+        game, fim_at, f"Finalização — placar {score} ({api_label})",
+        phase="fim", api=api_key, ok=True,
+    ))
 
     if not game.scorers_final:
         return
 
-    conf = _pick_last_event(old, lambda e: re.search(r"confirmação final", e.get("action", ""), re.I))
-    pay_call = _pick_last_event(
-        old, lambda e: e.get("phase") == "fim" and re.search(r"consulta api paga|confirmação final", e.get("action", ""), re.I)
-    )
-    pay_ok = _pick_last_event(
-        old, lambda e: e.get("phase") == "fim" and re.search(r"api paga — achou", e.get("action", ""), re.I)
-    )
-    ia_call = _pick_last_event(
-        old, lambda e: e.get("phase") == "fim" and e.get("api") == "IA merge" and re.search(r"consulta", e.get("action", ""), re.I)
-    )
-    ia_ok = _pick_last_event(
-        old, lambda e: e.get("phase") == "fim" and e.get("api") == "IA merge" and e.get("ok") and re.search(r"resultado", e.get("action", ""), re.I)
-    )
-    fim_at = (game.finished_at.replace(tzinfo=timezone.utc).isoformat() if game.finished_at else _timeline_iso(game, 7500))
+    conf_at = fim_at
+    if game.scorers or total == 0:
+        clean.append(_timeline_event(game, conf_at, "Consulta API paga — confirmação final", phase="fim", api="API-Football"))
+        if game.scorers:
+            clean.append(_timeline_event(game, conf_at, f"API paga — achou: {scorers_txt}", phase="fim", api="API-Football", ok=True))
+        clean.append(_timeline_event(game, conf_at, "IA — consulta (API paga)", phase="fim", api="IA merge"))
+        if game.scorers:
+            clean.append(_timeline_event(game, conf_at, f"IA — resultado: {scorers_txt}", phase="fim", api="IA merge", ok=True))
 
-    if pay_call:
-        clean.append({**pay_call, "phase": "fim", "api": "API-Football"})
-    elif total > 0 or game.scorers:
-        clean.append({
-            "at": fim_at,
-            "match_number": mn,
-            "game": gname,
-            "action": "Consulta API paga — confirmação final",
-            "phase": "fim",
-            "api": "API-Football",
-        })
-
-    scorers_txt = game.scorers or "sem goleador"
-    if pay_ok:
-        clean.append({**pay_ok, "phase": "fim", "api": "API-Football", "ok": True})
-    elif game.scorers:
-        clean.append({
-            "at": fim_at,
-            "match_number": mn,
-            "game": gname,
-            "action": f"API paga — achou: {scorers_txt}",
-            "phase": "fim",
-            "api": "API-Football",
-            "ok": True,
-        })
-
-    if ia_call:
-        clean.append({**ia_call, "phase": "fim", "api": "IA merge"})
-    elif game.scorers or total == 0:
-        clean.append({
-            "at": fim_at,
-            "match_number": mn,
-            "game": gname,
-            "action": "IA — consulta (API paga)",
-            "phase": "fim",
-            "api": "IA merge",
-        })
-
-    if ia_ok:
-        clean.append({**ia_ok, "phase": "fim", "api": "IA merge", "ok": True})
-    elif game.scorers:
-        clean.append({
-            "at": fim_at,
-            "match_number": mn,
-            "game": gname,
-            "action": f"IA — resultado: {scorers_txt}",
-            "phase": "fim",
-            "api": "IA merge",
-            "ok": True,
-        })
-
-    if conf:
-        clean.append({**conf, "phase": "fim", "api": "API-Football", "ok": True})
-    else:
-        n_sources = game.scorers_confirmations or len([s for s in (game.confirmation_sources or "").split(",") if s.strip()])
-        conf_txt = f" · ✓ {n_sources} fonte(s)" if n_sources else ""
-        gol_txt = f" · goleadores: {scorers_txt}" if game.scorers else " · sem goleador"
-        clean.append({
-            "at": fim_at,
-            "match_number": mn,
-            "game": gname,
-            "action": f"Confirmação final — {score}{conf_txt}{gol_txt}",
-            "phase": "fim",
-            "api": "API-Football",
-            "ok": True,
-        })
+    n_sources = game.scorers_confirmations or len([s for s in (game.confirmation_sources or "").split(",") if s.strip()])
+    conf_txt = f" · ✓ {n_sources} fonte(s)" if n_sources else ""
+    gol_txt = f" · goleadores: {scorers_txt}" if game.scorers else " · sem goleador"
+    clean.append(_timeline_event(
+        game, conf_at, f"Confirmação final — {score}{conf_txt}{gol_txt}",
+        phase="fim", api="API-Football", ok=True,
+    ))
 
     if not game.reconfirmed:
         return
 
-    reconf = _pick_last_event(
-        old, lambda e: e.get("phase") == "reconfirmacao" and re.search(r"reconfirmação — resultado", e.get("action", ""), re.I)
+    reconf_at = (
+        (game.finished_at + timedelta(minutes=10)).replace(tzinfo=timezone.utc).isoformat()
+        if game.finished_at
+        else _timeline_iso(game, _match_duration_sec(game) + 600)
     )
-    reconf_at = (game.finished_at.replace(tzinfo=timezone.utc).isoformat() if game.finished_at else _timeline_iso(game, 8100))
-    if game.finished_at:
-        reconf_at = (game.finished_at + timedelta(minutes=10)).replace(tzinfo=timezone.utc).isoformat()
+    of_names: list[str] = []
+    try:
+        of_names = openfootball_scorers_for_game(game, fetch_openfootball_world_cup_games())
+    except Exception:
+        of_names = []
 
-    of_ok = _pick_last_event(old, lambda e: e.get("phase") == "reconfirmacao" and e.get("api") == "openfootball" and e.get("ok"))
-    tsd_ok = _pick_last_event(old, lambda e: e.get("phase") == "reconfirmacao" and e.get("api") == "TheSportsDB" and e.get("ok"))
-    reconf_ia_call = _pick_last_event(
-        old, lambda e: e.get("phase") == "reconfirmacao" and e.get("api") == "IA merge" and re.search(r"consulta", e.get("action", ""), re.I)
-    )
-    reconf_ia_ok = _pick_last_event(
-        old, lambda e: e.get("phase") == "reconfirmacao" and e.get("api") == "IA merge" and e.get("ok") and re.search(r"resultado", e.get("action", ""), re.I)
-    )
+    clean.append(_timeline_event(game, reconf_at, "Reconfirmação — iniciada", phase="reconfirmacao", api="pipeline"))
+    if total == 0:
+        clean.append(_timeline_event(
+            game, reconf_at, "Reconfirmação — resultado: sem goleadores (0-0)",
+            phase="reconfirmacao", api="pipeline", ok=True,
+        ))
+        return
 
-    clean.append({
-        "at": reconf_at,
-        "match_number": mn,
-        "game": gname,
-        "action": "Reconfirmação — iniciada",
-        "phase": "reconfirmacao",
-        "api": "pipeline",
-    })
-    if of_ok:
-        clean.append({**of_ok, "phase": "reconfirmacao", "api": "openfootball", "ok": True})
-    elif total > 0:
-        clean.append({
-            "at": reconf_at,
-            "match_number": mn,
-            "game": gname,
-            "action": f"openfootball reconfirmação — achou: {scorers_txt}",
-            "phase": "reconfirmacao",
-            "api": "openfootball",
-            "ok": True,
-        })
-    if tsd_ok:
-        clean.append({**tsd_ok, "phase": "reconfirmacao", "api": "TheSportsDB", "ok": True})
-    if reconf_ia_call:
-        clean.append({**reconf_ia_call, "phase": "reconfirmacao", "api": "IA merge"})
-    elif game.scorers or total == 0:
-        clean.append({
-            "at": reconf_at,
-            "match_number": mn,
-            "game": gname,
-            "action": "IA — consulta (reconfirmação)",
-            "phase": "reconfirmacao",
-            "api": "IA merge",
-        })
-    if reconf_ia_ok:
-        clean.append({**reconf_ia_ok, "phase": "reconfirmacao", "api": "IA merge", "ok": True})
-    elif game.scorers:
-        clean.append({
-            "at": reconf_at,
-            "match_number": mn,
-            "game": gname,
-            "action": f"IA — resultado: {scorers_txt}",
-            "phase": "reconfirmacao",
-            "api": "IA merge",
-            "ok": True,
-        })
-    if reconf:
-        clean.append({**reconf, "phase": "reconfirmacao", "ok": True})
-    else:
-        result_txt = "sem goleadores (0-0)" if total == 0 else (scorers_txt or "confirmado")
-        clean.append({
-            "at": reconf_at,
-            "match_number": mn,
-            "game": gname,
-            "action": f"Reconfirmação — resultado: {result_txt}",
-            "phase": "reconfirmacao",
-            "api": "pipeline",
-            "ok": True,
-        })
+    of_txt = ", ".join(of_names) if of_names else scorers_txt
+    if of_names or scorers_txt:
+        clean.append(_timeline_event(
+            game, reconf_at, f"openfootball reconfirmação — achou: {of_txt}",
+            phase="reconfirmacao", api="openfootball", ok=True,
+        ))
+    sources = (game.confirmation_sources or "").lower()
+    if "thesportsdb" in sources or "sportsdb" in sources:
+        clean.append(_timeline_event(
+            game, reconf_at, f"SportsDB reconfirmação — achou: {scorers_txt}",
+            phase="reconfirmacao", api="TheSportsDB", ok=True,
+        ))
+    clean.append(_timeline_event(game, reconf_at, "IA — consulta (reconfirmação)", phase="reconfirmacao", api="IA merge"))
+    clean.append(_timeline_event(game, reconf_at, f"IA — resultado: {scorers_txt}", phase="reconfirmacao", api="IA merge", ok=True))
+    result_txt = scorers_txt or "confirmado"
+    clean.append(_timeline_event(
+        game, reconf_at, f"Reconfirmação — resultado: {result_txt}",
+        phase="reconfirmacao", api="pipeline", ok=True,
+    ))
 
 
 def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[dict[str, Any]]:
-    """Reconstrói timeline limpa do jogo: remove spam, mantém fatos reais, zera contadores velhos."""
+    """Reconstrói timeline canônica: fluxo teórico real, ignora logs sujos/retry."""
     raw = get_app_setting(db, "wc_game_events")
     try:
         all_ev = json.loads(raw) if raw else []
@@ -2222,121 +2218,48 @@ def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[
         all_ev = []
     old = [e for e in all_ev if e.get("match_number") == game.match_number]
     others = [e for e in all_ev if e.get("match_number") != game.match_number]
-    mn = game.match_number
-    gname = f"{game.home_team} x {game.away_team}"
-    score = _game_score_str(game)
-    scorers_txt = game.scorers or ""
+    scorers_names = game_scorer_names(game)
+    total = game_goal_total(game)
+    duration = _match_duration_sec(game)
 
-    def pick_at(pred, fallback: str | None = None) -> str:
-        for e in sorted(old, key=lambda x: x["at"]):
-            if pred(e):
-                return e["at"]
-        return fallback or _timeline_iso(game)
-
-    clean: list[dict[str, Any]] = []
-
-    clean.append({
-        "at": pick_at(lambda e: "começou" in e.get("action", "").lower() or "início" in e.get("action", "").lower(), _timeline_iso(game, 0)),
-        "match_number": mn, "game": gname,
-        "action": "Início do jogo — palpites fechados",
-        "phase": "gratuito", "api": "calendário", "ok": True,
-    })
-
-    goal_marks: list[tuple[str, str]] = []
-    for e in sorted(old, key=lambda x: x["at"]):
+    kickoff_at = _timeline_iso(game, 0)
+    for e in sorted(old, key=lambda x: x.get("at", "")):
         act = e.get("action", "")
-        if not re.search(r"gol detectado|placar virou", act, re.I):
-            continue
-        m = re.search(r"(\d+-\d+)", act)
-        if not m:
-            continue
-        g_score = m.group(1)
-        if any(s == g_score for _, s in goal_marks):
-            continue
-        goal_marks.append((e["at"], g_score))
+        if not _is_timeline_noise(act) and re.search(r"início|começou", act, re.I):
+            kickoff_at = e["at"]
+            break
 
-    if not goal_marks and game_goal_total(game) > 0:
-        goal_marks.append((pick_at(lambda e: False, _timeline_iso(game, 1800)), score))
+    clean: list[dict[str, Any]] = [
+        _timeline_event(
+            game, kickoff_at, "Início do jogo — palpites fechados",
+            phase="gratuito", api="calendário", ok=True,
+        ),
+    ]
 
-    af = 0
-    ia = 0
-    for i, (g_at, g_score) in enumerate(goal_marks):
-        gl = f"Gol {g_score} — "
-        next_at = goal_marks[i + 1][0] if i + 1 < len(goal_marks) else "9999-12-31T23:59:59"
-        window = [e for e in old if g_at <= e["at"] < next_at]
+    had_ht = any(e.get("action", "").strip().lower() == "intervalo" for e in old)
+    if had_ht or duration >= 4200:
+        clean.append(_timeline_event(game, _timeline_iso(game, 2700), "Intervalo", phase="gratuito", api="football-data", ok=True))
+        clean.append(_timeline_event(game, _timeline_iso(game, 2880), "2º tempo", phase="gratuito", api="football-data", ok=True))
 
-        clean.append({
-            "at": g_at, "match_number": mn, "game": gname,
-            "action": f"Gol detectado — placar {g_score}",
-            "phase": "gratuito", "api": "football-data", "ok": True,
-        })
+    theoretical_scores = _theoretical_goal_scores(game)
+    real_marks = _extract_monotonic_goal_marks(old, total)
+    if len(real_marks) == len(theoretical_scores) and len(real_marks) > 0:
+        goal_plan = list(real_marks)
+    else:
+        goal_plan = [
+            (_timeline_iso(game, int(duration * (i + 1) / (total + 1))), sc)
+            for i, sc in enumerate(theoretical_scores)
+        ]
 
-        achou = next(
-            (e for e in window if re.search(r"api paga — achou", e.get("action", ""), re.I)),
-            None,
-        )
-        if achou:
-            t = achou["at"]
-            names_m = re.search(r"achou:\s*(.+)", achou["action"], re.I)
-            names_s = names_m.group(1).strip() if names_m else scorers_txt
-            consulta = next(
-                (e for e in window if re.search(r"api paga — consulta", e.get("action", ""), re.I)),
-                None,
-            )
-            t_consulta = consulta["at"] if consulta else t
-            clean.append({"at": t_consulta, "match_number": mn, "game": gname, "action": f"{gl}API paga — consulta artilheiro", "phase": "ao_vivo", "api": "API-Football"})
-            clean.append({"at": t, "match_number": mn, "game": gname, "action": f"{gl}API paga — achou: {names_s}", "phase": "ao_vivo", "api": "API-Football", "ok": True})
-            af += 1
-        elif scorers_txt:
-            t = _timeline_iso(game, 1860 + i * 120)
-            clean.append({"at": t, "match_number": mn, "game": gname, "action": f"{gl}API paga — consulta artilheiro", "phase": "ao_vivo", "api": "API-Football"})
-            clean.append({"at": t, "match_number": mn, "game": gname, "action": f"{gl}API paga — achou: {scorers_txt}", "phase": "ao_vivo", "api": "API-Football", "ok": True})
-            af += 1
-
-        ia_res = next(
-            (e for e in window
-             if e.get("api") == "IA merge" and e.get("ok") and re.search(r"resultado|merge|✓", e.get("action", ""), re.I)),
-            None,
-        )
-        if ia_res:
-            t = ia_res["at"]
-            names_s = scorers_txt
-            for pat in (r"resultado:\s*(.+)", r"✓ —\s*(.+)", r"—\s*(.+)"):
-                m = re.search(pat, ia_res["action"])
-                if m:
-                    names_s = m.group(1).strip()
-                    break
-            t_consulta = next(
-                (e["at"] for e in window
-                 if e.get("api") == "IA merge" and re.search(r"consulta|chamada", e.get("action", ""), re.I)),
-                t,
-            )
-            clean.append({"at": t_consulta, "match_number": mn, "game": gname, "action": f"{gl}IA — consulta (API paga)", "phase": "ao_vivo", "api": "IA merge"})
-            clean.append({"at": t, "match_number": mn, "game": gname, "action": f"{gl}IA — resultado: {names_s}", "phase": "ao_vivo", "api": "IA merge", "ok": True})
-            ia += 1
-        elif scorers_txt:
-            t = _timeline_iso(game, 1890 + i * 120)
-            clean.append({"at": t, "match_number": mn, "game": gname, "action": f"{gl}IA — consulta (API paga)", "phase": "ao_vivo", "api": "IA merge"})
-            clean.append({"at": t, "match_number": mn, "game": gname, "action": f"{gl}IA — resultado: {scorers_txt}", "phase": "ao_vivo", "api": "IA merge", "ok": True})
-            ia += 1
-
-        if (achou or scorers_txt) and (ia_res or scorers_txt):
-            clean.append({
-                "at": ia_res["at"] if ia_res else _timeline_iso(game, 1893 + i * 120),
-                "match_number": mn, "game": gname,
-                "action": f"{gl}fluxo do gol concluído",
-                "phase": "ao_vivo", "api": "pipeline", "ok": True,
-            })
-
-    for e in sorted(old, key=lambda x: x["at"]):
-        act = e.get("action", "")
-        if act.strip().lower() == "intervalo":
-            clean.append({**e, "action": "Intervalo", "phase": "gratuito", "api": "football-data", "ok": True})
-        elif re.match(r"^2º tempo", act, re.I):
-            clean.append({**e, "action": "2º tempo", "phase": "gratuito", "api": "football-data", "ok": True})
+    af = ia = 0
+    for i, (g_at, g_score) in enumerate(goal_plan):
+        slice_names = ", ".join(scorers_names[: i + 1]) if scorers_names else (game.scorers or "")
+        a, b = _append_goal_flow(clean, game, g_at, g_score, slice_names)
+        af += a
+        ia += b
 
     if game.status == "finished":
-        _append_closing_timeline(clean, old, game, mn, gname)
+        _append_canonical_closing(db, clean, game)
 
     seen_actions: set[tuple[str, str]] = set()
     deduped: list[dict[str, Any]] = []
@@ -2356,27 +2279,29 @@ def rebuild_clean_game_timeline(db: Session, game: models.WorldCupGame) -> list[
         1 for e in clean
         if e.get("api") == "football-data" and re.search(r"gol detectado", e.get("action", ""), re.I)
     )
-    set_app_setting(db, f"gpoll_af_{game.id}", str(af))
-    set_app_setting(db, f"gpoll_tsd_{game.id}", str(1 if game.reconfirmed and game_goal_total(game) > 0 else 0))
-    set_app_setting(db, f"gpoll_ia_{game.id}", str(ia + (1 if game.scorers_final else 0) + (1 if game.reconfirmed else 0)))
+    reconf_ia = 1 if game.reconfirmed else 0
+    fim_ia = 1 if game.scorers_final else 0
+    set_app_setting(db, f"gpoll_af_{game.id}", str(af + fim_ia))
+    set_app_setting(
+        db, f"gpoll_tsd_{game.id}",
+        str(1 if game.reconfirmed and total > 0 and "thesportsdb" in (game.confirmation_sources or "").lower() else 0),
+    )
+    set_app_setting(db, f"gpoll_ia_{game.id}", str(ia + fim_ia + reconf_ia))
     set_app_setting(db, f"gpoll_gratis_{game.id}", str(gratis))
 
-    cur = score
-    if game.status == "finished" or (game_goal_total(game) > 0 and len(game_scorer_names(game)) >= max(1, game_goal_total(game) - 1)):
+    cur = _game_score_str(game)
+    if game.status == "finished" or total == 0 or len(scorers_names) >= max(1, total - 1):
         set_app_setting(db, f"wc_live_polled_{game.id}", f"{cur}:done")
         set_goal_pipeline(db, game.id, {"score": cur, "stage": "done", "api_tries": 0, "tsd_tries": 0})
-        mark_goal_total_processed(db, game.id, game_goal_total(game))
-    elif game_goal_total(game) == 0:
-        ensure_idle_goal_pipeline(db, game)
+        mark_goal_total_processed(db, game.id, total)
     else:
-        set_app_setting(db, f"wc_live_polled_{game.id}", f"{cur}:0:0")
-        set_goal_pipeline(db, game.id, {"score": cur, "stage": "detected", "api_tries": 0, "tsd_tries": 0})
+        ensure_idle_goal_pipeline(db, game)
 
     return list(reversed(clean))
 
 
 def sanitize_all_finished_timelines(db: Session, *, before_match_number: int | None = None) -> list[dict[str, Any]]:
-    """Sanitiza timelines de jogos encerrados (legado) até o match de referência."""
+    """Sanitiza timelines de todos os jogos encerrados com fluxo canônico."""
     query = db.query(models.WorldCupGame).filter(models.WorldCupGame.status == "finished")
     if before_match_number is not None:
         query = query.filter(models.WorldCupGame.match_number <= before_match_number)
