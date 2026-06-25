@@ -12393,6 +12393,48 @@ img.team-flag {
   50% { box-shadow: 0 0 40px rgba(255,205,70,0.45), inset 0 1px 0 rgba(255,255,255,0.2); }
 }
 
+/* ===== Card dourado de mata-mata (fase eliminatória) — áurea igual ao pódio #1 ===== */
+.wc-game-card.wc-knockout-gold,
+.wc-fcard.wc-fcard-gold {
+  position: relative;
+  border-color: rgba(255,205,70,0.55) !important;
+  background:
+    radial-gradient(ellipse 110% 60% at 50% 0%, rgba(255,205,70,0.16), transparent 62%),
+    linear-gradient(180deg, rgba(255,205,70,0.07), rgba(255,205,70,0.02));
+  box-shadow: 0 0 24px rgba(255,205,70,0.22), inset 0 1px 0 rgba(255,255,255,0.12);
+  animation: wc-ko-gold-pulse 2.6s ease-in-out infinite, wc-ko-gold-float 5s ease-in-out infinite;
+}
+@keyframes wc-ko-gold-pulse {
+  0%,100% { box-shadow: 0 0 20px rgba(255,205,70,0.2), inset 0 1px 0 rgba(255,255,255,0.12); }
+  50% { box-shadow: 0 0 42px rgba(255,205,70,0.42), inset 0 1px 0 rgba(255,255,255,0.18); }
+}
+@keyframes wc-ko-gold-float {
+  0%,100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+.wc-ko-banner {
+  display: flex; align-items: center; gap: 8px;
+  margin: -4px -4px 10px; padding: 7px 12px;
+  border-radius: 14px 14px 0 0;
+  background: linear-gradient(90deg, rgba(255,205,70,0.2), rgba(255,205,70,0.05));
+  border-bottom: 1px solid rgba(255,205,70,0.3);
+  color: #ffe08a; font-weight: 800; font-size: 0.72rem; letter-spacing: 0.08em;
+}
+.wc-ko-banner svg { color: #ffd24a; filter: drop-shadow(0 0 6px rgba(255,205,70,0.6)); flex: none; }
+.wc-ko-banner-sub { margin-left: auto; font-size: 0.6rem; opacity: 0.7; letter-spacing: 0.18em; }
+.wc-fcard-pens {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 8px; padding: 6px 10px; border-radius: 10px;
+  background: rgba(255,205,70,0.08); border: 1px solid rgba(255,205,70,0.22);
+  font-size: 0.82rem;
+}
+.wc-fcard-pens-tag { font-weight: 700; color: #ffd24a; text-transform: uppercase; font-size: 0.64rem; letter-spacing: 0.08em; }
+.wc-fcard-pens strong { font-size: 1.05rem; color: #ffe08a; }
+.wc-fcard-pens-win { margin-left: auto; color: #9dffc8; font-weight: 600; }
+@media (prefers-reduced-motion: reduce) {
+  .wc-game-card.wc-knockout-gold, .wc-fcard.wc-fcard-gold { animation: none; }
+}
+
 .bolao-podium2-step.place-2 { border-color: rgba(210,220,235,0.45); background: linear-gradient(180deg, rgba(210,220,235,0.1), rgba(210,220,235,0.02)); }
 .bolao-podium2-step.place-3 { border-color: rgba(220,150,90,0.5); background: linear-gradient(180deg, rgba(220,150,90,0.12), rgba(220,150,90,0.02)); }
 

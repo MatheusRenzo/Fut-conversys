@@ -758,16 +758,29 @@ function FinishedGameCard({ game, viewerId }: { game: WorldCupGame; viewerId?: n
   const exactCount = preds.filter((p) => p.home_score === game.home_score && p.away_score === game.away_score).length;
   const scorerCount = preds.filter((p) => p.scorer_hit).length;
   const finished = game.status === "finished";
+  const hasPens = game.home_penalties != null && game.away_penalties != null;
+  const penWinner = hasPens
+    ? (game.home_penalties! > game.away_penalties! ? game.home_team : game.away_team)
+    : null;
+  const livePeriodLabel =
+    game.live_period === "penalties" ? "PÊNALTIS" : game.live_period === "extra-time" ? "PRORROGAÇÃO" : null;
 
   return (
-    <article className={`wc-fcard${finished ? "" : " live"}`}>
+    <article className={`wc-fcard${finished ? "" : " live"}${game.is_knockout ? " wc-fcard-gold" : ""}`}>
+      {game.is_knockout && (
+        <div className="wc-ko-banner" aria-hidden="true">
+          <Crown size={12} />
+          <span>{(stageLabels[game.stage] ?? "Mata-mata").toUpperCase()}</span>
+          <span className="wc-ko-banner-sub">✦ MATA-MATA ✦</span>
+        </div>
+      )}
       <div className="wc-fcard-top">
         <span className="wc-game-stage">
           {game.group_label ? `Grupo ${game.group_label}` : stageLabels[game.stage] ?? game.stage}
         </span>
         <span className={`wc-fcard-status ${game.status}${game.halftime ? " halftime" : ""}`}>
           {game.status === "live" && !game.halftime && <span className="wc-live-dot small" />}
-          {liveGameStatusLabel(game)}
+          {!finished && livePeriodLabel ? livePeriodLabel : liveGameStatusLabel(game)}
         </span>
         <span className="wc-game-date">{formatEventDate(game.kickoff_at)}</span>
       </div>
@@ -781,6 +794,14 @@ function FinishedGameCard({ game, viewerId }: { game: WorldCupGame; viewerId?: n
           {teamLabel(game.away_team)} <TeamFlag team={game.away_team} />
         </span>
       </div>
+
+      {hasPens && (
+        <div className="wc-fcard-pens">
+          <span className="wc-fcard-pens-tag">Pênaltis</span>
+          <strong>{game.home_penalties} x {game.away_penalties}</strong>
+          <span className="wc-fcard-pens-win">🏆 {teamLabel(penWinner!)} avança</span>
+        </div>
+      )}
 
       {game.scorers ? (
         <div className="wc-fcard-scorers"><Goal size={13} /> <span>{game.scorers}</span></div>
@@ -1867,12 +1888,20 @@ export default function BolaoPage() {
                   hasBet ? "has-bet" : "needs-bet",
                   isNextScheduled ? "is-next" : "",
                   isExpanded ? "expanded" : "collapsed",
+                  game.is_knockout ? "wc-knockout-gold" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
                 id={`game-${game.id}`}
                 key={game.id}
               >
+                {game.is_knockout && (
+                  <div className="wc-ko-banner" aria-hidden="true">
+                    <Crown size={13} />
+                    <span>{(stageLabels[game.stage] ?? "Mata-mata").toUpperCase()}</span>
+                    <span className="wc-ko-banner-sub">✦ MATA-MATA ✦</span>
+                  </div>
+                )}
                 <button
                   aria-expanded={isExpanded}
                   className="wc-game-summary"
