@@ -571,6 +571,9 @@ def ensure_schema() -> None:
             "confirmation_sources": "VARCHAR",
             "end_source": "VARCHAR",
             "halftime": "BOOLEAN DEFAULT FALSE",
+            "home_penalties": "INTEGER",
+            "away_penalties": "INTEGER",
+            "live_period": "VARCHAR",
             "finished_at": "TIMESTAMP",
             "reconfirmed": "BOOLEAN DEFAULT FALSE",
             "created_at": "TIMESTAMP",
@@ -1142,17 +1145,38 @@ WORLD_CUP_POINTS_SCORER = 1
 WORLD_CUP_POINTS_CHAMPION = 10
 
 
+def effective_game_outcome(
+    game_home: int,
+    game_away: int,
+    home_pens: int | None = None,
+    away_pens: int | None = None,
+) -> str:
+    """Vencedor REAL da partida. No mata-mata, se o tempo normal/prorrogação empatou
+    e foi pra pênaltis, quem vence os pênaltis é o vencedor (decide o ponto de Vencedor).
+    Na fase de grupos (sem pênaltis) é só o placar normal."""
+    base = game_outcome(game_home, game_away)
+    if base == "draw" and home_pens is not None and away_pens is not None and home_pens != away_pens:
+        return "home" if home_pens > away_pens else "away"
+    return base
+
+
 def world_cup_prediction_points(
     prediction_home: int,
     prediction_away: int,
     game_home: int | None,
     game_away: int | None,
+    home_pens: int | None = None,
+    away_pens: int | None = None,
 ) -> int:
     if game_home is None or game_away is None:
         return 0
+    # Placar exato é sempre pelo tempo normal/prorrogação (pênaltis não contam pro placar)
     if prediction_home == game_home and prediction_away == game_away:
         return WORLD_CUP_POINTS_EXACT
-    if game_outcome(prediction_home, prediction_away) == game_outcome(game_home, game_away):
+    # Vencedor: no mata-mata decidido nos pênaltis, vale o vencedor dos pênaltis
+    if game_outcome(prediction_home, prediction_away) == effective_game_outcome(
+        game_home, game_away, home_pens, away_pens
+    ):
         return WORLD_CUP_POINTS_OUTCOME
     return 0
 
@@ -1172,6 +1196,8 @@ def score_world_cup_game(game: models.WorldCupGame) -> None:
             prediction.away_score or 0,
             game.home_score,
             game.away_score,
+            game.home_penalties,
+            game.away_penalties,
         )
         hit = scorer_guess_matches(scorers, prediction.scorer_guess)
         if hit:
@@ -1223,6 +1249,10 @@ def world_cup_game_response(game: models.WorldCupGame, user: models.User | None 
         "halftime": bool(game.halftime),
         "home_score": game.home_score,
         "away_score": game.away_score,
+        "home_penalties": game.home_penalties,
+        "away_penalties": game.away_penalties,
+        "live_period": game.live_period,
+        "is_knockout": (game.stage or "group-stage") != "group-stage",
         "scorers": game.scorers,
         "source": game.source,
         "predictions_count": len(game.predictions),
@@ -1259,11 +1289,13 @@ def world_cup_leaderboard_response(db: Session, exclude_game_id: int | None = No
         }
 
     game_scores = {
-        gid: (home, away)
-        for gid, home, away in db.query(
+        gid: (home, away, hpen, apen)
+        for gid, home, away, hpen, apen in db.query(
             models.WorldCupGame.id,
             models.WorldCupGame.home_score,
             models.WorldCupGame.away_score,
+            models.WorldCupGame.home_penalties,
+            models.WorldCupGame.away_penalties,
         ).all()
     }
 
@@ -1279,12 +1311,14 @@ def world_cup_leaderboard_response(db: Session, exclude_game_id: int | None = No
         row["predictions"] += 1
         if prediction.status == "scored":
             row["scored_predictions"] += 1
-            home_score, away_score = game_scores.get(prediction.game_id, (None, None))
+            home_score, away_score, home_pens, away_pens = game_scores.get(
+                prediction.game_id, (None, None, None, None)
+            )
             if home_score is not None and away_score is not None:
                 if prediction.home_score == home_score and prediction.away_score == away_score:
                     row["exact_scores"] += 1
-                if game_outcome(prediction.home_score or 0, prediction.away_score or 0) == game_outcome(
-                    home_score, away_score
+                if game_outcome(prediction.home_score or 0, prediction.away_score or 0) == effective_game_outcome(
+                    home_score, away_score, home_pens, away_pens
                 ):
                     row["outcome_hits"] += 1
             if prediction.scorer_hit:
@@ -3072,6 +3106,18 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         if goals.get("home") is not None and goals.get("away") is not None:
             game.home_score = int(goals["home"])
             game.away_score = int(goals["away"])
+        # Mata-mata: guarda o resultado da disputa de pênaltis (decide o vencedor) e
+        # marca como o jogo foi decidido (regular/prorrogação/pênaltis) pra exibição.
+        score_obj = fixture.get("score") or {}
+        pen = score_obj.get("penalty") or {}
+        if pen.get("home") is not None and pen.get("away") is not None:
+            game.home_penalties = int(pen["home"])
+            game.away_penalties = int(pen["away"])
+            game.live_period = "penalties"
+        elif short == "AET" or (score_obj.get("extratime") or {}).get("home") is not None:
+            game.live_period = "extra-time"
+        else:
+            game.live_period = "regular"
         game.status = "finished"
         game.halftime = False
         if not game.end_source:
@@ -3997,6 +4043,46 @@ def run_world_cup_sync_with_retries(attempts: int = 3) -> None:
         record_world_cup_sync_failure(str(last_error))
 
 
+def _brt_date_str(now: datetime | None = None) -> str:
+    # Dia em horário de Brasília (UTC-3): a rotina diária vira junto da meia-noite local
+    return ((now or datetime.utcnow()) - timedelta(hours=3)).strftime("%Y-%m-%d")
+
+
+def world_cup_knockout_daily_due(db: Session) -> bool:
+    return get_app_setting(db, "wc_knockout_daily_date") != _brt_date_str()
+
+
+def world_cup_knockout_daily_check(db: Session) -> dict[str, Any]:
+    """Rotina diária (meia-noite BRT): detecta confrontos do mata-mata que ganharam
+    adversário (viraram apostáveis) desde a última checagem. O banco já é preenchido
+    continuamente pelo sync (openfootball, a cada ciclo); aqui só registramos os novos
+    confrontos pra aparecerem em destaque e ficar logado pro admin."""
+    set_app_setting(db, "wc_knockout_daily_date", _brt_date_str())
+    ko_games = db.query(models.WorldCupGame).filter(models.WorldCupGame.stage != "group-stage").all()
+    bettable_now = {g.id for g in ko_games if is_bettable_world_cup_game(g)}
+    raw = get_app_setting(db, "wc_knockout_known_bettable")
+    try:
+        known = set(json.loads(raw)) if raw else set()
+    except json.JSONDecodeError:
+        known = set()
+    new_games = [g for g in ko_games if g.id in (bettable_now - known)]
+    for g in new_games:
+        log_game_event(
+            db, g, f"Confronto definido — {g.home_team} x {g.away_team} ({g.stage})",
+            phase="mata-mata", api="openfootball", ok=True,
+        )
+    set_app_setting(db, "wc_knockout_known_bettable", json.dumps(sorted(bettable_now)))
+    summary = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "new": [f"{g.home_team} x {g.away_team}" for g in new_games],
+        "bettable_total": len(bettable_now),
+    }
+    set_app_setting(db, "wc_knockout_last_daily", json.dumps(summary, ensure_ascii=False))
+    if new_games:
+        print(f"[world-cup-knockout] novos confrontos definidos: {summary['new']}", flush=True)
+    return summary
+
+
 def world_cup_sync_loop() -> None:
     last_schedule_at = 0.0
     while True:
@@ -4028,6 +4114,18 @@ def world_cup_sync_loop() -> None:
                 session.close()
         except Exception as exc:
             print(f"[world-cup-sync] squads failed: {exc}", flush=True)
+
+        # Mata-mata: rotina diária (meia-noite BRT) detecta novos confrontos definidos
+        try:
+            session = SessionLocal()
+            try:
+                if world_cup_knockout_daily_due(session):
+                    world_cup_knockout_daily_check(session)
+                    session.commit()
+            finally:
+                session.close()
+        except Exception as exc:
+            print(f"[world-cup-knockout] daily check failed: {exc}", flush=True)
 
 
 def openai_calls_key() -> str:

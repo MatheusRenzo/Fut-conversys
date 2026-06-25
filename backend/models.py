@@ -185,6 +185,13 @@ class WorldCupGame(Base):
     end_source = Column(String, nullable=True)
     # está no intervalo? (football-data status PAUSED)
     halftime = Column(Boolean, default=False)
+    # Mata-mata: resultado da disputa de pênaltis (None fora do mata-mata ou quando
+    # não foi pra pênaltis). O vencedor dos pênaltis decide o "vencedor" da partida
+    # para fins de pontuação; o placar exato continua sendo o do tempo normal/prorrogação.
+    home_penalties = Column(Integer, nullable=True)
+    away_penalties = Column(Integer, nullable=True)
+    # Fase do jogo ao vivo: "regular" | "extra-time" | "penalties" (dirige a experiência ao vivo)
+    live_period = Column(String, nullable=True)
     # quando o jogo foi marcado como encerrado (pra agendar a re-confirmação de 10min)
     finished_at = Column(DateTime, nullable=True)
     # já passou pela re-confirmação grátis (TheSportsDB + openfootball + IA) pós-jogo
