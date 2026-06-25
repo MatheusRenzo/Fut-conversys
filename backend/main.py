@@ -3943,6 +3943,21 @@ def world_cup_has_live_window(db: Session) -> bool:
                 models.WorldCupGame.kickoff_at <= now + timedelta(minutes=5),
                 models.WorldCupGame.kickoff_at >= now - timedelta(hours=3, minutes=30),
             ),
+            # Jogo que ACABOU de encerrar mas ainda não confirmou goleadores: mantém a
+            # cadência rápida por ~20min pra a confirmação final/reconfirmação rodar
+            # logo, em vez de esperar o próximo tick idle (10min) quando era o último
+            # jogo do dia. Sai do modo rápido assim que fica final E reconfirmado.
+            and_(
+                models.WorldCupGame.status == "finished",
+                models.WorldCupGame.finished_at.isnot(None),
+                models.WorldCupGame.finished_at >= now - timedelta(minutes=20),
+                or_(
+                    models.WorldCupGame.scorers_final.is_(False),
+                    models.WorldCupGame.scorers_final.is_(None),
+                    models.WorldCupGame.reconfirmed.is_(False),
+                    models.WorldCupGame.reconfirmed.is_(None),
+                ),
+            ),
         )
     ).first() is not None
 
