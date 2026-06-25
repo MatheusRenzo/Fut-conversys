@@ -147,10 +147,12 @@ THESPORTSDB_LIVE_RETRY_MAX = max(1, int(os.getenv("THESPORTSDB_LIVE_RETRY_MAX", 
 WORLD_CUP_RECONFIRM_AFTER = timedelta(minutes=int(os.getenv("WORLD_CUP_RECONFIRM_MINUTES", "10")))
 WORLD_CUP_RECONFIRM_MAX_TRIES = max(1, int(os.getenv("WORLD_CUP_RECONFIRM_MAX_TRIES", "6")))
 WORLD_CUP_RECONFIRM_RETRY_GAP = timedelta(minutes=int(os.getenv("WORLD_CUP_RECONFIRM_RETRY_MINUTES", "3")))
-# Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há. 30s deixa
-# o PLACAR/GOL bem ao vivo (football-data 10/min aguenta de sobra: ~2/min) e faz o
-# gatilho de goleador disparar logo após o gol; a cota paga é protegida à parte.
-WORLD_CUP_LIVE_INTERVAL = max(25, int(os.getenv("WORLD_CUP_LIVE_INTERVAL_SECONDS", "30")))
+# Intervalo do loop: rápido quando há jogo ao vivo, lento quando não há. 15s deixa
+# o PLACAR/GOL bem ao vivo (football-data 10/min aguenta: 1 chamada/ciclo = ~4/min) e
+# faz o gatilho de goleador disparar logo após o gol; a cota paga é protegida à parte
+# (event-driven por gol, não por ciclo). Antes era 30s; baixamos porque o board não
+# atualiza mais o placar dentro do request — o ao vivo agora depende só deste loop.
+WORLD_CUP_LIVE_INTERVAL = max(12, int(os.getenv("WORLD_CUP_LIVE_INTERVAL_SECONDS", "15")))
 WORLD_CUP_IDLE_INTERVAL = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECONDS", "600")))
 # Schedule (openfootball/football-data) revalida no máximo a cada N segundos
 WORLD_CUP_SCHEDULE_MIN_GAP = max(120, int(os.getenv("WORLD_CUP_SCHEDULE_MIN_GAP", "300")))
@@ -3018,6 +3020,19 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         ia_ok = not OPENAI_API_KEY and bool(merged)
         return merged[:500], ia_ok
 
+    # Jogos 0-0 não têm goleador pra confirmar: marca como final ANTES da seção paga,
+    # pra não gastar descoberta/consulta da API-Football à toa e pra eles saírem da
+    # fila de "incompletos" na hora (finalizam instantâneo, sem depender de cota).
+    zero_finished = (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.status == "finished")
+        .filter(or_(models.WorldCupGame.scorers_final.is_(False), models.WorldCupGame.scorers_final.is_(None)))
+        .filter((models.WorldCupGame.home_score == 0) & (models.WorldCupGame.away_score == 0))
+        .all()
+    )
+    for game in zero_finished:
+        game.scorers_final = True
+
     # ============ A) FIM: paga 1× → TODOS os goleadores (confirmação final) ============
     incomplete_finished = (
         db.query(models.WorldCupGame)
@@ -3845,7 +3860,10 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
         "updated": updated,
         "finished_games": len(finished_games),
         "missing_scorers": [
-            f"{game.home_team} x {game.away_team}" for game in finished_games if not game.scorers
+            f"{game.home_team} x {game.away_team}"
+            for game in finished_games
+            # 0-0 não tem goleador: não é pendência (senão fica eternamente na lista)
+            if not game.scorers and ((game.home_score or 0) + (game.away_score or 0)) > 0
         ],
         "secondary": secondary,
         "live_source": live_source,
