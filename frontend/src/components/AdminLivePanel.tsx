@@ -165,10 +165,11 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
     };
   }
   if (/api paga — não achou/i.test(raw)) {
+    // Esperado: a busca tem retry e cai no fallback; não é erro -> neutro
     return {
       kind: "CONSULTA GOL", api: "API paga", result: "Não achou",
       detail: tentativa ? `Tentativa ${tentativa[1]}/${tentativa[2]}` : "Sem artilheiro",
-      tone: "retry",
+      tone: "skip",
     };
   }
   if (/api paga — sem cota/i.test(raw)) {
@@ -185,10 +186,11 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
     return { kind: "FALLBACK", api: "SportsDB", result: "Achou", detail: pickNames(raw), tone: "ok" };
   }
   if (/sportsdb — não achou/i.test(raw)) {
+    // SportsDB tem cobertura incompleta da Copa: não achar é esperado -> neutro
     return {
       kind: "FALLBACK", api: "SportsDB", result: "Não achou",
       detail: tentativa ? `Tentativa ${tentativa[1]}/${tentativa[2]}` : "—",
-      tone: "retry",
+      tone: "skip",
     };
   }
   if (/sportsdb — passou/i.test(raw)) {
@@ -221,10 +223,11 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
     return { kind: "RECONFIRMAÇÃO", api: "Pipeline", result: "Segue", detail: raw.replace(/^reconfirmação —\s*/i, ""), tone: "ok" };
   }
   if (/openfootball reconfirmação — sem dados/i.test(raw)) {
+    // Fonte ainda não publicou; reconfirmação tenta de novo no próximo ciclo -> neutro
     return {
       kind: "RECONFIRMAÇÃO", api: "openfootball", result: "Sem dados",
       detail: "—",
-      tone: "retry",
+      tone: "skip",
     };
   }
   if (isReconf && /ia — consulta/i.test(raw)) {
@@ -234,16 +237,17 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
     return { kind: "RECONFIRMAÇÃO", api: "IA", result: "Validou", detail: pickNames(raw), tone: "ok" };
   }
   if (/sportsdb reconfirmação — adiada/i.test(raw)) {
-    return { kind: "RECONFIRMAÇÃO", api: "SportsDB", result: "Adiada", detail: "Cota do ciclo", tone: "retry" };
+    return { kind: "RECONFIRMAÇÃO", api: "SportsDB", result: "Adiada", detail: "Cota do ciclo", tone: "skip" };
   }
   if (/sportsdb reconfirmação — achou/i.test(raw)) {
     return { kind: "RECONFIRMAÇÃO", api: "SportsDB", result: "Achou", detail: pickNames(raw), tone: "ok" };
   }
   if (/sportsdb reconfirmação — sem dados/i.test(raw)) {
+    // SportsDB sem cobertura: esperado, tenta no próximo ciclo -> neutro
     return {
       kind: "RECONFIRMAÇÃO", api: "SportsDB", result: "Sem dados",
       detail: "—",
-      tone: "retry",
+      tone: "skip",
     };
   }
   if (/reconfirmação — iniciada/i.test(raw)) {
@@ -253,7 +257,8 @@ function parseTimelineEvent(ev: GameEvent, retryMax: number): TlDisplay {
     };
   }
   if (/reconfirmação — aguardando|reconfirmação — ia sem|reconfirmação — artilheiros incompletos|reconfirmação — fontes não batem|aguardando próximo ciclo/i.test(raw)) {
-    return { kind: "RECONFIRMAÇÃO", api: "Pipeline", result: "Retry", detail: raw.replace(/^reconfirmação —\s*/i, ""), tone: "retry" };
+    // Esperando o próximo ciclo / fontes ainda incompletas: fluxo normal, não erro -> neutro
+    return { kind: "RECONFIRMAÇÃO", api: "Pipeline", result: "Aguardando", detail: raw.replace(/^reconfirmação —\s*/i, ""), tone: "skip" };
   }
   if (/reconfirmação — resultado/i.test(raw)) {
     return {
