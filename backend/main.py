@@ -3043,7 +3043,10 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             sources["lista_atual"] = of_names
         total = (game.home_score or 0) + (game.away_score or 0)
         if total > 0 and (raw_names or of_names):
-            rec = ai_reconcile_scorers(db, game, sources, status, squad=squad, phase=phase, source_label=source_label)
+            rec = ai_reconcile_scorers(
+                db, game, sources, status, squad=squad, phase=phase, source_label=source_label,
+                corroborate_against=[n for lst in ai_sources.values() for n in lst],
+            )
             if rec:
                 official, _ = snap_scorers_to_squad([n for n in (s.strip() for s in rec) if n], squad)
                 merged, _ = merge_scorers(game.scorers, official)
@@ -3133,7 +3136,10 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
             log_game_event(db, game, f"API paga — achou: {', '.join(api_names)}", phase="fim", api="API-Football", ok=True)
         # IA definitiva no fim: cruza paga + openfootball + elenco
         reconciled = ai_reconcile_scorers(
-            db, game, {"API-Football": api_names, "openfootball": of_names}, status, squad=squad, phase="fim", source_label="API paga"
+            db, game, {"API-Football": api_names, "lista_atual": of_names}, status, squad=squad, phase="fim",
+            source_label="API paga",
+            # Só a API-Football (paga, autoritativa) corrobora aqui; a lista acumulada não.
+            corroborate_against=api_names,
         )
         candidate = (reconciled or []) + api_names + of_names
         official, unmatched = snap_scorers_to_squad([n for n in (s.strip() for s in candidate) if n], squad)
@@ -3556,10 +3562,13 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
         sources: dict[str, list[str]] = {
             "openfootball": of_names,
             "TheSportsDB": tsd,
-            "API_paga_fim": paid_names,
+            # game.scorers acumulado — contexto, NÃO é fonte real que corrobora
+            "lista_atual": paid_names,
         }
         reconciled = ai_reconcile_scorers(
             db, game, sources, status, squad=squad, phase="reconfirmacao", source_label="reconfirmação",
+            # Só as fontes externas reais desta reconfirmação corroboram
+            corroborate_against=list(of_names) + list(tsd),
         )
         if not reconciled:
             log_game_event(
@@ -4182,8 +4191,14 @@ def ai_reconcile_scorers(
     squad: list[str] | None = None,
     phase: str = "merge",
     source_label: str = "API paga",
+    corroborate_against: list[str] | None = None,
 ) -> list[str] | None:
-    """IA reconcilia goleadores das fontes. Sem cache — só chama quando precisa."""
+    """IA reconcilia goleadores das fontes. Sem cache — só chama quando precisa.
+
+    corroborate_against: nomes vindos de fontes REAIS (APIs externas) desta chamada.
+    Se informado, qualquer nome devolvido pela IA que NENHUMA fonte real tenha citado
+    é descartado — barra alucinação (a IA preenchendo gols sem dono com craques do
+    elenco, ex.: inventar Mbappé/Thuram). A lista acumulada do jogo NÃO corrobora."""
     if not OPENAI_API_KEY:
         log_game_event(db, game, "IA — não configurada", phase=phase, api="IA merge", ok=False)
         return None
@@ -4196,14 +4211,17 @@ def ai_reconcile_scorers(
     squad_txt = ", ".join((squad or [])[:60])
     text = openai_chat(
         system=(
-            "Você reconcilia dados de futebol de fontes diferentes. Recebe listas de goleadores "
-            "de várias APIs (que podem divergir, abreviar nomes ou estar incompletas), o total de gols "
-            "e o ELENCO oficial dos dois times. "
-            "Devolva APENAS um array JSON com os nomes dos goleadores, 1 entrada por gol de jogador "
-            "(ignore gols contra). REGRA: todo nome devolvido DEVE ser de um jogador do elenco fornecido — "
-            "use exatamente a grafia do elenco (resolva abreviações/acentos pra esse nome oficial). "
-            "Se uma fonte citar alguém fora do elenco, escolha o jogador do elenco mais provável. "
-            "Não invente. Responda só o JSON, ex: [\"Nome Oficial A\",\"Nome Oficial B\"]."
+            "Você UNIFICA e NORMALIZA goleadores relatados por fontes diferentes. Recebe listas "
+            "de goleadores de várias APIs (que divergem, abreviam nomes ou estão incompletas), o "
+            "total de gols e o ELENCO oficial dos dois times. "
+            "Sua tarefa é juntar e padronizar APENAS os nomes que as fontes relataram, usando a "
+            "grafia exata do elenco (resolva abreviações/acentos). "
+            "PROIBIDO inventar: NUNCA inclua um jogador que NENHUMA fonte citou, mesmo que falte "
+            "goleador para algum gol — nesse caso deixe faltar. Pode devolver MENOS nomes que o "
+            "total de gols. NÃO complete a lista até o total de gols. "
+            "Se uma fonte citar alguém fora do elenco, mapeie para o jogador do elenco mais provável "
+            "ENTRE OS QUE AS FONTES CITARAM. Ignore gols contra. "
+            "Responda só o JSON, ex: [\"Nome Oficial A\",\"Nome Oficial B\"]."
         ),
         user=(
             f"Jogo {game.home_team} {game.home_score}x{game.away_score} {game.away_team} ({total} gols). "
@@ -4227,6 +4245,27 @@ def ai_reconcile_scorers(
         log_game_event(db, game, "IA — resposta inválida", phase=phase, api="IA merge", ok=False)
         return None
     names = [re.sub(r"\s+", " ", str(n)).strip() for n in names if str(n).strip()]
+
+    # GUARD anti-alucinação: só mantém nomes corroborados por uma fonte real desta chamada.
+    if corroborate_against:
+        sq = squad or []
+        src_snapped, _ = snap_scorers_to_squad([s for s in corroborate_against if s], sq)
+        kept, dropped = [], []
+        for n in names:
+            n_snap, _ = snap_scorers_to_squad([n], sq)
+            cand = n_snap[0] if n_snap else n
+            if any(same_scorer(cand, s) for s in src_snapped):
+                kept.append(n)
+            else:
+                dropped.append(n)
+        if dropped:
+            log_game_event(
+                db, game,
+                f"IA — descartados (nenhuma fonte citou): {', '.join(dropped)}",
+                phase=phase, api="IA merge", ok=False,
+            )
+        names = kept
+
     log_game_event(
         db, game,
         f"IA — resultado: {', '.join(names) if names else 'vazio'}",
