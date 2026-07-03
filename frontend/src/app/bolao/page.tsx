@@ -61,13 +61,20 @@ type QuickFilter = "today" | "open" | "live" | "finished" | "all";
 
 const stageLabels: Record<string, string> = {
   "group-stage": "Fase de grupos",
-  "round-of-32": "32 avos",
+  "round-of-32": "16 avos de final",
   "round-of-16": "Oitavas",
   "quarter-finals": "Quartas",
   "semi-finals": "Semis",
   "third-place": "Terceiro lugar",
   final: "Final",
 };
+
+// O openfootball manda o venue com o sufixo da chave (ex.: "Los Angeles ## 2A / 2B").
+// Mostra só o nome do local.
+function venueLabel(venue?: string | null): string {
+  const v = (venue ?? "").split("##")[0].trim();
+  return v || "Local a confirmar";
+}
 
 const statusLabels: Record<WorldCupGame["status"], string> = {
   scheduled: "Aberto",
@@ -2074,7 +2081,7 @@ export default function BolaoPage() {
                 )}
 
                 <div className="wc-game-foot">
-                  <span>{game.venue || "Local a confirmar"}</span>
+                  <span>{venueLabel(game.venue)}</span>
                   {(game.bettors ?? []).length > 0 ? (
                     <span
                       className="wc-bettor-stack"
@@ -2167,7 +2174,7 @@ export default function BolaoPage() {
                       </div>
                       <div className="wc-bet-slip-meta">
                         <span>{formatEventDate(game.kickoff_at)}</span>
-                        <span>{game.venue || "Local a confirmar"}</span>
+                        <span>{venueLabel(game.venue)}</span>
                       </div>
                       <div className="wc-bet-slip-pick">
                         <span>

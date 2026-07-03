@@ -1528,8 +1528,12 @@ def parse_openfootball_matchup(matchup: str) -> tuple[str, str, int | None, int 
         return versus_match.group(1).strip(), versus_match.group(2).strip(), None, None
 
     cleaned = re.sub(r"\([^)]*\)", " ", matchup)
-    cleaned = re.sub(r"\ba\.e\.t\.?", " ", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\bpen\.?\s+\d{1,2}-\d{1,2}", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.replace("–", "-").replace("—", "-")  # normaliza traços
+    cleaned = re.sub(r"\ba\.?e\.?t\.?", " ", cleaned, flags=re.IGNORECASE)
+    # disputa de pênaltis em QUALQUER ordem: "3-4 pen." ou "pen. 3-4"
+    cleaned = re.sub(r"\d{1,2}\s*-\s*\d{1,2}\s*pen\.?", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"pen\.?\s*\d{1,2}\s*-\s*\d{1,2}", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[,;]", " ", cleaned)  # vírgula/; que sobra da anotação
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     score_match = re.match(r"^(.+?)\s+(\d{1,2})-(\d{1,2})\s+(.+)$", cleaned)
     if not score_match:
