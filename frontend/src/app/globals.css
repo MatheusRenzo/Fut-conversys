@@ -11368,6 +11368,33 @@ img.team-flag {
   display: block;
 }
 
+/* Palpite de campeã cujo time já foi eliminado: X vermelho na bandeirinha */
+.bolao-pick-chip {
+  position: relative;
+}
+.bolao-pick-chip.eliminated {
+  border-color: rgba(255, 82, 82, 0.5);
+  background: rgba(255, 82, 82, 0.12);
+}
+.bolao-pick-chip.eliminated .team-flag {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.bolao-pick-x {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ff5252;
+  font-weight: 900;
+  font-size: 0.82rem;
+  line-height: 1;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+.wc-person-champion.eliminated { opacity: 0.85; }
+
 .bolao-rank-name {
   display: inline-flex;
   align-items: center;

@@ -220,6 +220,26 @@ def is_bettable_world_cup_game(game: models.WorldCupGame) -> bool:
     return not is_placeholder_world_cup_team(game.home_team) and not is_placeholder_world_cup_team(game.away_team)
 
 
+def world_cup_alive_teams(db: Session) -> set[str]:
+    """Seleções ainda VIVAS na Copa = as que têm algum jogo por vir (agendado/ao vivo)
+    com nome real. Quem só tem jogo encerrado (perdeu no mata-mata ou não passou do
+    grupo) está eliminada — o palpite de campeã nela não vale mais os 10 pts."""
+    alive: set[str] = set()
+    for g in db.query(models.WorldCupGame).filter(
+        models.WorldCupGame.status.in_(("scheduled", "live"))
+    ).all():
+        for team in (g.home_team, g.away_team):
+            if team and not is_placeholder_world_cup_team(team):
+                alive.add(normalize_scorer_name(normalize_world_cup_team(team)))
+    return alive
+
+
+def world_cup_team_eliminated(team: str | None, alive: set[str]) -> bool:
+    if not team:
+        return False
+    return normalize_scorer_name(normalize_world_cup_team(team)) not in alive
+
+
 def world_cup_game_lock_passed(game: models.WorldCupGame) -> bool:
     # Mesma regra do fechamento de palpites: 1h antes do início (ou jogo já começou)
     if (game.status or "scheduled") != "scheduled":
@@ -1352,9 +1372,11 @@ def world_cup_leaderboard_response(db: Session, exclude_game_id: int | None = No
         else {}
     )
     leaderboard = [row for row in leaderboard if users.get(row["user_id"]) is not None]
+    alive = world_cup_alive_teams(db)  # pra marcar palpite de campeã já eliminado
     for index, row in enumerate(leaderboard, start=1):
         row["user"] = user_summary(users[row.pop("user_id")], include_rating=False)
         row["rank"] = index
+        row["champion_eliminated"] = world_cup_team_eliminated(row.get("champion_team"), alive)
 
     # Movimentação = posição ANTES da última rodada menos a posição agora (persistida
     # em wc_rank_movement pelo sync, que roda a cada ciclo). Sobrevive a reload e pega

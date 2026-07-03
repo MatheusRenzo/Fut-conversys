@@ -376,8 +376,12 @@ function BolaoRankingPanel({
                 <span className="bolao-podium2-sub">
                   {entry.exact_scores} exatos · {entry.scorer_hits} ⚽
                   {entry.champion_team && (
-                    <span className="bolao-pick-chip" title={`Campeã: ${teamLabel(entry.champion_team)}`}>
+                    <span
+                      className={`bolao-pick-chip${entry.champion_eliminated ? " eliminated" : ""}`}
+                      title={entry.champion_eliminated ? `${teamLabel(entry.champion_team)} eliminada — não vale +10` : `Campeã: ${teamLabel(entry.champion_team)}`}
+                    >
                       <TeamFlag team={entry.champion_team} />
+                      {entry.champion_eliminated && <span className="bolao-pick-x">✕</span>}
                     </span>
                   )}
                 </span>
@@ -429,8 +433,12 @@ function BolaoRankingPanel({
               <span className="bolao-rank-name">
                 <span className="bolao-rank-fullname">{entry.user.name}</span>
                 {entry.champion_team && (
-                  <span className="bolao-pick-chip" title={`Palpite de campeã: ${teamLabel(entry.champion_team)}`}>
+                  <span
+                    className={`bolao-pick-chip${entry.champion_eliminated ? " eliminated" : ""}`}
+                    title={entry.champion_eliminated ? `${teamLabel(entry.champion_team)} eliminada — não vale +10` : `Palpite de campeã: ${teamLabel(entry.champion_team)}`}
+                  >
                     <TeamFlag team={entry.champion_team} />
+                    {entry.champion_eliminated && <span className="bolao-pick-x">✕</span>}
                   </span>
                 )}
               </span>
@@ -543,11 +551,16 @@ function BolaoPersonModal({
         </div>
 
         {entry.champion_team && (
-          <div className="wc-person-champion">
+          <div className={`wc-person-champion${entry.champion_eliminated ? " eliminated" : ""}`}>
             <Crown size={15} />
             <span>
-              Campeã: <TeamFlag team={entry.champion_team} /> <strong>{teamLabel(entry.champion_team)}</strong>
-              {entry.champion_points > 0 ? ` (+${entry.champion_points} pts)` : ""}
+              Campeã:{" "}
+              <span className={`bolao-pick-chip${entry.champion_eliminated ? " eliminated" : ""}`}>
+                <TeamFlag team={entry.champion_team} />
+                {entry.champion_eliminated && <span className="bolao-pick-x">✕</span>}
+              </span>{" "}
+              <strong>{teamLabel(entry.champion_team)}</strong>
+              {entry.champion_eliminated ? " — eliminada (não vale +10)" : entry.champion_points > 0 ? ` (+${entry.champion_points} pts)` : ""}
             </span>
           </div>
         )}
