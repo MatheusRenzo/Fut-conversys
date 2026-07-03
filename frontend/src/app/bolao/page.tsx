@@ -898,7 +898,7 @@ export default function BolaoPage() {
   const [expandedGameId, setExpandedGameId] = useState<number | null>(null);
   const [editingGameIds, setEditingGameIds] = useState<Record<number, boolean>>({});
   const [syncStatus, setSyncStatus] = useState<WorldCupSyncStatus | null>(null);
-  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [aiInsight, setAiInsight] = useState<{ text: string; gameId: number | null } | null>(null);
   const [syncStatusError, setSyncStatusError] = useState("");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("open");
   const [stageFilter, setStageFilter] = useState("all");
@@ -942,7 +942,7 @@ export default function BolaoPage() {
 
       api
         .worldCupInsight()
-        .then((res) => setAiInsight(res.available ? res.text ?? null : null))
+        .then((res) => setAiInsight(res.available && res.text ? { text: res.text, gameId: res.game_id ?? null } : null))
         .catch(() => null);
     }
 
@@ -1975,10 +1975,10 @@ export default function BolaoPage() {
                   <span>{urgencyLabel(lockMinutes)}</span>
                 </div>
 
-                {isNextScheduled && aiInsight && (
+                {aiInsight && aiInsight.gameId === game.id && (
                   <div className="wc-ai-insight wc-ai-insight-card">
                     <span className="wc-ai-insight-tag"><Sparkles size={12} /> Resenha da IA</span>
-                    <p>{aiInsight}</p>
+                    <p>{aiInsight.text}</p>
                   </div>
                 )}
 
