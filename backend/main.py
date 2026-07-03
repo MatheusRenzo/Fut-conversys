@@ -2746,6 +2746,10 @@ def extract_api_football_scorers(fixture: dict[str, Any]) -> list[str]:
     for event in fixture.get("events") or []:
         if (event.get("type") or "") != "Goal":
             continue
+        # Disputa de pênaltis (shootout) NÃO é gol do jogo — não conta como artilheiro
+        # (a API marca com comments="Penalty Shootout" nos gols min 120+extra)
+        if "shootout" in (event.get("comments") or "").lower():
+            continue
         detail = (event.get("detail") or "").lower()
         # Pênalti perdido não é gol; gol contra não vale como artilheiro
         # (ninguém aposta num jogador pra fazer gol contra)

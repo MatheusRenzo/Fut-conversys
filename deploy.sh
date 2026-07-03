@@ -33,16 +33,16 @@ echo "[1/5] Preparando certificado SSL..."
 chmod +x nginx/install-ssl.sh nginx/generate-selfsigned.sh
 ./nginx/install-ssl.sh
 
-echo "[2/5] Parando containers antigos..."
-docker compose down --remove-orphans 2>/dev/null || true
-
-echo "[3/5] Construindo imagens..."
+# Build ANTES de derrubar: se o build falhar (ex.: instabilidade de rede pra
+# baixar a imagem base), o site CONTINUA no ar — o set -e aborta aqui sem tocar
+# nos containers em execução. Só troca pras imagens novas se o build der certo.
+echo "[2/4] Construindo imagens (site segue no ar durante o build)..."
 docker compose build
 
-echo "[4/5] Subindo serviços..."
-docker compose up -d
+echo "[3/4] Subindo serviços (troca pras imagens novas, sem down prévio)..."
+docker compose up -d --remove-orphans
 
-echo "[5/5] Aguardando serviços ficarem prontos..."
+echo "[4/4] Aguardando serviços ficarem prontos..."
 sleep 8
 
 echo ""
