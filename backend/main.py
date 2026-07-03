@@ -2522,7 +2522,26 @@ def fetch_football_data_results(db: Session | None = None) -> list[dict[str, Any
         away = normalize_world_cup_team(((match.get("awayTeam") or {}).get("name")) or "")
         if not home or not away:
             continue
-        full_time = ((match.get("score") or {}).get("fullTime")) or {}
+        score_obj = match.get("score") or {}
+        full_time = score_obj.get("fullTime") or {}
+        regular = score_obj.get("regularTime") or {}
+        extra = score_obj.get("extraTime") or {}
+        # PROBLEMA: em jogo decidido nos pênaltis a football-data soma a disputa no
+        # fullTime (ex.: 1-1 no jogo + 2-4 nos pênaltis => fullTime 3-5). O PLACAR do
+        # jogo é o tempo normal/prorrogação; a disputa vai pra home/away_penalties.
+        match_home, match_away = full_time.get("home"), full_time.get("away")
+        home_pen = away_pen = None
+        if score_obj.get("duration") == "PENALTY_SHOOTOUT":
+            # placar do jogo = tempo normal + prorrogação (ambos são "delta" na
+            # football-data). O pênalti vem de fullTime - placar (o campo .penalties
+            # da fonte é furado: às vezes vem empatado). fullTime = jogo + pênaltis.
+            rh, ra = regular.get("home"), regular.get("away")
+            if rh is not None and ra is not None:
+                mh = rh + (extra.get("home") or 0)
+                ma = ra + (extra.get("away") or 0)
+                if match_home is not None and match_away is not None:
+                    home_pen, away_pen = match_home - mh, match_away - ma
+                match_home, match_away = mh, ma
         utc_date = match.get("utcDate")
         kickoff = None
         if utc_date:
@@ -2536,8 +2555,10 @@ def fetch_football_data_results(db: Session | None = None) -> list[dict[str, Any
                 "away_team": away,
                 "kickoff_at": kickoff,
                 "status": match.get("status"),
-                "home_score": full_time.get("home"),
-                "away_score": full_time.get("away"),
+                "home_score": match_home,
+                "away_score": match_away,
+                "home_penalties": home_pen,
+                "away_penalties": away_pen,
             }
         )
     return results
@@ -2646,6 +2667,10 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
             was_finished = already_finished
             game.home_score = official_h
             game.away_score = official_a
+            # Disputa de pênaltis (já separada do placar em fetch_football_data_results)
+            if item.get("home_penalties") is not None and item.get("away_penalties") is not None:
+                game.home_penalties = int(item["home_penalties"])
+                game.away_penalties = int(item["away_penalties"])
             game.status = "finished"
             game.halftime = False
             game.end_source = "football-data"  # confirmação oficial de FIM
