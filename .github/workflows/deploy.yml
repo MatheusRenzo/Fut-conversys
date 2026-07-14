@@ -33,7 +33,65 @@ jobs:
           bash deploy.sh 2>&1 | tee deploy.log
           code=${PIPESTATUS[0]}
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          # Anotação de erro na UI do GitHub (aparece no topo da run e no PR)
+          if [ "$code" != "0" ]; then
+            first_error=$(grep -iE "error|failed|fatal" deploy.log | head -1 | cut -c1-180)
+            echo "::error title=Deploy falhou (exit $code)::${first_error:-veja o resumo e o artifact deploy-log}"
+          fi
           exit $code
+
+      # Resumo bonito da run (aba Summary do GitHub): status, commit e, em caso de
+      # falha, os erros extraídos do log + log completo dobrável.
+      - name: Resumo do deploy (Summary)
+        if: always()
+        working-directory: /home/matheusdev/Fut-conversys
+        run: |
+          STATUS="${{ steps.deploy.outcome }}"
+          {
+            if [ "$STATUS" = "success" ]; then
+              echo "# ✅ Deploy concluído — produção atualizada"
+            else
+              echo "# ❌ Deploy FALHOU — o site segue no ar na versão anterior (build-first)"
+            fi
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Commit** | \`$(git rev-parse --short HEAD)\` — $(git log -1 --pretty=%s | head -c 100) |"
+            echo "| **Autor** | $(git log -1 --pretty=%an) |"
+            echo "| **Branch** | ${GITHUB_REF_NAME} |"
+            echo "| **Quando** | $(date -u '+%d/%m/%Y %H:%M UTC') |"
+            echo "| **App** | https://fut.conversys.global:9443/bolao |"
+            echo ""
+            if [ "$STATUS" != "success" ]; then
+              echo "## 🔍 Erros encontrados no log"
+              echo '```'
+              grep -inE "error|failed|fatal|exit code" deploy.log | tail -20 || echo "(nenhuma linha de erro óbvia — veja o log completo abaixo)"
+              echo '```'
+              echo ""
+              echo "<details><summary>📜 Últimas 80 linhas do log completo</summary>"
+              echo ""
+              echo '```'
+              tail -80 deploy.log
+              echo '```'
+              echo "</details>"
+              echo ""
+              echo "> 📎 Log completo anexado como artifact **deploy-log** nesta run."
+            else
+              echo "## 🩺 Saúde pós-deploy"
+              echo '```'
+              tail -12 deploy.log
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Anexar log do deploy (artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-log-run-${{ github.run_number }}
+          path: /home/matheusdev/Fut-conversys/deploy.log
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Resolver destinatário do e-mail
         id: mailto
