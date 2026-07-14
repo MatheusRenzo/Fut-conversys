@@ -12462,25 +12462,47 @@ img.team-flag {
   .wc-game-card.wc-knockout-gold, .wc-fcard.wc-fcard-gold { animation: none; }
 }
 
-/* ===== SEMIFINAL: platina/diamante — aura branco-azulada, um nível acima do ouro ===== */
+/* ===== SEMIFINAL: platina/diamante — aura FORTE, é semifinal de Copa ===== */
 .wc-game-card.wc-ko-semi,
 .wc-fcard.wc-ko-semi {
-  border-color: rgba(190, 226, 255, 0.7) !important;
+  border: 2px solid rgba(205, 234, 255, 0.95) !important;
   background:
-    radial-gradient(ellipse 110% 60% at 50% 0%, rgba(170, 218, 255, 0.2), transparent 62%),
-    linear-gradient(180deg, rgba(170, 218, 255, 0.08), rgba(170, 218, 255, 0.02));
-  animation: wc-ko-plat-pulse 2.4s ease-in-out infinite, wc-ko-gold-float 5s ease-in-out infinite;
+    radial-gradient(ellipse 120% 70% at 50% 0%, rgba(170, 218, 255, 0.34), transparent 64%),
+    radial-gradient(ellipse 90% 55% at 50% 100%, rgba(120, 190, 255, 0.18), transparent 60%),
+    linear-gradient(180deg, rgba(170, 218, 255, 0.14), rgba(170, 218, 255, 0.03));
+  animation: wc-ko-plat-pulse 2s ease-in-out infinite, wc-ko-gold-float 4.5s ease-in-out infinite;
 }
 @keyframes wc-ko-plat-pulse {
-  0%,100% { box-shadow: 0 0 22px rgba(170,218,255,0.28), 0 0 44px rgba(140,190,255,0.12), inset 0 1px 0 rgba(255,255,255,0.18); }
-  50% { box-shadow: 0 0 46px rgba(170,218,255,0.55), 0 0 80px rgba(140,190,255,0.22), inset 0 1px 0 rgba(255,255,255,0.28); }
+  0%,100% { box-shadow: 0 0 34px rgba(180,222,255,0.5), 0 0 75px rgba(140,190,255,0.26), 0 0 120px rgba(120,180,255,0.12), inset 0 1px 0 rgba(255,255,255,0.3); }
+  50% { box-shadow: 0 0 65px rgba(190,228,255,0.85), 0 0 130px rgba(150,200,255,0.45), 0 0 190px rgba(120,180,255,0.22), inset 0 2px 0 rgba(255,255,255,0.45); }
+}
+/* Reflexo de diamante varrendo o card (foil) */
+.wc-game-card.wc-ko-semi::after,
+.wc-fcard.wc-ko-semi::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 30%, rgba(215,240,255,0.28) 46%, rgba(255,255,255,0.42) 50%, rgba(215,240,255,0.28) 54%, transparent 70%);
+  background-size: 260% 100%;
+  animation: wc-ko-plat-shine 3.2s ease-in-out infinite;
+  mix-blend-mode: screen;
+}
+@keyframes wc-ko-plat-shine {
+  0% { background-position: 130% 0; }
+  55% { background-position: -60% 0; }
+  100% { background-position: -60% 0; }
 }
 .wc-ko-semi .wc-ko-banner {
-  background: linear-gradient(90deg, rgba(170,218,255,0.24), rgba(170,218,255,0.05));
-  border-bottom-color: rgba(170,218,255,0.4);
-  color: #d8edff;
+  background: linear-gradient(90deg, rgba(170,218,255,0.42), rgba(150,205,255,0.1));
+  border-bottom: 1px solid rgba(190,228,255,0.65);
+  color: #eaf6ff;
+  text-shadow: 0 0 12px rgba(170,218,255,0.9);
+  letter-spacing: 0.12em;
 }
-.wc-ko-semi .wc-ko-banner svg { color: #a8d8ff; filter: drop-shadow(0 0 7px rgba(170,218,255,0.8)); }
+.wc-ko-semi .wc-ko-banner svg { color: #d5ecff; filter: drop-shadow(0 0 9px rgba(190,228,255,1)); }
+.wc-ko-semi .wc-ko-banner-sub { opacity: 1; color: #cfe9ff; text-shadow: 0 0 10px rgba(170,218,255,0.9); }
 
 /* ===== FINAL: fogo — vermelho/laranja, o card "pegando fogo" ===== */
 .wc-game-card.wc-ko-final,
@@ -12511,6 +12533,7 @@ img.team-flag {
 
 @media (prefers-reduced-motion: reduce) {
   .wc-game-card.wc-ko-semi, .wc-fcard.wc-ko-semi,
+  .wc-game-card.wc-ko-semi::after, .wc-fcard.wc-ko-semi::after,
   .wc-game-card.wc-ko-final, .wc-fcard.wc-ko-final { animation: none; }
 }
 
