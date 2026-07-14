@@ -76,6 +76,19 @@ function venueLabel(venue?: string | null): string {
   return v || "Local a confirmar";
 }
 
+// Efeito do card por fase do mata-mata: ouro (padrão), platina (semis), fogo (final)
+function koStageClass(stage: string): string {
+  if (stage === "final") return " wc-ko-final";
+  if (stage === "semi-finals") return " wc-ko-semi";
+  return "";
+}
+
+function koBannerSub(stage: string): string {
+  if (stage === "final") return "🔥 GRANDE FINAL 🔥";
+  if (stage === "semi-finals") return "✦ SEMIFINAL ✦";
+  return "✦ MATA-MATA ✦";
+}
+
 const statusLabels: Record<WorldCupGame["status"], string> = {
   scheduled: "Aberto",
   live: "Ao vivo",
@@ -786,12 +799,17 @@ function FinishedGameCard({ game, viewerId }: { game: WorldCupGame; viewerId?: n
     game.live_period === "penalties" ? "PÊNALTIS" : game.live_period === "extra-time" ? "PRORROGAÇÃO" : null;
 
   return (
-    <article className={`wc-fcard${finished ? "" : " live"}${game.is_knockout ? " wc-fcard-gold" : ""}`}>
+    <article className={`wc-fcard${finished ? "" : " live"}${game.is_knockout ? ` wc-fcard-gold${koStageClass(game.stage)}` : ""}${game.voided ? " wc-fcard-voided" : ""}`}>
       {game.is_knockout && (
         <div className="wc-ko-banner" aria-hidden="true">
           <Crown size={12} />
           <span>{(stageLabels[game.stage] ?? "Mata-mata").toUpperCase()}</span>
-          <span className="wc-ko-banner-sub">✦ MATA-MATA ✦</span>
+          <span className="wc-ko-banner-sub">{koBannerSub(game.stage)}</span>
+        </div>
+      )}
+      {game.voided && (
+        <div className="wc-voided-banner">
+          <X size={14} /> Jogo invalidado — instabilidade do sistema · ninguém pontua neste jogo
         </div>
       )}
       <div className="wc-fcard-top">
@@ -838,8 +856,8 @@ function FinishedGameCard({ game, viewerId }: { game: WorldCupGame; viewerId?: n
               ⚽ {mine.scorer_guess}{mine.scorer_hit ? " ✓" : ""}
             </span>
           )}
-          <b className={(mine.points ?? 0) > 0 ? "wc-points-badge won" : "wc-points-badge"}>
-            {finished ? ((mine.points ?? 0) > 0 ? `+${mine.points} pts` : "0 pts") : "aguardando"}
+          <b className={(mine.points ?? 0) > 0 && !game.voided ? "wc-points-badge won" : "wc-points-badge"}>
+            {game.voided ? "não vale" : finished ? ((mine.points ?? 0) > 0 ? `+${mine.points} pts` : "0 pts") : "aguardando"}
           </b>
         </div>
       )}
@@ -1908,7 +1926,7 @@ export default function BolaoPage() {
                   hasBet ? "has-bet" : "needs-bet",
                   isNextScheduled ? "is-next" : "",
                   isExpanded ? "expanded" : "collapsed",
-                  game.is_knockout ? "wc-knockout-gold" : "",
+                  game.is_knockout ? `wc-knockout-gold${koStageClass(game.stage)}` : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
@@ -1919,7 +1937,7 @@ export default function BolaoPage() {
                   <div className="wc-ko-banner" aria-hidden="true">
                     <Crown size={13} />
                     <span>{(stageLabels[game.stage] ?? "Mata-mata").toUpperCase()}</span>
-                    <span className="wc-ko-banner-sub">✦ MATA-MATA ✦</span>
+                    <span className="wc-ko-banner-sub">{koBannerSub(game.stage)}</span>
                   </div>
                 )}
                 <button

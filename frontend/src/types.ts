@@ -237,6 +237,7 @@ export type WorldCupGame = {
   home_penalties?: number | null;
   away_penalties?: number | null;
   live_period?: "regular" | "extra-time" | "penalties" | null;
+  voided?: boolean;
   is_knockout?: boolean;
   scorers?: string | null;
   source?: string | null;

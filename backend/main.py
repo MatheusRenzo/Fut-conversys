@@ -157,6 +157,10 @@ WORLD_CUP_IDLE_INTERVAL = max(120, int(os.getenv("WORLD_CUP_SYNC_INTERVAL_SECOND
 # Schedule (openfootball/football-data) revalida no máximo a cada N segundos
 WORLD_CUP_SCHEDULE_MIN_GAP = max(120, int(os.getenv("WORLD_CUP_SCHEDULE_MIN_GAP", "300")))
 BOARD_LIVE_SCORE_GAP = max(10, int(os.getenv("BOARD_LIVE_SCORE_GAP", "12")))
+# Confirmação final (paga) tenta no máximo a cada N segundos POR JOGO — sem isso,
+# um fixture que a API-Football ainda não marcou como FT era reconsultado a cada
+# ciclo de 15s e devorava a cota (houve jogo com 103 chamadas).
+API_FOOTBALL_FIM_RETRY_GAP = max(60, int(os.getenv("API_FOOTBALL_FIM_RETRY_GAP", "300")))
 # Wikipedia usa nomes diferentes do openfootball para algumas seleções
 WIKIPEDIA_TEAM_ALIASES = {
     "United States": "USA",
@@ -594,6 +598,7 @@ def ensure_schema() -> None:
             "home_penalties": "INTEGER",
             "away_penalties": "INTEGER",
             "live_period": "VARCHAR",
+            "voided": "BOOLEAN DEFAULT FALSE",
             "finished_at": "TIMESTAMP",
             "reconfirmed": "BOOLEAN DEFAULT FALSE",
             "created_at": "TIMESTAMP",
@@ -1209,6 +1214,14 @@ def game_scorer_names(game: models.WorldCupGame) -> list[str]:
 
 
 def score_world_cup_game(game: models.WorldCupGame) -> None:
+    # Jogo invalidado (ex.: instabilidade do sistema): ninguém pontua nele
+    if game.voided:
+        for prediction in game.predictions:
+            prediction.points = 0
+            prediction.scorer_hit = False
+            prediction.status = "voided"
+            prediction.updated_at = datetime.utcnow()
+        return
     scorers = game_scorer_names(game)
     for prediction in game.predictions:
         points = world_cup_prediction_points(
@@ -1272,6 +1285,7 @@ def world_cup_game_response(game: models.WorldCupGame, user: models.User | None 
         "home_penalties": game.home_penalties,
         "away_penalties": game.away_penalties,
         "live_period": game.live_period,
+        "voided": bool(game.voided),
         "is_knockout": (game.stage or "group-stage") != "group-stage",
         "scorers": game.scorers,
         "source": game.source,
@@ -1318,12 +1332,18 @@ def world_cup_leaderboard_response(db: Session, exclude_game_id: int | None = No
             models.WorldCupGame.away_penalties,
         ).all()
     }
+    voided_ids = {
+        gid for (gid,) in db.query(models.WorldCupGame.id).filter(models.WorldCupGame.voided.is_(True)).all()
+    }
 
     predictions = db.query(models.WorldCupPrediction).all()
     for prediction in predictions:
         # reconstrução "antes da rodada": ignora o jogo excluído por completo
         # (pontos E desempates), pra calcular a posição real anterior
         if exclude_game_id is not None and prediction.game_id == exclude_game_id:
+            continue
+        # Jogo invalidado: o palpite não conta pra nada (pontos nem desempates)
+        if prediction.game_id in voided_ids:
             continue
         row = rows.setdefault(prediction.user_id, empty_row())
         row["user_id"] = prediction.user_id
@@ -3146,6 +3166,20 @@ def apply_api_football_live(db: Session) -> dict[str, Any]:
     pending += [g for g in stuck_live if g.id not in seen and g.api_fixture_id] if has_keys else []
 
     for game in pending:
+        # Backoff por jogo: a API-Football pode demorar minutos pra marcar o fixture
+        # como encerrado; sem esse gap a consulta repetia a cada ciclo (15s) e
+        # estourava a cota do dia num jogo só.
+        raw_try = get_app_setting(db, f"wc_af_fim_try_{game.id}")
+        if raw_try:
+            try:
+                last_try = datetime.fromisoformat(raw_try)
+                if last_try.tzinfo:
+                    last_try = last_try.astimezone(timezone.utc).replace(tzinfo=None)
+                if (now - last_try).total_seconds() < API_FOOTBALL_FIM_RETRY_GAP:
+                    continue
+            except ValueError:
+                pass
+        set_app_setting(db, f"wc_af_fim_try_{game.id}", datetime.now(timezone.utc).isoformat())
         log_game_event(db, game, "Consulta API paga — confirmação final", phase="fim", api="API-Football")
         payload = call(f"{API_FOOTBALL_FIXTURE_URL}?id={game.api_fixture_id}")
         if payload is None:
