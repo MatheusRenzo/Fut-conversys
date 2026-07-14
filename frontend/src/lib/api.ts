@@ -211,6 +211,23 @@ export const api = {
     apiFetch<{ available: boolean; game_id?: number | null; matchup?: string | null; text?: string | null }>(
       "/api/world-cup/insight",
     ),
+  worldCupRetro: () =>
+    apiFetch<{
+      participants: UserProfile[];
+      top3: WorldCupLeaderboardEntry[];
+      stats: {
+        participants: number;
+        predictions: number;
+        champion_picks: number;
+        games_finished: number;
+        goals: number;
+        exact_scores: number;
+        scorer_hits: number;
+        started_at?: string | null;
+        ends_at?: string | null;
+      };
+      api_calls: Record<string, number>;
+    }>("/api/world-cup/retrospective"),
   submitWorldCupChampionPick: (team: string) =>
     apiFetch<WorldCupChampion>("/api/world-cup/champion-pick", {
       method: "POST",

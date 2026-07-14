@@ -13783,3 +13783,106 @@ img.team-flag {
   box-shadow: 0 0 0 3px rgba(0, 207, 180, 0.12);
 }
 .global-search-field svg { color: var(--brand-cyan); }
+
+/* ===================== RETROSPECTIVA DO BOLÃO (tela de agradecimento) ===================== */
+.retro-page {
+  min-height: 100vh;
+  padding: 48px 20px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 34px;
+  background:
+    radial-gradient(ellipse 80% 45% at 50% 0%, rgba(255, 205, 70, 0.14), transparent 60%),
+    radial-gradient(ellipse 70% 40% at 15% 100%, rgba(0, 207, 180, 0.1), transparent 60%),
+    radial-gradient(ellipse 70% 40% at 85% 100%, rgba(0, 90, 255, 0.08), transparent 60%),
+    #060d14;
+  color: #eef4fb;
+}
+.retro-loading { margin: auto; opacity: 0.7; }
+.retro-hero { text-align: center; max-width: 760px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.retro-logo { width: 110px; height: auto; filter: drop-shadow(0 0 22px rgba(255, 205, 70, 0.35)); }
+.retro-title {
+  margin: 4px 0 0;
+  font-size: clamp(2rem, 6vw, 3.2rem);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  background: linear-gradient(120deg, #ffe08a 15%, #f2b53b 40%, #fff3c4 55%, #f2b53b 75%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 40px rgba(255, 205, 70, 0.25);
+}
+.retro-subtitle { margin: 0; font-size: 1rem; color: #9fb3c8; letter-spacing: 0.14em; text-transform: uppercase; }
+.retro-subtitle strong { color: var(--brand-cyan); }
+.retro-thanks { margin: 10px 0 0; font-size: 1.06rem; line-height: 1.65; color: #cfdcea; }
+
+.retro-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 220px));
+  gap: 14px;
+  width: 100%;
+  max-width: 760px;
+}
+@media (max-width: 640px) { .retro-grid { grid-template-columns: repeat(2, 1fr); } }
+.retro-stat {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 18px 10px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 205, 70, 0.28);
+  background: linear-gradient(180deg, rgba(255, 205, 70, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  text-align: center;
+}
+.retro-stat svg { color: #ffd24a; }
+.retro-stat strong { font-size: 1.9rem; font-weight: 900; color: #ffe08a; line-height: 1.1; }
+.retro-stat span { font-size: 0.78rem; color: #9fb3c8; }
+
+.retro-engine { width: 100%; max-width: 760px; text-align: center; }
+.retro-engine h2, .retro-podium h2, .retro-wall h2 {
+  font-size: 1.05rem; letter-spacing: 0.1em; text-transform: uppercase; color: #ffd24a; margin: 0 0 6px;
+}
+.retro-engine-copy { margin: 0 0 12px; color: #9fb3c8; font-size: 0.92rem; }
+.retro-engine-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+@media (max-width: 640px) { .retro-engine-grid { grid-template-columns: repeat(2, 1fr); } }
+.retro-engine-grid div {
+  padding: 12px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 207, 180, 0.25);
+  background: rgba(0, 207, 180, 0.06);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.retro-engine-grid strong { color: var(--brand-cyan); font-size: 1.25rem; font-weight: 800; }
+.retro-engine-grid span { font-size: 0.7rem; color: #9fb3c8; }
+
+.retro-podium { text-align: center; width: 100%; max-width: 760px; }
+.retro-podium-row { display: flex; justify-content: center; align-items: flex-end; gap: 18px; margin-top: 14px; }
+.retro-podium-step {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 16px 20px 12px; border-radius: 16px; position: relative;
+  border: 1px solid rgba(210, 220, 235, 0.3);
+  background: rgba(255, 255, 255, 0.03);
+}
+.retro-podium-step.place-1 {
+  order: 2; padding-bottom: 26px;
+  border-color: rgba(255, 205, 70, 0.6);
+  background: linear-gradient(180deg, rgba(255, 205, 70, 0.14), rgba(255, 205, 70, 0.03));
+  box-shadow: 0 0 30px rgba(255, 205, 70, 0.28);
+}
+.retro-podium-step.place-2 { order: 1; }
+.retro-podium-step.place-3 { order: 3; border-color: rgba(220, 150, 90, 0.5); }
+.retro-podium-crown { color: #ffd24a; filter: drop-shadow(0 0 8px rgba(255, 205, 70, 0.9)); margin-bottom: -4px; }
+.retro-podium-step strong { font-size: 0.95rem; }
+.retro-podium-step span { color: #ffe08a; font-weight: 800; font-size: 0.85rem; }
+
+.retro-wall { width: 100%; max-width: 860px; text-align: center; }
+.retro-wall-grid {
+  margin-top: 14px;
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 14px 18px;
+}
+.retro-wall-item { display: flex; flex-direction: column; align-items: center; gap: 5px; margin: 0; }
+.retro-wall-item .avatar { box-shadow: 0 0 0 2px rgba(255, 205, 70, 0.45), 0 0 14px rgba(255, 205, 70, 0.18); border-radius: 999px; }
+.retro-wall-item figcaption { font-size: 0.72rem; color: #cfdcea; }
+
+.retro-footer { text-align: center; color: #9fb3c8; font-size: 0.95rem; }
+.retro-footer strong { color: var(--brand-cyan); }

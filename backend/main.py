@@ -5188,6 +5188,65 @@ def list_world_cup_games(
     return {"games": [world_cup_game_response(game, user) for game in games]}
 
 
+@app.get("/api/world-cup/retrospective")
+def world_cup_retrospective(
+    db: Session = Depends(get_db),
+    _user: models.User = Depends(get_current_user),
+):
+    """Números da jornada do bolão (pra tela de retrospectiva/agradecimento):
+    totais de palpites/gols/participantes e chamadas por fonte de dados."""
+    from sqlalchemy import text as sa_text
+
+    finished = (
+        db.query(models.WorldCupGame)
+        .filter(models.WorldCupGame.status == "finished")
+        .all()
+    )
+    total_goals = sum((g.home_score or 0) + (g.away_score or 0) for g in finished)
+    exact = 0
+    scorer_hits = 0
+    for g in finished:
+        for p in g.predictions:
+            if p.status == "scored" and p.home_score == g.home_score and p.away_score == g.away_score:
+                exact += 1
+            if p.scorer_hit:
+                scorer_hits += 1
+
+    # Chamadas por fonte: soma os contadores diários calls_<fonte>_<data>
+    api_calls: dict[str, int] = {}
+    for key, value in db.execute(sa_text("SELECT key, value FROM app_settings WHERE key LIKE 'calls_%'")).fetchall():
+        match = re.match(r"^calls_([a-z_]+)_(\d{8})$", key or "")
+        if match and (value or "").lstrip("-").isdigit():
+            api_calls[match.group(1)] = api_calls.get(match.group(1), 0) + int(value)
+    api_calls.pop("_teste_counter", None)
+
+    # Participantes = quem palpitou em ao menos 1 jogo, ordenados pelo ranking
+    lb = world_cup_leaderboard_response(db)
+    rank_order = {row["user"]["id"]: row["rank"] for row in lb}
+    participant_ids = [uid for (uid,) in db.query(models.WorldCupPrediction.user_id).distinct().all()]
+    users = db.query(models.User).filter(models.User.id.in_(participant_ids)).all() if participant_ids else []
+    users.sort(key=lambda u: (rank_order.get(u.id, 999), (u.display_name or u.name or "").lower()))
+    first_game = min((g.kickoff_at for g in finished if g.kickoff_at), default=None)
+    last_game = db.query(models.WorldCupGame).order_by(models.WorldCupGame.kickoff_at.desc()).first()
+
+    return {
+        "participants": [user_summary(u, include_rating=False) for u in users],
+        "top3": lb[:3],
+        "stats": {
+            "participants": len(participant_ids),
+            "predictions": db.query(models.WorldCupPrediction).count(),
+            "champion_picks": db.query(models.WorldCupChampionPick).count(),
+            "games_finished": len(finished),
+            "goals": total_goals,
+            "exact_scores": exact,
+            "scorer_hits": scorer_hits,
+            "started_at": iso_utc(first_game) if first_game else None,
+            "ends_at": iso_utc(last_game.kickoff_at) if last_game and last_game.kickoff_at else None,
+        },
+        "api_calls": api_calls,
+    }
+
+
 @app.get("/api/world-cup/insight")
 def world_cup_insight(
     db: Session = Depends(get_db),
