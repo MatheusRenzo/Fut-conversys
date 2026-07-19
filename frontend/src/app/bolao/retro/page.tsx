@@ -61,7 +61,7 @@ export default function BolaoRetroPage() {
         <p className="retro-subtitle">Uma jornada <strong>Conversys</strong> · IT Solutions</p>
         <p className="retro-thanks">
           Obrigado a todos que participaram, palpitaram, torceram e brincaram com a gente.
-          Do primeiro apito à grande final — esse bolão é de vocês. 💚⚽
+          Do primeiro apito à grande final — esse bolão é de vocês. 💙⚽
         </p>
       </header>
 
@@ -130,7 +130,7 @@ export default function BolaoRetroPage() {
 
       {data.top3.length > 0 && (
         <section className="retro-podium">
-          <h2>O pódio até aqui</h2>
+          <h2>O pódio final</h2>
           <div className="retro-podium-row">
             {data.top3.map((entry) => (
               <div className={`retro-podium-step place-${entry.rank}`} key={entry.user.id}>
@@ -158,7 +158,7 @@ export default function BolaoRetroPage() {
 
       <footer className="retro-footer">
         <p>
-          Feito com ⚽ e 💚 pela <strong>Conversys IT Solutions</strong> — rumo à grande final!
+          Feito com ⚽ e 💙 pela <strong>Conversys IT Solutions</strong>.
         </p>
       </footer>
     </div>
