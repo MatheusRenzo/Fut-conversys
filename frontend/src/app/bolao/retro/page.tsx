@@ -169,9 +169,12 @@ export default function BolaoRetroPage() {
       </section>
 
       <section className="retro2-engine">
-        <h2>O motor por trás do bolão</h2>
+        <h2>Zero planilha. 100% ao vivo.</h2>
         <p className="retro2-engine-copy">
-          <strong>{fmt(totalCalls)}</strong> chamadas de dados mantiveram placar, gols e artilheiros em tempo real:
+          Fugimos do bolão clássico de planilha: aqui o placar, os gols e os artilheiros entraram
+          <strong> em tempo real</strong>, com <strong>{fmt(totalCalls)}</strong> chamadas de dados em{" "}
+          <strong>4 APIs esportivas + IA generativa</strong> cruzando e validando cada lance — a pontuação
+          caía sozinha, segundos depois do apito.
         </p>
         <div className="retro2-engine-grid">
           <div><Radio size={17} /><strong>{fmt(calls.football_data ?? 0)}</strong><span>placar ao vivo</span></div>
@@ -191,6 +194,15 @@ export default function BolaoRetroPage() {
             </figure>
           ))}
         </div>
+      </section>
+
+      <section className="retro2-ceo">
+        <Trophy size={22} />
+        <p>
+          E um agradecimento especial ao nosso <strong>CEO</strong>, que abraçou a ideia e{" "}
+          <strong>investiu nos prêmios</strong> — o combustível que fez todo mundo palpitar, zoar no grupo
+          e disputar cada rodada até o último jogo da Copa. 🏆💙
+        </p>
       </section>
 
       <footer className="retro2-footer">

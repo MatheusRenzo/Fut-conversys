@@ -14325,3 +14325,17 @@ img.team-flag {
   .retro2-spot, .retro2-sparkles i, .retro2-ring, .retro2-ring .retro2-step-avatar,
   .retro2-crown, .retro2-step, .retro2-step-block.gold, .retro2-champ-name { animation: none; }
 }
+
+/* Agradecimento ao CEO (prêmios) */
+.retro2-ceo {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; max-width: 760px;
+  padding: 18px 24px; border-radius: 18px;
+  border: 1px solid rgba(255, 210, 74, 0.45);
+  background: linear-gradient(90deg, rgba(0, 90, 255, 0.12), rgba(255, 205, 70, 0.08));
+  box-shadow: 0 0 26px rgba(0, 90, 255, 0.18);
+  animation: retro2-rise 0.7s ease 0.55s both;
+}
+.retro2-ceo svg { color: #ffd24a; flex: none; filter: drop-shadow(0 0 8px rgba(255, 205, 70, 0.8)); }
+.retro2-ceo p { margin: 0; font-size: 0.97rem; line-height: 1.6; color: #dbe7f3; }
+.retro2-ceo strong { color: #ffe08a; }
