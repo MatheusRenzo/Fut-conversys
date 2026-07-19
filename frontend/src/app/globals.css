@@ -14036,3 +14036,44 @@ img.team-flag {
   .champ-overlay, .champ-rays, .champ-confetti span, .champ-card, .champ-crown,
   .champ-avatar, .champ-name, .champ-runner, .champ-close, .champ-replay { animation: none; }
 }
+
+/* ===== Retrospectiva: TEMA OFICIAL CONVERSYS (navy/azul/ciano/verde da marca) ===== */
+.retro-page {
+  background:
+    radial-gradient(ellipse 85% 50% at 50% 0%, rgba(0, 90, 255, 0.17), transparent 60%),
+    radial-gradient(ellipse 70% 40% at 12% 100%, rgba(0, 207, 180, 0.13), transparent 60%),
+    radial-gradient(ellipse 70% 40% at 88% 100%, rgba(97, 162, 41, 0.11), transparent 60%),
+    linear-gradient(180deg, #041e42 0%, #051c2c 55%, #060d14 100%);
+}
+.retro-logo { filter: drop-shadow(0 0 24px rgba(0, 207, 180, 0.5)); }
+.retro-title {
+  background: linear-gradient(115deg, #00cfb4 10%, #7eb8ff 36%, #ffffff 52%, #4d8dff 70%, #00cfb4 95%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 0 44px rgba(0, 122, 255, 0.35);
+}
+.retro-stat { border-color: rgba(0, 207, 180, 0.32); background: linear-gradient(180deg, rgba(0, 90, 255, 0.11), rgba(0, 207, 180, 0.03)); }
+.retro-stat svg { color: #00cfb4; }
+.retro-stat strong { color: #fff; text-shadow: 0 0 16px rgba(0, 207, 180, 0.55); }
+.retro-engine h2, .retro-podium h2, .retro-wall h2 { color: #00cfb4; }
+.retro-wall-item .avatar { box-shadow: 0 0 0 2px rgba(0, 207, 180, 0.6), 0 0 14px rgba(0, 122, 255, 0.28); }
+
+/* Campeões da jornada — aqui sim, ouro de troféu */
+.retro-champs { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 760px; }
+.retro-champ-card {
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  padding: 18px 34px; border-radius: 18px; text-align: center; min-width: 220px;
+}
+.retro-champ-card.cup { border: 1px solid rgba(0, 207, 180, 0.5); background: rgba(0, 207, 180, 0.08); }
+.retro-champ-card.cup .team-flag { width: 46px; height: 32px; border-radius: 5px; box-shadow: 0 0 18px rgba(0, 207, 180, 0.45); }
+.retro-champ-card.winner {
+  border: 2px solid rgba(255, 205, 70, 0.8);
+  background: linear-gradient(180deg, rgba(255, 205, 70, 0.15), rgba(255, 205, 70, 0.03));
+  box-shadow: 0 0 34px rgba(255, 205, 70, 0.35);
+  animation: bolao-gold-pulse 2.4s ease-in-out infinite;
+}
+.retro-champ-card.winner svg { color: #ffd24a; filter: drop-shadow(0 0 8px rgba(255, 205, 70, 0.9)); }
+.retro-champ-card.winner .avatar { box-shadow: 0 0 0 3px rgba(255, 205, 70, 0.9), 0 0 22px rgba(255, 205, 70, 0.5); border-radius: 999px; }
+.retro-champ-tag { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #9fb3c8; }
+.retro-champ-card.winner .retro-champ-tag { color: #ffd24a; }
+.retro-champ-card strong { font-size: 1.08rem; }
+.retro-champ-pts { color: #ffe08a; font-weight: 800; font-size: 0.9rem; }

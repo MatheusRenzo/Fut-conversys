@@ -214,6 +214,7 @@ export const api = {
   worldCupRetro: () =>
     apiFetch<{
       participants: UserProfile[];
+      cup_champion?: string | null;
       top3: WorldCupLeaderboardEntry[];
       stats: {
         participants: number;

@@ -4,11 +4,14 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Crown, Goal, Sparkles, Target, Trophy, Users, Zap } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { TeamFlag } from "@/components/TeamFlag";
 import { api } from "@/lib/api";
+import { teamLabel } from "@/lib/teams";
 import type { UserProfile, WorldCupLeaderboardEntry } from "@/types";
 
 type RetroData = {
   participants: UserProfile[];
+  cup_champion?: string | null;
   top3: WorldCupLeaderboardEntry[];
   stats: {
     participants: number;
@@ -61,6 +64,23 @@ export default function BolaoRetroPage() {
           Do primeiro apito à grande final — esse bolão é de vocês. 💚⚽
         </p>
       </header>
+
+      {data.cup_champion && data.top3[0] && (
+        <section className="retro-champs">
+          <div className="retro-champ-card cup">
+            <span className="retro-champ-tag">Campeã da Copa</span>
+            <TeamFlag team={data.cup_champion} />
+            <strong>{teamLabel(data.cup_champion)}</strong>
+          </div>
+          <div className="retro-champ-card winner">
+            <Crown size={20} />
+            <span className="retro-champ-tag">Campeão do Bolão</span>
+            <Avatar size="md" user={data.top3[0].user} />
+            <strong>{data.top3[0].user.name}</strong>
+            <span className="retro-champ-pts">{data.top3[0].points} pts</span>
+          </div>
+        </section>
+      )}
 
       <section className="retro-grid">
         <div className="retro-stat">

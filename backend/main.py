@@ -5274,6 +5274,7 @@ def world_cup_retrospective(
 
     return {
         "participants": [user_summary(u, include_rating=False) for u in users],
+        "cup_champion": get_app_setting(db, "world_cup_champion"),
         "top3": lb[:3],
         "stats": {
             "participants": len(participant_ids),
