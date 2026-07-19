@@ -14200,3 +14200,128 @@ img.team-flag {
 @media (prefers-reduced-motion: reduce) {
   .retro2-orbs span, .retro2-title, .retro2-champ, .retro2-stat, .retro2-wall-item { animation: none; }
 }
+
+/* ===== Retro v2: PALCO DOS CAMPEÕES — pódio de verdade, cara Conversys ===== */
+.retro2-stage { width: 100%; max-width: 900px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+
+/* Faixa da campeã da Copa */
+.retro2-cup-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 26px; border-radius: 999px;
+  border: 1px solid rgba(0, 207, 180, 0.55);
+  background: linear-gradient(90deg, rgba(0, 90, 255, 0.18), rgba(0, 207, 180, 0.12));
+  box-shadow: 0 0 24px rgba(0, 207, 180, 0.25);
+  animation: retro2-rise 0.7s ease 0.35s both;
+}
+.retro2-cup-tag { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase; color: #00cfb4; }
+.retro2-cup-banner .team-flag { width: 30px; height: 21px; border-radius: 4px; box-shadow: 0 0 12px rgba(0, 207, 180, 0.5); }
+.retro2-cup-banner strong { font-size: 1.05rem; }
+
+/* Arena com holofote girando */
+.retro2-arena { position: relative; width: 100%; display: flex; justify-content: center; padding: 26px 0 0; }
+.retro2-spot {
+  position: absolute; inset: -60px -10% -20px;
+  background: repeating-conic-gradient(from 0deg at 50% 62%, rgba(0, 122, 255, 0.13) 0deg 9deg, transparent 9deg 26deg, rgba(0, 207, 180, 0.09) 26deg 34deg, transparent 34deg 52deg);
+  -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 60%, black 0%, transparent 68%);
+  mask-image: radial-gradient(ellipse 60% 55% at 50% 60%, black 0%, transparent 68%);
+  animation: retro2-spot-spin 30s linear infinite;
+  pointer-events: none;
+}
+@keyframes retro2-spot-spin { to { transform: rotate(360deg); } }
+
+/* Sparkles cintilando ao redor do campeão */
+.retro2-sparkles { position: absolute; inset: 0; pointer-events: none; }
+.retro2-sparkles i {
+  position: absolute; font-style: normal; color: #7eb8ff; opacity: 0;
+  animation: retro2-twinkle 2.6s ease-in-out infinite;
+  text-shadow: 0 0 10px rgba(0, 122, 255, 0.9);
+  font-size: 0.9rem;
+}
+.retro2-sparkles i:nth-child(1) { left: 24%; top: 12%; animation-delay: 0s; color: #ffd24a; }
+.retro2-sparkles i:nth-child(2) { left: 70%; top: 8%; animation-delay: 0.5s; }
+.retro2-sparkles i:nth-child(3) { left: 82%; top: 34%; animation-delay: 1s; color: #00cfb4; }
+.retro2-sparkles i:nth-child(4) { left: 14%; top: 40%; animation-delay: 1.4s; }
+.retro2-sparkles i:nth-child(5) { left: 38%; top: 4%; animation-delay: 1.9s; color: #00cfb4; }
+.retro2-sparkles i:nth-child(6) { left: 60%; top: 26%; animation-delay: 2.2s; color: #ffd24a; }
+.retro2-sparkles i:nth-child(7) { left: 8%; top: 16%; animation-delay: 0.8s; }
+.retro2-sparkles i:nth-child(8) { left: 90%; top: 14%; animation-delay: 1.6s; }
+@keyframes retro2-twinkle { 0%,100% { opacity: 0; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.25); } }
+
+/* Pódio: degraus 2º · 1º · 3º */
+.retro2-podium { display: flex; align-items: flex-end; justify-content: center; gap: 14px; position: relative; z-index: 2; }
+.retro2-step { display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; }
+.retro2-step.place-2 { animation: retro2-rise 0.7s ease 0.55s both; }
+.retro2-step.place-3 { animation: retro2-rise 0.7s ease 0.7s both; }
+.retro2-step.place-1 { animation: retro2-rise 0.8s cubic-bezier(0.25, 1.2, 0.4, 1) 0.4s both; position: relative; }
+
+/* Anel Conversys girando no campeão (azul -> ciano -> ouro) */
+.retro2-ring {
+  padding: 4px; border-radius: 999px;
+  background: conic-gradient(from 0deg, #005aff, #00cfb4, #ffd24a, #00cfb4, #005aff);
+  animation: retro2-ring-spin 3.2s linear infinite;
+  box-shadow: 0 0 34px rgba(0, 122, 255, 0.55), 0 0 70px rgba(0, 207, 180, 0.3);
+}
+@keyframes retro2-ring-spin { to { transform: rotate(360deg); } }
+.retro2-ring .retro2-step-avatar { animation: retro2-ring-unspin 3.2s linear infinite; }
+@keyframes retro2-ring-unspin { to { transform: rotate(-360deg); } }
+
+.retro2-step-avatar { border-radius: 999px; display: flex; }
+.retro2-step-avatar.gold .avatar { box-shadow: 0 0 0 3px rgba(4, 30, 66, 0.9); border-radius: 999px; }
+.retro2-step-avatar.silver .avatar { box-shadow: 0 0 0 3px rgba(210, 222, 238, 0.85), 0 0 22px rgba(180, 205, 235, 0.45); border-radius: 999px; }
+.retro2-step-avatar.bronze .avatar { box-shadow: 0 0 0 3px rgba(222, 148, 90, 0.85), 0 0 22px rgba(222, 148, 90, 0.4); border-radius: 999px; }
+
+.retro2-crown {
+  color: #ffd24a; margin-bottom: -6px; z-index: 3;
+  filter: drop-shadow(0 0 12px rgba(255, 205, 70, 1));
+  animation: retro2-crown-bob 2.4s ease-in-out infinite;
+}
+@keyframes retro2-crown-bob { 0%,100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-7px) rotate(3deg); } }
+
+.retro2-step-name { font-size: 0.95rem; }
+.retro2-champ-name {
+  font-size: 1.35rem; font-weight: 900; line-height: 1.15; max-width: 250px;
+  background: linear-gradient(110deg, #ffffff 25%, #9fd0ff 50%, #ffffff 75%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: retro2-title-shine 3.4s linear 1.4s infinite;
+}
+.retro2-step-pts { font-weight: 800; font-size: 0.9rem; color: #9fd0ff; }
+.retro2-step-pts.gold { color: #ffe08a; font-size: 1.12rem; text-shadow: 0 0 16px rgba(255, 205, 70, 0.7); }
+
+/* Blocos do pódio: azul Conversys com brilho de vidro */
+.retro2-step-block {
+  width: 118px; margin-top: 8px; border-radius: 12px 12px 6px 6px;
+  display: flex; align-items: flex-start; justify-content: center; padding-top: 8px;
+  background: linear-gradient(180deg, rgba(0, 122, 255, 0.5), rgba(4, 30, 66, 0.85));
+  border: 1px solid rgba(126, 184, 255, 0.5); border-bottom: none;
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.28), 0 -6px 30px rgba(0, 122, 255, 0.25);
+}
+.retro2-step-block span {
+  font-weight: 900; font-size: 1.5rem;
+  background: linear-gradient(180deg, #fff, rgba(255, 255, 255, 0.25));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.place-1 .retro2-step-block { height: 104px; width: 150px; }
+.place-2 .retro2-step-block { height: 70px; }
+.place-3 .retro2-step-block { height: 52px; }
+.retro2-step-block.gold {
+  background: linear-gradient(180deg, rgba(255, 205, 70, 0.5), rgba(4, 30, 66, 0.9));
+  border-color: rgba(255, 215, 94, 0.7);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.4), 0 -8px 40px rgba(255, 205, 70, 0.3);
+  animation: retro2-block-glow 2.4s ease-in-out infinite;
+}
+@keyframes retro2-block-glow {
+  0%,100% { box-shadow: inset 0 2px 0 rgba(255,255,255,0.4), 0 -8px 36px rgba(255,205,70,0.28); }
+  50% { box-shadow: inset 0 2px 0 rgba(255,255,255,0.5), 0 -10px 60px rgba(255,205,70,0.5); }
+}
+
+@media (max-width: 560px) {
+  .retro2-podium { gap: 8px; }
+  .retro2-step-block { width: 92px; }
+  .place-1 .retro2-step-block { width: 116px; }
+  .retro2-champ-name { font-size: 1.1rem; max-width: 180px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .retro2-spot, .retro2-sparkles i, .retro2-ring, .retro2-ring .retro2-step-avatar,
+  .retro2-crown, .retro2-step, .retro2-step-block.gold, .retro2-champ-name { animation: none; }
+}

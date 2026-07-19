@@ -108,35 +108,54 @@ export default function BolaoRetroPage() {
       </header>
 
       {data.cup_champion && winner && (
-        <section className="retro2-champs">
-          <div className="retro2-champ cup">
-            <span className="retro2-champ-tag">Campeã da Copa</span>
+        <section className="retro2-stage">
+          <div className="retro2-cup-banner">
+            <span className="retro2-cup-tag">Campeã da Copa</span>
             <TeamFlag team={data.cup_champion} />
             <strong>{teamLabel(data.cup_champion)}</strong>
           </div>
-          <div className="retro2-champ winner">
-            <Crown className="retro2-champ-crown" size={30} />
-            <span className="retro2-champ-tag">Campeão do Bolão</span>
-            <div className="retro2-champ-avatar">
-              <Avatar size="lg" user={winner.user} />
+
+          <div className="retro2-arena">
+            <div aria-hidden="true" className="retro2-spot" />
+            <div aria-hidden="true" className="retro2-sparkles">
+              <i>✦</i><i>✦</i><i>✦</i><i>✦</i><i>✦</i><i>✦</i><i>✦</i><i>✦</i>
             </div>
-            <strong className="retro2-champ-name">{winner.user.name}</strong>
-            <span className="retro2-champ-pts">{winner.points} pts</span>
-            <span className="retro2-champ-note">decidido no último jogo da Copa 🔥</span>
-          </div>
-          {data.top3.length > 1 && (
-            <div className="retro2-champ podium-mini">
-              <span className="retro2-champ-tag">Pódio</span>
-              {data.top3.slice(1).map((r) => (
-                <div className="retro2-podium-mini-row" key={r.user.id}>
-                  <span className="retro2-medal">{r.rank}º</span>
-                  <Avatar size="sm" user={r.user} />
-                  <span className="retro2-podium-mini-name">{r.user.name.split(" ")[0]}</span>
-                  <b>{r.points}</b>
+            <div className="retro2-podium">
+              {data.top3[1] && (
+                <div className="retro2-step place-2">
+                  <div className="retro2-step-avatar silver">
+                    <Avatar size="lg" user={data.top3[1].user} />
+                  </div>
+                  <strong className="retro2-step-name">{data.top3[1].user.name.split(" ")[0]}</strong>
+                  <span className="retro2-step-pts">{data.top3[1].points} pts</span>
+                  <div className="retro2-step-block"><span>2º</span></div>
                 </div>
-              ))}
+              )}
+              <div className="retro2-step place-1">
+                <Crown className="retro2-crown" size={38} />
+                <div className="retro2-ring">
+                  <div className="retro2-step-avatar gold">
+                    <Avatar size="lg" user={winner.user} />
+                  </div>
+                </div>
+                <span className="retro2-champ-tag">Campeão do Bolão</span>
+                <strong className="retro2-champ-name">{winner.user.name}</strong>
+                <span className="retro2-step-pts gold">{winner.points} pts</span>
+                <span className="retro2-champ-note">decidido no último jogo da Copa 🔥</span>
+                <div className="retro2-step-block gold"><span>1º</span></div>
+              </div>
+              {data.top3[2] && (
+                <div className="retro2-step place-3">
+                  <div className="retro2-step-avatar bronze">
+                    <Avatar size="lg" user={data.top3[2].user} />
+                  </div>
+                  <strong className="retro2-step-name">{data.top3[2].user.name.split(" ")[0]}</strong>
+                  <span className="retro2-step-pts">{data.top3[2].points} pts</span>
+                  <div className="retro2-step-block"><span>3º</span></div>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </section>
       )}
 
