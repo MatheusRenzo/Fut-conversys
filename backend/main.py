@@ -2637,6 +2637,15 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
         # gastar a cota da API-Football). IN_PLAY/PAUSED → live + placar.
         if remote_status in ("IN_PLAY", "PAUSED") and has_score:
             lh, la = int(item["home_score"]), int(item["away_score"])
+            # A fonte pode marcar FINISHED cedo demais (ex.: fim dos 90min de mata-mata
+            # que foi pra PRORROGAÇÃO) e se corrigir pra IN_PLAY depois: revive o jogo —
+            # é a mesma fonte que encerrou voltando atrás. (Aconteceu na FINAL.)
+            if game.status == "finished" and (game.end_source or "") in ("football-data", "openfootball", "auto:tempo"):
+                game.status = "live"
+                game.live_period = "extra-time"
+                game.end_source = None
+                log_game_event(db, game, "Fonte corrigiu: jogo segue — PRORROGAÇÃO", phase="gratuito", api="football-data", ok=True)
+                status["filled"] += 1
             if game.status in ("scheduled", "live") or game.status is None:
                 if game.home_score != lh or game.away_score != la or game.status != "live":
                     game.home_score = lh
@@ -2673,7 +2682,15 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
         # do feed ao vivo (que pode ter congelado) e promove o jogo a "finished".
         already_finished = (game.status or "") == "finished"
         scores_differ = game.home_score != official_h or game.away_score != official_a
-        if not already_finished or scores_differ:
+        # Pênaltis podem chegar DEPOIS do FINISHED (ex.: final 0-0 marcada encerrada
+        # e a disputa publicada em seguida) — sem isso o jogo ficava sem pênaltis,
+        # sem vencedor e sem campeã.
+        pens_differ = (
+            item.get("home_penalties") is not None
+            and item.get("away_penalties") is not None
+            and (game.home_penalties != item["home_penalties"] or game.away_penalties != item["away_penalties"])
+        )
+        if not already_finished or scores_differ or pens_differ:
             # Conflito real só quando JÁ estava encerrado com placar diferente
             if already_finished and scores_differ:
                 status["conflicts"].append(
@@ -2691,6 +2708,7 @@ def cross_check_world_cup_results(db: Session) -> dict[str, Any]:
             if item.get("home_penalties") is not None and item.get("away_penalties") is not None:
                 game.home_penalties = int(item["home_penalties"])
                 game.away_penalties = int(item["away_penalties"])
+                game.live_period = "penalties"
             game.status = "finished"
             game.halftime = False
             game.end_source = "football-data"  # confirmação oficial de FIM
