@@ -14339,3 +14339,89 @@ img.team-flag {
 .retro2-ceo svg { color: #ffd24a; flex: none; filter: drop-shadow(0 0 8px rgba(255, 205, 70, 0.8)); }
 .retro2-ceo p { margin: 0; font-size: 0.97rem; line-height: 1.6; color: #dbe7f3; }
 .retro2-ceo strong { color: #ffe08a; }
+
+/* ============ RETRO v2 — PASSE PREMIUM (DNA do bolão: vidro escuro + dourado) ============ */
+.retro2-page {
+  background:
+    radial-gradient(ellipse 75% 42% at 50% 0%, rgba(255, 205, 70, 0.13), transparent 58%),
+    radial-gradient(ellipse 60% 38% at 12% 100%, rgba(0, 90, 255, 0.12), transparent 60%),
+    radial-gradient(ellipse 60% 38% at 88% 100%, rgba(0, 207, 180, 0.08), transparent 60%),
+    linear-gradient(180deg, #070b12 0%, #05080f 60%, #04060b 100%);
+}
+.retro2-logo { filter: drop-shadow(0 0 26px rgba(255, 205, 70, 0.5)); }
+.retro2-title {
+  background: linear-gradient(115deg, #ffe08a 12%, #f2b53b 34%, #fff6d8 50%, #f2b53b 66%, #ffe08a 88%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 0 26px rgba(255, 205, 70, 0.35));
+}
+.retro2-subtitle { color: #8fa3b8; }
+.retro2-subtitle strong { color: #00cfb4; }
+
+/* Números: painel de vidro com fio dourado e dígitos dourados (estilo bolão) */
+.retro2-stat {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+  backdrop-filter: blur(10px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 10px 26px rgba(0, 0, 0, 0.35);
+  position: relative; overflow: hidden;
+}
+.retro2-stat::before {
+  content: ""; position: absolute; top: 0; left: 14%; right: 14%; height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 205, 70, 0.8), transparent);
+}
+.retro2-stat-icon { color: #ffd24a; filter: drop-shadow(0 0 9px rgba(255, 205, 70, 0.65)); }
+.retro2-stat strong {
+  background: linear-gradient(180deg, #fff6d8 10%, #ffd24a 55%, #f2a93b 95%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: none; filter: drop-shadow(0 0 14px rgba(255, 205, 70, 0.35));
+}
+.retro2-stat-label { color: #93a7bc; }
+
+/* Faixa da campeã e motor: vidro + acentos */
+.retro2-cup-banner {
+  border: 1px solid rgba(255, 205, 70, 0.4);
+  background: linear-gradient(90deg, rgba(255, 205, 70, 0.1), rgba(0, 90, 255, 0.1));
+  box-shadow: 0 0 24px rgba(255, 205, 70, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.retro2-cup-tag { color: #ffd24a; }
+.retro2-engine h2, .retro2-wall h2 {
+  color: #ffd24a; text-shadow: 0 0 16px rgba(255, 205, 70, 0.4);
+}
+.retro2-engine-grid div {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012));
+  backdrop-filter: blur(8px);
+}
+.retro2-engine-grid svg { color: #ffd24a; }
+.retro2-engine-grid strong { color: #ffe9b0; }
+
+/* Pódio: degraus de vidro escuro com fio metálico (ouro/prata/bronze) */
+.retro2-step-block {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(8, 12, 20, 0.9));
+  border: 1px solid rgba(210, 222, 238, 0.35); border-bottom: none;
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.18), 0 -6px 26px rgba(120, 150, 190, 0.12);
+}
+.place-3 .retro2-step-block { border-color: rgba(222, 148, 90, 0.5); box-shadow: inset 0 2px 0 rgba(255,255,255,0.18), 0 -6px 26px rgba(222,148,90,0.16); }
+.retro2-step-pts { color: #c9d6e8; }
+.retro2-ring {
+  background: conic-gradient(from 0deg, #f2b53b, #ffe08a, #fff6d8, #ffd24a, #00cfb4, #f2b53b);
+  box-shadow: 0 0 36px rgba(255, 205, 70, 0.55), 0 0 90px rgba(255, 205, 70, 0.22);
+}
+.retro2-champ-name {
+  background: linear-gradient(110deg, #fff6d8 20%, #ffd24a 45%, #ffffff 60%, #ffe08a 80%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.retro2-champ-tag { color: #ffd24a !important; text-shadow: 0 0 10px rgba(255, 205, 70, 0.5); }
+.retro2-sparkles i { color: #ffd24a; text-shadow: 0 0 12px rgba(255, 205, 70, 0.95); }
+.retro2-sparkles i:nth-child(2), .retro2-sparkles i:nth-child(4), .retro2-sparkles i:nth-child(8) { color: #7eb8ff; text-shadow: 0 0 10px rgba(0, 122, 255, 0.9); }
+.retro2-spot {
+  background: repeating-conic-gradient(from 0deg at 50% 62%, rgba(255, 205, 70, 0.1) 0deg 9deg, transparent 9deg 26deg, rgba(0, 122, 255, 0.07) 26deg 34deg, transparent 34deg 52deg);
+}
+
+/* Mural com aro dourado (igual aos destaques do bolão) */
+.retro2-wall-item .avatar { box-shadow: 0 0 0 2px rgba(255, 205, 70, 0.55), 0 0 14px rgba(255, 205, 70, 0.2); }
+.retro2-orbs span:nth-child(1), .retro2-orbs span:nth-child(4) { background: #ffd24a; }
+.retro2-footer strong { color: #ffd24a; }
