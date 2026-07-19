@@ -3984,6 +3984,31 @@ def apply_world_cup_sync(db: Session) -> tuple[int, int]:
     for game in finished_games:
         score_world_cup_game(game)
     db.flush()
+    # AUTO-COROAÇÃO: quando a FINAL termina, define a campeã sozinho (vencedor da
+    # final, pênaltis inclusos) e pontua os palpites de campeã (+10) na hora —
+    # sem esperar o admin. Roda uma única vez (enquanto não há campeã definida).
+    final_game = next((g for g in finished_games if (g.stage or "") == "final" and not g.voided), None)
+    if final_game is not None and not get_app_setting(db, "world_cup_champion"):
+        outcome = effective_game_outcome(
+            final_game.home_score or 0,
+            final_game.away_score or 0,
+            final_game.home_penalties,
+            final_game.away_penalties,
+        )
+        champion_team = final_game.home_team if outcome == "home" else final_game.away_team if outcome == "away" else None
+        if champion_team and not is_placeholder_world_cup_team(champion_team):
+            set_app_setting(db, "world_cup_champion", champion_team)
+            for pick in db.query(models.WorldCupChampionPick).all():
+                correct = normalize_scorer_name(pick.team) == normalize_scorer_name(champion_team)
+                pick.points = WORLD_CUP_POINTS_CHAMPION if correct else 0
+                pick.status = "scored"
+                pick.updated_at = datetime.utcnow()
+            db.flush()
+            log_game_event(
+                db, final_game,
+                f"🏆 CAMPEÃ DA COPA: {champion_team} — palpites de campeã pontuados (+{WORLD_CUP_POINTS_CHAMPION})",
+                phase="fim", api="sistema", ok=True,
+            )
     update_rank_movement(db)
     # E-mail de transparência: ao fechar a aposta, manda os palpites pra todo mundo.
     # Isolado: falha de e-mail nunca derruba o sync.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
@@ -890,6 +890,88 @@ function FinishedGameCard({ game, viewerId }: { game: WorldCupGame; viewerId?: n
   );
 }
 
+// ===== Celebração do campeão do bolão (fim da Copa): card 3D girando, coroa,
+// raios dourados e chuva de confete — o momento dopamina máxima. =====
+function ChampionCelebration({
+  winner,
+  runners,
+  championTeam,
+  onClose,
+}: {
+  winner: WorldCupLeaderboardEntry;
+  runners: WorldCupLeaderboardEntry[];
+  championTeam: string;
+  onClose: () => void;
+}) {
+  const confetti = useMemo(() => {
+    // pseudo-random determinístico (puro) — o lint proíbe Math.random no render
+    const rnd = (seed: number) => {
+      const x = Math.sin(seed * 12.9898) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    return Array.from({ length: 64 }, (_, i) => ({
+      left: rnd(i + 1) * 100,
+      delay: rnd(i + 101) * 4.5,
+      duration: 3.4 + rnd(i + 201) * 3,
+      size: 6 + rnd(i + 301) * 7,
+      color: ["#ffd24a", "#ffe08a", "#00cfb4", "#61dc64", "#e31c79", "#7eb8ff", "#ffffff"][i % 7],
+      spin: i % 2 === 0 ? 1 : -1,
+    }));
+  }, []);
+
+  return createPortal(
+    <div aria-label="Campeão do bolão" className="champ-overlay" role="dialog">
+      <div aria-hidden="true" className="champ-rays" />
+      <div aria-hidden="true" className="champ-confetti">
+        {confetti.map((c, i) => (
+          <span
+            key={i}
+            style={{
+              left: `${c.left}%`,
+              width: c.size,
+              height: c.size * 0.45,
+              background: c.color,
+              animationDelay: `${c.delay}s`,
+              animationDuration: `${c.duration}s`,
+              "--spin": c.spin,
+            } as CSSProperties}
+          />
+        ))}
+      </div>
+      <div className="champ-stage">
+        <div className="champ-card">
+          <Crown className="champ-crown" size={46} />
+          <div className="champ-avatar">
+            <Avatar size="lg" user={winner.user} />
+          </div>
+          <span className="champ-eyebrow">🏆 Campeão do Bolão da Copa 2026</span>
+          <h2 className="champ-name">{winner.user.name}</h2>
+          <p className="champ-points">{winner.points} pts</p>
+          <p className="champ-team">
+            Campeã da Copa: <TeamFlag team={championTeam} /> <strong>{teamLabel(championTeam)}</strong>
+          </p>
+        </div>
+        {runners.length > 0 && (
+          <div className="champ-runners">
+            {runners.map((r) => (
+              <div className="champ-runner" key={r.user.id}>
+                <span className="champ-runner-medal">{r.rank}º</span>
+                <Avatar size="sm" user={r.user} />
+                <span>{r.user.name.split(" ")[0]}</span>
+                <b>{r.points} pts</b>
+              </div>
+            ))}
+          </div>
+        )}
+        <button className="champ-close" onClick={onClose} type="button">
+          Fechar celebração
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export default function BolaoPage() {
   const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -1203,6 +1285,21 @@ export default function BolaoPage() {
   const currentMinute = useMemo(() => Math.floor(currentTime / 60_000) * 60_000, [currentTime]);
   const myEntry = board?.leaderboard.find((entry) => entry.user.id === profile?.id);
   const champion = board?.champion;
+
+  // Fim da Copa: final encerrada + campeã definida => celebração do campeão do bolão.
+  // Abre sozinha 1x por usuário (localStorage) e fica o botão 🏆 pra rever.
+  const finalGame = useMemo(() => (board?.games ?? []).find((g) => g.stage === "final"), [board?.games]);
+  const cupChampionTeam = champion?.team ?? null;
+  const bolaoWinner = board?.leaderboard[0];
+  const cupDone = Boolean(finalGame?.status === "finished" && !finalGame?.voided && cupChampionTeam && bolaoWinner);
+  const [showChamp, setShowChamp] = useState(false);
+  const champSeenKey = cupDone && finalGame && bolaoWinner ? `bolao-champ-seen-${finalGame.id}-${bolaoWinner.user.id}` : null;
+  useEffect(() => {
+    if (!champSeenKey) return;
+    if (localStorage.getItem(champSeenKey)) return;
+    const timer = window.setTimeout(() => setShowChamp(true), 900);
+    return () => window.clearTimeout(timer);
+  }, [champSeenKey]);
   const highlights = board?.highlights;
 
   const teams = useMemo(() => {
@@ -2384,6 +2481,23 @@ export default function BolaoPage() {
             <span>Cravar palpite</span>
           </button>
         </div>
+      )}
+
+      {cupDone && !showChamp && (
+        <button className="champ-replay" onClick={() => setShowChamp(true)} title="Rever o campeão do bolão" type="button">
+          🏆
+        </button>
+      )}
+      {showChamp && cupDone && board && bolaoWinner && cupChampionTeam && (
+        <ChampionCelebration
+          championTeam={cupChampionTeam}
+          onClose={() => {
+            if (champSeenKey) localStorage.setItem(champSeenKey, "1");
+            setShowChamp(false);
+          }}
+          runners={board.leaderboard.slice(1, 3)}
+          winner={bolaoWinner}
+        />
       )}
       </div>
     </AppShell>
