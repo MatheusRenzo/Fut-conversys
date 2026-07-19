@@ -1293,6 +1293,15 @@ export default function BolaoPage() {
   const bolaoWinner = board?.leaderboard[0];
   const cupDone = Boolean(finalGame?.status === "finished" && !finalGame?.voided && cupChampionTeam && bolaoWinner);
   const [showChamp, setShowChamp] = useState(false);
+  // Teste no console: __bolaoChampTest() força a celebração (sem esperar a final)
+  const [champForce, setChampForce] = useState(false);
+  useEffect(() => {
+    const w = window as Window & { __bolaoChampTest?: () => void };
+    w.__bolaoChampTest = () => setChampForce(true);
+    return () => {
+      delete w.__bolaoChampTest;
+    };
+  }, []);
   const champSeenKey = cupDone && finalGame && bolaoWinner ? `bolao-champ-seen-${finalGame.id}-${bolaoWinner.user.id}` : null;
   useEffect(() => {
     if (!champSeenKey) return;
@@ -2488,12 +2497,13 @@ export default function BolaoPage() {
           🏆
         </button>
       )}
-      {showChamp && cupDone && board && bolaoWinner && cupChampionTeam && (
+      {((showChamp && cupDone && cupChampionTeam) || champForce) && board && bolaoWinner && (
         <ChampionCelebration
-          championTeam={cupChampionTeam}
+          championTeam={cupChampionTeam ?? finalGame?.home_team ?? "Spain"}
           onClose={() => {
             if (champSeenKey) localStorage.setItem(champSeenKey, "1");
             setShowChamp(false);
+            setChampForce(false);
           }}
           runners={board.leaderboard.slice(1, 3)}
           winner={bolaoWinner}
