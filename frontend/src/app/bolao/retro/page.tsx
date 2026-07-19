@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Crown, Goal, Sparkles, Target, Trophy, Users, Zap } from "lucide-react";
+import { BrainCircuit, Crown, Goal, Radio, Sparkles, Target, Trophy, Users, Zap } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { TeamFlag } from "@/components/TeamFlag";
 import { api } from "@/lib/api";
@@ -29,6 +29,35 @@ type RetroData = {
 
 const fmt = (n: number) => n.toLocaleString("pt-BR");
 
+// Número que sobe animado (efeito contagem) — dopamina nos dados
+function useCountUp(target: number, duration = 2000) {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setValue(Math.round(target * eased));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+  return value;
+}
+
+function StatCard({ icon, value, label, delay = 0 }: { icon: React.ReactNode; value: number; label: string; delay?: number }) {
+  const n = useCountUp(value);
+  return (
+    <div className="retro2-stat" style={{ animationDelay: `${delay}ms` }}>
+      <span className="retro2-stat-icon">{icon}</span>
+      <strong>{fmt(n)}</strong>
+      <span className="retro2-stat-label">{label}</span>
+    </div>
+  );
+}
+
 export default function BolaoRetroPage() {
   const router = useRouter();
   const [data, setData] = useState<RetroData | null>(null);
@@ -40,10 +69,18 @@ export default function BolaoRetroPage() {
       .catch(() => router.push("/"));
   }, [router]);
 
+  const startedAt = data?.stats.started_at ?? null;
+  const endsAt = data?.stats.ends_at ?? null;
+  const days = useMemo(() => {
+    if (!startedAt || !endsAt) return null;
+    const ms = new Date(endsAt).getTime() - new Date(startedAt).getTime();
+    return Math.max(1, Math.round(ms / 86_400_000));
+  }, [startedAt, endsAt]);
+
   if (!data) {
     return (
-      <div className="retro-page">
-        <p className="retro-loading">Carregando a retrospectiva…</p>
+      <div className="retro2-page">
+        <p className="retro2-loading">Carregando a retrospectiva…</p>
       </div>
     );
   }
@@ -51,104 +88,85 @@ export default function BolaoRetroPage() {
   const { stats, api_calls: calls } = data;
   const iaCalls = (calls.ai_insight ?? 0) + (calls.ai_reconcile ?? 0);
   const totalCalls = (calls.football_data ?? 0) + (calls.api_football ?? 0) + (calls.thesportsdb ?? 0) + iaCalls;
+  const winner = data.top3[0];
 
   return (
-    <div className="retro-page">
-      <header className="retro-hero">
+    <div className="retro2-page">
+      <div aria-hidden="true" className="retro2-orbs">
+        <span /><span /><span /><span /><span /><span />
+      </div>
+
+      <header className="retro2-hero">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img alt="Fut Conversys" className="retro-logo" src="/icons/fut-conversys-logo.png" />
-        <h1 className="retro-title">Bolão da Copa 2026</h1>
-        <p className="retro-subtitle">Uma jornada <strong>Conversys</strong> · IT Solutions</p>
-        <p className="retro-thanks">
-          Obrigado a todos que participaram, palpitaram, torceram e brincaram com a gente.
-          Do primeiro apito à grande final — esse bolão é de vocês. 💙⚽
+        <img alt="Fut Conversys" className="retro2-logo" src="/icons/fut-conversys-logo.png" />
+        <h1 className="retro2-title">Bolão da Copa 2026</h1>
+        <p className="retro2-subtitle">A retrospectiva de uma jornada <strong>Conversys</strong> · IT Solutions</p>
+        <p className="retro2-thanks">
+          {days ? `Foram ${days} dias de Copa` : "Foi uma Copa inteira"} — do primeiro apito à grande final.
+          Obrigado a cada um que palpitou, torceu, zoou no grupo e fez essa jornada valer a pena. Esse bolão é de vocês! 💙⚽
         </p>
       </header>
 
-      {data.cup_champion && data.top3[0] && (
-        <section className="retro-champs">
-          <div className="retro-champ-card cup">
-            <span className="retro-champ-tag">Campeã da Copa</span>
+      {data.cup_champion && winner && (
+        <section className="retro2-champs">
+          <div className="retro2-champ cup">
+            <span className="retro2-champ-tag">Campeã da Copa</span>
             <TeamFlag team={data.cup_champion} />
             <strong>{teamLabel(data.cup_champion)}</strong>
           </div>
-          <div className="retro-champ-card winner">
-            <Crown size={20} />
-            <span className="retro-champ-tag">Campeão do Bolão</span>
-            <Avatar size="md" user={data.top3[0].user} />
-            <strong>{data.top3[0].user.name}</strong>
-            <span className="retro-champ-pts">{data.top3[0].points} pts</span>
+          <div className="retro2-champ winner">
+            <Crown className="retro2-champ-crown" size={30} />
+            <span className="retro2-champ-tag">Campeão do Bolão</span>
+            <div className="retro2-champ-avatar">
+              <Avatar size="lg" user={winner.user} />
+            </div>
+            <strong className="retro2-champ-name">{winner.user.name}</strong>
+            <span className="retro2-champ-pts">{winner.points} pts</span>
+            <span className="retro2-champ-note">decidido no último jogo da Copa 🔥</span>
           </div>
+          {data.top3.length > 1 && (
+            <div className="retro2-champ podium-mini">
+              <span className="retro2-champ-tag">Pódio</span>
+              {data.top3.slice(1).map((r) => (
+                <div className="retro2-podium-mini-row" key={r.user.id}>
+                  <span className="retro2-medal">{r.rank}º</span>
+                  <Avatar size="sm" user={r.user} />
+                  <span className="retro2-podium-mini-name">{r.user.name.split(" ")[0]}</span>
+                  <b>{r.points}</b>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
-      <section className="retro-grid">
-        <div className="retro-stat">
-          <Users size={20} />
-          <strong>{fmt(stats.participants)}</strong>
-          <span>participantes</span>
-        </div>
-        <div className="retro-stat">
-          <Target size={20} />
-          <strong>{fmt(stats.predictions)}</strong>
-          <span>palpites registrados</span>
-        </div>
-        <div className="retro-stat">
-          <Goal size={20} />
-          <strong>{fmt(stats.goals)}</strong>
-          <span>gols acompanhados ao vivo</span>
-        </div>
-        <div className="retro-stat">
-          <Trophy size={20} />
-          <strong>{fmt(stats.games_finished)}</strong>
-          <span>jogos disputados</span>
-        </div>
-        <div className="retro-stat">
-          <Zap size={20} />
-          <strong>{fmt(stats.exact_scores)}</strong>
-          <span>placares exatos cravados</span>
-        </div>
-        <div className="retro-stat">
-          <Sparkles size={20} />
-          <strong>{fmt(stats.scorer_hits)}</strong>
-          <span>artilheiros cravados</span>
-        </div>
+      <section className="retro2-grid">
+        <StatCard delay={0} icon={<Users size={22} />} label="participantes" value={stats.participants} />
+        <StatCard delay={120} icon={<Target size={22} />} label="palpites registrados" value={stats.predictions} />
+        <StatCard delay={240} icon={<Goal size={22} />} label="gols acompanhados ao vivo" value={stats.goals} />
+        <StatCard delay={360} icon={<Trophy size={22} />} label="jogos disputados" value={stats.games_finished} />
+        <StatCard delay={480} icon={<Zap size={22} />} label="placares exatos cravados" value={stats.exact_scores} />
+        <StatCard delay={600} icon={<Sparkles size={22} />} label="artilheiros cravados" value={stats.scorer_hits} />
       </section>
 
-      <section className="retro-engine">
+      <section className="retro2-engine">
         <h2>O motor por trás do bolão</h2>
-        <p className="retro-engine-copy">
-          {fmt(totalCalls)} chamadas de dados pra manter placar, gols e artilheiros em tempo real:
+        <p className="retro2-engine-copy">
+          <strong>{fmt(totalCalls)}</strong> chamadas de dados mantiveram placar, gols e artilheiros em tempo real:
         </p>
-        <div className="retro-engine-grid">
-          <div><strong>{fmt(calls.football_data ?? 0)}</strong><span>placar ao vivo (football-data)</span></div>
-          <div><strong>{fmt(calls.api_football ?? 0)}</strong><span>artilheiros (API-Football)</span></div>
-          <div><strong>{fmt(calls.thesportsdb ?? 0)}</strong><span>confirmações (TheSportsDB)</span></div>
-          <div><strong>{fmt(iaCalls)}</strong><span>consultas de IA (reconciliação + resenhas)</span></div>
+        <div className="retro2-engine-grid">
+          <div><Radio size={17} /><strong>{fmt(calls.football_data ?? 0)}</strong><span>placar ao vivo</span></div>
+          <div><Goal size={17} /><strong>{fmt(calls.api_football ?? 0)}</strong><span>artilheiros (API oficial)</span></div>
+          <div><Target size={17} /><strong>{fmt(calls.thesportsdb ?? 0)}</strong><span>confirmações cruzadas</span></div>
+          <div><BrainCircuit size={17} /><strong>{fmt(iaCalls)}</strong><span>consultas de IA</span></div>
         </div>
       </section>
 
-      {data.top3.length > 0 && (
-        <section className="retro-podium">
-          <h2>O pódio final</h2>
-          <div className="retro-podium-row">
-            {data.top3.map((entry) => (
-              <div className={`retro-podium-step place-${entry.rank}`} key={entry.user.id}>
-                {entry.rank === 1 && <Crown className="retro-podium-crown" size={22} />}
-                <Avatar size="lg" user={entry.user} />
-                <strong>{entry.user.name.split(" ")[0]}</strong>
-                <span>{entry.points} pts</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="retro-wall">
+      <section className="retro2-wall">
         <h2>Quem fez essa jornada acontecer</h2>
-        <div className="retro-wall-grid">
-          {data.participants.map((p) => (
-            <figure className="retro-wall-item" key={p.id}>
+        <div className="retro2-wall-grid">
+          {data.participants.map((p, i) => (
+            <figure className="retro2-wall-item" key={p.id} style={{ animationDelay: `${Math.min(i * 45, 1800)}ms` }}>
               <Avatar size="md" user={p} />
               <figcaption>{p.name.split(" ")[0]}</figcaption>
             </figure>
@@ -156,10 +174,9 @@ export default function BolaoRetroPage() {
         </div>
       </section>
 
-      <footer className="retro-footer">
-        <p>
-          Feito com ⚽ e 💙 pela <strong>Conversys IT Solutions</strong>.
-        </p>
+      <footer className="retro2-footer">
+        <p>Feito com ⚽ e 💙 pela <strong>Conversys IT Solutions</strong></p>
+        <span>fut.conversys.global</span>
       </footer>
     </div>
   );
